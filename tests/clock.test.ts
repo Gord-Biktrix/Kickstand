@@ -58,13 +58,20 @@ describe("clock job (§8)", () => {
     expect(fresh.settings.clock_last_run_date).toBe("2026-09-15");
   });
 
-  it("only runs the daily actions at the configured local hour", async () => {
+  it("runs the daily actions once per local date, at or after the configured hour", async () => {
     await invitedUnit();
     notifier.sent = [];
-    await runClock(db, { now: localToUtc("2026-09-04", "09:00", TZ) });
+    // Before the run hour: nothing.
+    let [summary] = await runClock(db, { now: localToUtc("2026-09-04", "06:00", TZ) });
+    expect(summary.ranDaily).toBe(false);
     expect(notifier.sent).toHaveLength(0);
-    const [summary] = await runClock(db, { now: localToUtc("2026-09-04", "07:30", TZ) });
+    // A late tick (scheduler delayed past 7 am) still runs the day once.
+    [summary] = await runClock(db, { now: localToUtc("2026-09-04", "09:00", TZ) });
     expect(summary.ranDaily).toBe(true);
+    expect(notifier.sent).toHaveLength(1);
+    // The next tick the same day does not repeat it.
+    [summary] = await runClock(db, { now: localToUtc("2026-09-04", "10:00", TZ) });
+    expect(summary.ranDaily).toBe(false);
     expect(notifier.sent).toHaveLength(1);
   });
 

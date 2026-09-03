@@ -83,8 +83,11 @@ export async function runClockForShowroom(
     else counts.messagesSkipped++;
   };
 
-  const runDaily = opts.forceDaily || (hour === s.clock_run_hour_local && s.clock_last_run_date !== today);
-  const runReminders = opts.forceReminders || hour === s.reminder_send_hour_local;
+  // Tolerate a late tick (external schedulers can start minutes late): daily actions run at or after
+  // the run hour, once per local date; reminders run at or after the send hour and are deduped per
+  // appointment, so a second tick the same evening sends nothing.
+  const runDaily = opts.forceDaily || (hour >= s.clock_run_hour_local && s.clock_last_run_date !== today);
+  const runReminders = opts.forceReminders || hour >= s.reminder_send_hour_local;
 
   if (runDaily) {
     const rows = await dbx

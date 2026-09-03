@@ -1,0 +1,25 @@
+# Hourly clock tick (SPEC §8). Vercel's Hobby plan only allows daily crons, so GitHub Actions
+# calls the endpoint instead. Secrets: APP_BASE_URL (e.g. https://kickstand.vercel.app) and
+# CRON_SECRET (same value as the Vercel env var). GitHub may start a schedule a few minutes late,
+# which is fine — the clock runs daily actions at or after 7 am local and dedupes every message.
+name: clock
+on:
+  schedule:
+    - cron: "0 * * * *"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "daily | reminders | all"
+        required: false
+        default: ""
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call /api/cron/clock
+        run: |
+          url="${{ secrets.APP_BASE_URL }}/api/cron/clock"
+          if [ -n "${{ inputs.force }}" ]; then url="$url?force=${{ inputs.force }}"; fi
+          code=$(curl -sS -o /tmp/out.json -w "%{http_code}" -X POST -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" "$url")
+          cat /tmp/out.json; echo
+          [ "$code" = "200" ]

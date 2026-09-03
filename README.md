@@ -71,7 +71,7 @@ pnpm lint
 - **No-show on an unbuilt bike** returns the unit to `invited` (so it counts as unbooked and, with the flag on, releasable); built bikes stay `ready` per R11.
 - **Rate limiting** in `proxy.ts` is per-instance memory. On Vercel, add a WAF rule or Upstash for a hard limit.
 - **Navigation** (after the 2026-09-03 UX panel): Today · Schedule · Arrivals · Build board · Watchlist · Settings, with Reports as an admin-only utility link. Capacity and Program are tabs under Settings, and the **CSV import moved from Arrivals to Settings › Import** — a deliberate deviation from §10.2, since it is a one-off migration rather than delivery-day work.
-- Vercel Cron calls the route with `GET` and `Authorization: Bearer $CRON_SECRET`; `POST` is also accepted.
+- The hourly tick comes from **GitHub Actions** (`.github/workflows/clock.yml`, secrets `APP_BASE_URL` and `CRON_SECRET`) because Vercel's Hobby plan only allows daily crons; `vercel.json` therefore declares none. The route accepts `GET` or `POST` with `Authorization: Bearer $CRON_SECRET`. Daily actions run at or after `clock_run_hour_local` once per local date; reminders at or after `reminder_send_hour_local`, deduped per appointment. Run it by hand from the Actions tab (workflow_dispatch, optional `force`).
 
 ## Lightspeed bridge
 
