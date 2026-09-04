@@ -15,7 +15,7 @@ import { logger } from "@/lib/logger";
 import { getUnitView } from "@/lib/queries";
 import { getShowroom } from "@/lib/showroom";
 import { formatLongDateFromLocal, formatShortDateFromLocal, formatTime, toLocalDate } from "@/lib/time";
-import { staffBookAction, staffPrepareUnitAction } from "../actions";
+import { staffBookAction, staffPrepareUnitAction, staffRescheduleAction } from "../actions";
 
 export const metadata = { title: "Book pickup" };
 
@@ -47,16 +47,19 @@ export default async function StaffBookPage({ searchParams }: { searchParams: Pr
     const view = await getUnitView(db, unitParam);
     if (!view) return <div><PageHeader title="Book pickup" />{flash}<Alert tone="danger">Unit not found.</Alert></div>;
     const { unit, order, appointment } = view;
-    if (appointment) {
+    const reschedule = sp(q.reschedule) === "1" && !!appointment;
+    if (appointment && !reschedule) {
       return (
         <div>
           <PageHeader title="Book pickup" subtitle={`${order?.customerName ?? "—"} · ${unit.model} · box ${unit.boxTag}`} />
           {flash}
-          <Alert tone="ok">Already booked for {formatLongDateFromLocal(appointment.onDate)} at {formatTime(appointment.startsAt, tz)}. Reschedule or cancel from the <Link className="underline" href={`/app/units/${unit.id}`}>unit page</Link>.</Alert>
+          <Alert tone="ok">Already booked for {formatLongDateFromLocal(appointment.onDate)} at {formatTime(appointment.startsAt, tz)}.{" "}
+            <Link className="underline" href={`/app/book?unit=${unit.id}&reschedule=1`}>Reschedule</Link> · <Link className="underline" href={`/app/units/${unit.id}`}>Open the bike</Link>
+          </Alert>
         </div>
       );
     }
-    if (!["invited", "building", "ready"].includes(unit.status)) {
+    if (!["invited", "building", "ready", ...(reschedule ? ["booked"] : [])].includes(unit.status)) {
       return <div><PageHeader title="Book pickup" />{flash}<Alert tone="warn">This unit is {unit.status} and can&apos;t be booked. <Link className="underline" href={`/app/units/${unit.id}`}>Open the unit</Link>.</Alert></div>;
     }
     const days = (await getAvailability(db, { showroom, unit, order, now })).filter((d) => !d.day.closed && !d.beyondHorizon);
@@ -65,21 +68,27 @@ export default async function StaffBookPage({ searchParams }: { searchParams: Pr
     const shortNotice = sp(q.short) === "1";
     const selected: DaySummary | undefined = selectedDate ? days.find((d) => d.date === selectedDate) : undefined;
     const slot = selected && selectedTime ? selected.slots.find((sl) => sl.startLocal === selectedTime) : undefined;
-    const base = `/app/book?unit=${unit.id}&${shortNotice ? "short=1&" : ""}`;
+    const base = `/app/book?unit=${unit.id}&${reschedule ? "reschedule=1&" : ""}${shortNotice ? "short=1&" : ""}`;
     const today = toLocalDate(now, tz);
 
     return (
       <div>
         <PageHeader
-          title="Book pickup"
+          title={reschedule ? "Reschedule pickup" : "Book pickup"}
           subtitle={<>{order?.customerName ?? "—"} · {unit.model} · {[unit.size, unit.colour].filter(Boolean).join(" · ")} · box {unit.boxTag} · <StatusBadge status={unit.status} /></>}
-          action={<Link href={`/app/units/${unit.id}`} className="btn btn-sm">Unit page</Link>}
+          action={<Link href={`/app/units/${unit.id}`} className="btn btn-sm">Back to bike</Link>}
         />
         {flash}
+        {reschedule && appointment && (
+          <Alert tone="neutral">
+            Currently {formatLongDateFromLocal(appointment.onDate)} at {formatTime(appointment.startsAt, tz)}. Pick the new time below; the customer is texted the change.
+            {appointment.startsAt.getTime() - now.getTime() < showroom.settings.reschedule_cutoff_hours * 3600_000 && <> The slot is inside the {showroom.settings.reschedule_cutoff_hours}-hour cutoff, so moving it counts as a missed pickup.</>}
+          </Alert>
+        )}
         <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
           <Card title={slot ? "Confirm" : selected ? formatLongDateFromLocal(selected.date) : "Pick a day"}>
             {slot ? (
-              <form action={staffBookAction.bind(null, unit.id)} className="space-y-4">
+              <form action={(reschedule ? staffRescheduleAction : staffBookAction).bind(null, unit.id)} className="space-y-4">
                 <input type="hidden" name="starts_at" value={slot.startsAt.toISOString()} />
                 {shortNotice && <input type="hidden" name="short_notice" value="1" />}
                 <p className="text-xl font-semibold">{formatLongDateFromLocal(selected!.date)}</p>
@@ -93,7 +102,7 @@ export default async function StaffBookPage({ searchParams }: { searchParams: Pr
                 </label>
                 <div className="flex gap-2">
                   <Link href={`${base}date=${selected!.date}`} className="btn">Back</Link>
-                  <button type="submit" className="btn btn-primary">Confirm booking</button>
+                  <button type="submit" className="btn btn-primary">{reschedule ? "Move booking" : "Confirm booking"}</button>
                 </div>
               </form>
             ) : selected ? (
@@ -137,7 +146,7 @@ export default async function StaffBookPage({ searchParams }: { searchParams: Pr
           <div className="space-y-4">
             <Card title="Short notice">
               <p className="text-sm text-muted">Customers need {showroom.settings.min_lead_hours} hours&apos; notice so the bike can be built. Staff can book sooner when the bike is already built or the customer is waiting.</p>
-              <Link href={shortNotice ? `/app/book?unit=${unit.id}` : `/app/book?unit=${unit.id}&short=1`} className={`btn btn-sm mt-3 ${shortNotice ? "btn-primary" : ""}`}>
+              <Link href={`/app/book?unit=${unit.id}${reschedule ? "&reschedule=1" : ""}${shortNotice ? "" : "&short=1"}`} className={`btn btn-sm mt-3 ${shortNotice ? "btn-primary" : ""}`}>
                 {shortNotice ? "Short notice: ON" : "Allow short notice"}
               </Link>
             </Card>

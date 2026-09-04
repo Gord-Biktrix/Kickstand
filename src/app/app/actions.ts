@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { db } from "@/db/client";
 import { capacityOverrides, capacityRules, orders } from "@/db/schema";
 import { requireActor, signOut } from "@/lib/auth";
-import { BOOKING_ERROR_TEXT, BookingError, bookSlot, recordNoShow } from "@/lib/booking";
+import { BOOKING_ERROR_TEXT, BookingError, bookSlot, cancelBooking, recordNoShow, rescheduleBooking } from "@/lib/booking";
 import { validateImport } from "@/lib/csv";
 import { logEvent } from "@/lib/events";
 import { bool, dollarsToCents, errorMessage, num, str, withFlash } from "@/lib/flash";
@@ -308,6 +308,40 @@ export async function staffPrepareUnitAction(formData: FormData) {
   }
   if (error || !unitId) redirect(withFlash(back, { error: error ?? "Could not prepare the unit" }));
   redirect(`/app/book?unit=${unitId}`);
+}
+
+/** Staff cancels on the customer's behalf. "customer" applies the late-change rule and texts the
+ *  customer a cancellation; "staff" is silent and never counts as a no-show. */
+export async function staffCancelBookingAction(unitId: string, returnTo: string, formData: FormData) {
+  const reason = str(formData, "reason") === "staff" ? "staff" : "customer";
+  return run(safeReturn(returnTo, `/app/units/${unitId}`), async () => {
+    const user = await requireActor("staff");
+    const showroom = await getShowroom(db);
+    const res = await cancelBooking(db, { showroom, unitId, reason, actor: user.id });
+    if (reason === "staff") return "Booking cancelled. No message was sent; the bike is back to invited.";
+    return res.lateChange
+      ? "Booking cancelled inside the cutoff — it counts as a missed pickup. The customer has been sent a rebook link."
+      : "Booking cancelled. The customer has been sent a message with their rebook link.";
+  });
+}
+
+/** Staff moves an existing booking to a new slot (customer-requested; the late-change rule applies). */
+export async function staffRescheduleAction(unitId: string, formData: FormData) {
+  const startsAt = new Date(str(formData, "starts_at"));
+  const back = `/app/book?unit=${unitId}&reschedule=1`;
+  if (Number.isNaN(startsAt.getTime())) redirect(withFlash(back, { error: "Pick a time first." }));
+  let error: string | null = null;
+  let late = false;
+  try {
+    const user = await requireActor("staff");
+    const showroom = await getShowroom(db);
+    const res = await rescheduleBooking(db, { showroom, unitId, startsAt, actor: user.id, smsConsent: bool(formData, "sms_consent") });
+    late = res.lateChange;
+  } catch (err) {
+    error = err instanceof BookingError ? BOOKING_ERROR_TEXT[err.code] : errorMessage(err);
+  }
+  if (error) redirect(withFlash(back, { error }));
+  redirect(withFlash(`/app/units/${unitId}`, { ok: late ? "Pickup moved inside the cutoff — counted as a missed pickup. The customer has been sent the new time." : "Pickup moved. The customer has been sent the new time." }));
 }
 
 export async function staffBookAction(unitId: string, formData: FormData) {

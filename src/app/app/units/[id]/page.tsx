@@ -15,7 +15,7 @@ import { customerUrls } from "@/lib/messages";
 import { appointmentHistory, getUnitView, unitTimeline } from "@/lib/queries";
 import { getShowroom } from "@/lib/showroom";
 import { storageDueCents, storageEnabledFor } from "@/lib/storage";
-import { formatDateTime, formatLongDate } from "@/lib/time";
+import { formatDateTime, formatLongDate, formatLongDateFromLocal, formatTime } from "@/lib/time";
 import { HANDOVER_CHECKLIST, waitlistFor } from "@/lib/units";
 import {
   attachUnitAction,
@@ -27,11 +27,12 @@ import {
   recordNoShowAction,
   resendInviteAction,
   retagUnitAction,
+  staffCancelBookingAction,
   startBuildAction,
   waiveStorageAction,
 } from "../../actions";
 
-export const metadata = { title: "Unit" };
+export const metadata = { title: "Bike" };
 
 export default async function UnitPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<SearchParams> }) {
   const { id } = await params;
@@ -59,7 +60,19 @@ export default async function UnitPage({ params, searchParams }: { params: Promi
     <div>
       <PageHeader
         title={<>{unit.model} <span className="text-muted">· box {unit.boxTag}</span></>}
-        subtitle={<>{[unit.size, unit.colour].filter(Boolean).join(" · ")} · {order ? <Link className="underline" href={`/app/orders/${order.id}`}>{order.customerName} — {order.source} {order.orderRef}</Link> : "no order attached"}</>}
+        subtitle={
+          order ? (
+            <>
+              <Link className="font-medium text-fg underline" href={`/app/customers/${encodeURIComponent(customerKey(order))}`}>{order.customerName}</Link>
+              {order.customerPhone && <> · {order.customerPhone}</>}
+              {" · "}
+              <Link className="underline" href={`/app/orders/${order.id}`}>{order.source} {order.orderRef}</Link>
+              {[unit.size, unit.colour].filter(Boolean).length > 0 && <> · {[unit.size, unit.colour].filter(Boolean).join(" · ")}</>}
+            </>
+          ) : (
+            <>{[unit.size, unit.colour].filter(Boolean).join(" · ")} · no order attached</>
+          )
+        }
         action={<StatusBadge status={unit.status} />}
       />
       <Flash ok={sp(q.ok)} error={sp(q.error)} />
@@ -104,9 +117,88 @@ export default async function UnitPage({ params, searchParams }: { params: Promi
         </Card>
       )}
 
+      {/* The booking is what staff come here for: show it first, with the everyday actions beside it. */}
+      <Card title="Pickup" className="mb-6">
+        {appointment ? (
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <p className="text-2xl font-semibold">{formatLongDateFromLocal(appointment.onDate)}</p>
+              <p className="text-lg">{formatTime(appointment.startsAt, tz)} – {formatTime(appointment.endsAt, tz)}</p>
+              <p className="mt-1 text-sm text-muted">
+                Booked {formatDateTime(appointment.createdAt, tz)} by {appointment.createdBy === "customer" ? "the customer" : "staff"}
+                {unit.pickupBy && <> · pick up by {formatLongDate(unit.pickupBy, tz)}</>}
+                {unit.noShowCount > 0 && <> · {unit.noShowCount} no-show</>}
+                {appointment.startsAt < now && <> · <span className="text-warn">slot has passed</span></>}
+              </p>
+            </div>
+            <div className="flex flex-wrap items-start gap-2">
+              {unit.status === "booked" && <form action={startBuildAction.bind(null, unit.id, RETURN)}><button type="submit" className="btn btn-primary">Build</button></form>}
+              {unit.status === "building" && <form action={markReadyAction.bind(null, unit.id, RETURN)}><button type="submit" className="btn btn-primary">Ready</button></form>}
+              {["booked", "building", "ready"].includes(unit.status) && !handover && <Link href={`${RETURN}?handover=1`} className={`btn ${unit.status === "ready" ? "btn-primary" : ""}`}>Start handover</Link>}
+              <Link href={`/app/book?unit=${unit.id}&reschedule=1`} className="btn">Reschedule</Link>
+              <details className="relative">
+                <summary className="btn cursor-pointer list-none">Cancel booking</summary>
+                <form action={staffCancelBookingAction.bind(null, unit.id, RETURN)} className="card absolute right-0 z-10 mt-2 w-80 space-y-3 shadow-lg">
+                  <Field label="Who is cancelling?" htmlFor="cancel_reason">
+                    <select id="cancel_reason" name="reason" className="input" defaultValue="customer">
+                      <option value="customer">Customer asked — text them a rebook link</option>
+                      <option value="staff">Shop reason — no message, no penalty</option>
+                    </select>
+                  </Field>
+                  <p className="text-xs text-muted">Customer cancellations inside {s.reschedule_cutoff_hours} hours count as a missed pickup. The slot is freed either way and the bike goes back to invited.</p>
+                  <ConfirmButton className="btn btn-danger w-full" message="Cancel this booking?">Cancel booking</ConfirmButton>
+                </form>
+              </details>
+              {appointment.startsAt < now && (
+                <form action={recordNoShowAction.bind(null, unit.id, RETURN)}><ConfirmButton className="btn btn-danger" message="Record a no-show for this appointment? The customer will be sent a rebook link.">Record no-show</ConfirmButton></form>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <p className="text-2xl font-semibold">
+                {unit.status === "received" ? "Not invited yet" : unit.status === "picked_up" ? "Picked up" : unit.status === "unassigned" ? "No customer attached" : "Not booked yet"}
+              </p>
+              <p className="mt-1 text-sm text-muted">
+                {unit.status === "picked_up" && unit.pickedUpAt ? formatDateTime(unit.pickedUpAt, tz) : (
+                  <>
+                    {unit.invitedAt && <>Invited {formatDateTime(unit.invitedAt, tz)} (day {age})</>}
+                    {unit.bookBy && <> · book by {formatLongDate(unit.bookBy, tz)}</>}
+                    {unit.pickupBy && <> · pick up by {formatLongDate(unit.pickupBy, tz)}</>}
+                    {unit.noShowCount > 0 && <> · {unit.noShowCount} no-show</>}
+                    {callDue(unit, now, tz) && <> · <span className="text-danger">call due</span></>}
+                  </>
+                )}
+              </p>
+            </div>
+            <div className="flex flex-wrap items-start gap-2">
+              {unit.status === "received" && (
+                <form action={inviteUnitAction.bind(null, unit.id, RETURN)}><button type="submit" className="btn btn-primary" disabled={!order?.customerEmail && !order?.customerPhone}>Send invite</button></form>
+              )}
+              {["invited", "building", "ready"].includes(unit.status) && <Link href={`/app/book?unit=${unit.id}`} className="btn btn-primary">Book for customer</Link>}
+              {unit.status === "invited" && <form action={resendInviteAction.bind(null, unit.id, RETURN)}><button type="submit" className="btn">Send invite again</button></form>}
+              {["building", "ready"].includes(unit.status) && !handover && <Link href={`${RETURN}?handover=1`} className="btn">Start handover</Link>}
+              {unit.status === "building" && <form action={markReadyAction.bind(null, unit.id, RETURN)}><button type="submit" className="btn">Ready</button></form>}
+            </div>
+          </div>
+        )}
+      </Card>
+
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="space-y-6 lg:col-span-2">
-          <Card title="Clock">
+          {order && (
+            <Card title="Customer" action={<Link href={`/app/customers/${encodeURIComponent(customerKey(order))}`} className="btn btn-sm">View customer</Link>}>
+              <Dl items={[["Name", order.customerName], ["Phone", order.customerPhone ?? "—"], ["Email", order.customerEmail ?? "—"], ["Text reminders", order.smsConsent ? "yes" : "no"], ["Payment", order.paymentStatus === "deposit" ? `deposit · ${formatMoney(order.balanceCents)} due` : "paid"], ["Notes", order.notes ?? "—"]]} />
+              <div className="mt-3 flex gap-4 text-sm">
+                <Link href={`/app/orders/${order.id}`} className="text-accent underline">Edit order</Link>
+                {urls && unit.status !== "unassigned" && <a className="text-accent underline" href={urls.landing_url} target="_blank" rel="noreferrer">Open customer&apos;s page</a>}
+              </div>
+            </Card>
+          )}
+          <details className="card">
+            <summary className="cursor-pointer text-base font-semibold">Dates and storage</summary>
+            <div className="mt-3">
             <Dl
               items={[
                 ["Received", formatDateTime(unit.receivedAt, tz)],
@@ -120,9 +212,10 @@ export default async function UnitPage({ params, searchParams }: { params: Promi
               ]}
             />
             <div className="mt-3 flex flex-wrap gap-1.5">{callDue(unit, now, tz) && <Badge tone="danger">Call due</Badge>}{unit.earlyBird && <Badge tone="accent">Early bird</Badge>}{releasable && <Badge tone="warn">Releasable</Badge>}</div>
-          </Card>
+            </div>
+          </details>
 
-          <Card title="Appointments">
+          <Card title="Booking history">
             {history.length === 0 ? <p className="text-sm text-muted">No bookings yet.</p> : (
               <table className="table">
                 <thead><tr><th>Slot</th><th>Status</th><th>By</th><th>Created</th></tr></thead>
@@ -144,21 +237,8 @@ export default async function UnitPage({ params, searchParams }: { params: Promi
         </div>
 
         <div className="space-y-6">
-          <Card title="Actions">
+          <Card title="More actions">
             <div className="space-y-3">
-              {unit.status === "received" && (
-                <form action={inviteUnitAction.bind(null, unit.id, RETURN)}><button type="submit" className="btn btn-primary w-full" disabled={!order?.customerEmail && !order?.customerPhone}>Send invite</button></form>
-              )}
-              {["invited", "building", "ready"].includes(unit.status) && !appointment && (
-                <Link href={`/app/book?unit=${unit.id}`} className="btn btn-primary w-full">Book for customer</Link>
-              )}
-              {unit.status === "invited" && <form action={resendInviteAction.bind(null, unit.id, RETURN)}><button type="submit" className="btn w-full">Send invite again</button></form>}
-              {unit.status === "booked" && <form action={startBuildAction.bind(null, unit.id, RETURN)}><button type="submit" className="btn btn-primary w-full">Build</button></form>}
-              {unit.status === "building" && <form action={markReadyAction.bind(null, unit.id, RETURN)}><button type="submit" className="btn btn-primary w-full">Ready</button></form>}
-              {["booked", "building", "ready"].includes(unit.status) && !handover && <Link href={`${RETURN}?handover=1`} className="btn w-full">Start handover</Link>}
-              {appointment && appointment.startsAt < now && (
-                <form action={recordNoShowAction.bind(null, unit.id, RETURN)}><ConfirmButton className="btn btn-danger w-full" message="Record a no-show for this appointment? The customer will be sent a rebook link.">Record no-show</ConfirmButton></form>
-              )}
               {!["picked_up", "unassigned", "received"].includes(unit.status) && (
                 manager ? (
                   <details>
@@ -223,16 +303,6 @@ export default async function UnitPage({ params, searchParams }: { params: Promi
             <Card title="Customer link">
               <p className="break-all text-xs text-muted">{urls.landing_url}</p>
               <div className="mt-2 flex gap-2"><CopyButton text={urls.landing_url} /><a className="btn btn-sm" href={urls.landing_url} target="_blank" rel="noreferrer">Open</a></div>
-            </Card>
-          )}
-
-          {order && (
-            <Card title="Customer">
-              <Dl items={[["Name", order.customerName], ["Email", order.customerEmail ?? "—"], ["Phone", order.customerPhone ?? "—"], ["SMS consent", order.smsConsent ? "yes" : "no"], ["Payment", order.paymentStatus === "deposit" ? `deposit · ${formatMoney(order.balanceCents)} due` : "paid"], ["Terms", `v${order.termsVersion}`], ["Notes", order.notes ?? "—"]]} />
-              <div className="mt-3 flex gap-4 text-sm">
-                <Link href={`/app/orders/${order.id}`} className="text-accent underline">Edit order</Link>
-                <Link href={`/app/customers/${encodeURIComponent(customerKey(order))}`} className="text-accent underline">View customer</Link>
-              </div>
             </Card>
           )}
         </div>
