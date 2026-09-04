@@ -267,6 +267,26 @@ export class LightspeedClient {
     };
   }
 
+  /**
+   * Special-order items that have not been completed onto a sale yet. On the register they sit on
+   * the customer's Special Order tab; in the API they are SaleLines with saleID 0, isSpecialOrder
+   * true and the customerID set — Sale/{id} does not include them. Newest first.
+   */
+  async getSpecialOrderLines(customerID: string): Promise<{ description: string; qty: number }[]> {
+    const res = await this.request<Record<string, unknown>>(
+      "GET",
+      `SaleLine.json?customerID=${encodeURIComponent(customerID)}&isSpecialOrder=true&load_relations=${encodeURIComponent('["Item"]')}`,
+    );
+    return asList<Record<string, unknown>>(res, "SaleLine")
+      .filter((l) => String(l.itemID ?? "0") !== "0" && String(l.isWorkorder) !== "true")
+      .sort((a, b) => String(b.createTime ?? "").localeCompare(String(a.createTime ?? "")))
+      .map((l) => ({
+        description: String((l.Item as Record<string, unknown> | undefined)?.description ?? l.description ?? "").trim(),
+        qty: Number(l.unitQuantity ?? 1),
+      }))
+      .filter((l) => l.description);
+  }
+
   async createWorkorder(body: Record<string, unknown>): Promise<string> {
     const res = await this.request<{ Workorder?: { workorderID: string } }>("POST", "Workorder.json", body);
     return String(res.Workorder?.workorderID);

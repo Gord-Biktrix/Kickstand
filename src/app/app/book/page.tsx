@@ -199,18 +199,22 @@ export default async function StaffBookPage({ searchParams }: { searchParams: Pr
   let ls: { name: string; email: string | null; phone: string | null } | null = null;
   let sale: { createDate: string | null; lines: { description: string; qty: number }[] } | null = null;
   let lsError: string | null = null;
+  let saleLines: { description: string; qty: number }[] = [];
   if ((customerID || saleID) && (await getConnection(db))) {
     try {
       const client = new LightspeedClient(db);
       if (saleID) sale = await client.getSale(saleID);
       const cid = customerID || (sale && "customerID" in sale ? (sale as { customerID: string | null }).customerID : null);
       if (cid) ls = await client.getCustomer(cid);
+      // Special-order items are not on the sale until completed; they hang off the customer.
+      if (cid && !(sale?.lines.length)) saleLines = await client.getSpecialOrderLines(cid);
     } catch (err) {
       lsError = err instanceof Error ? err.message : String(err);
       logger.warn({ err: lsError }, "book pickup: lightspeed prefill failed");
     }
   }
-  const bikeGuess = sale?.lines[0]?.description ?? "";
+  if (sale?.lines.length) saleLines = sale.lines;
+  const bikeGuess = saleLines[0]?.description ?? "";
 
   return (
     <div>
@@ -255,7 +259,7 @@ export default async function StaffBookPage({ searchParams }: { searchParams: Pr
             <Field label="Sale / order #" htmlFor="order_ref" hint="Lightspeed sale number. Any unique reference works."><input id="order_ref" name="order_ref" required className="input" defaultValue={saleID || (customerID ? `C${customerID}-${toLocalDate(now, tz)}` : "")} /></Field>
             <Field label="Email" htmlFor="customer_email"><input id="customer_email" name="customer_email" type="email" className="input" defaultValue={ls?.email ?? ""} /></Field>
             <Field label="Mobile" htmlFor="customer_phone"><input id="customer_phone" name="customer_phone" className="input" defaultValue={ls?.phone ?? ""} /></Field>
-            <Field label="Model" htmlFor="model" hint={sale && sale.lines.length > 1 ? `Sale lines: ${sale.lines.map((l) => l.description).join("; ")}` : undefined}>
+            <Field label="Model" htmlFor="model" hint={saleLines.length > 1 ? `Sale lines: ${saleLines.map((l) => l.description).join("; ")}` : undefined}>
               <input id="model" name="model" required className="input" defaultValue={bikeGuess} />
             </Field>
             <div className="grid grid-cols-2 gap-3">
