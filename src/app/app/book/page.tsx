@@ -173,8 +173,12 @@ export default async function StaffBookPage({ searchParams }: { searchParams: Pr
         )
     : [];
   const withUnit = matches.filter((m) => m.unit);
-  if (withUnit.length === 1 && withUnit[0].unit && !["received"].includes(withUnit[0].unit.status)) {
-    // One live bike → straight to its slot picker.
+  const forceNew = sp(q.new) === "1";
+  // A sale number that differs from the bike we know about usually means a second bike for a
+  // repeat customer — don't jump to the existing one, show both choices below instead.
+  const saleMatchesKnownBike = !saleID || withUnit.some((m) => m.order.orderRef === saleID);
+  if (!forceNew && saleMatchesKnownBike && withUnit.length === 1 && withUnit[0].unit && !["received"].includes(withUnit[0].unit.status)) {
+    // One live bike → straight to its slot picker, with a way out for a different bike.
     return (
       <div>
         <PageHeader title="Book pickup" />
@@ -182,9 +186,14 @@ export default async function StaffBookPage({ searchParams }: { searchParams: Pr
           Found {withUnit[0].order.customerName}&apos;s {withUnit[0].unit.model} (box {withUnit[0].unit.boxTag}).{" "}
           <Link className="underline" href={`/app/book?unit=${withUnit[0].unit.id}`}>Continue to the slot picker →</Link>
         </Alert>
+        <p className="mt-3 text-sm text-muted">
+          Different bike?{" "}
+          <Link className="underline" href={`/app/book?${returnQuery}&new=1`}>Start a new pickup for this customer →</Link>
+        </p>
       </div>
     );
   }
+  const secondBike = withUnit.length > 0 && (forceNew || !saleMatchesKnownBike);
 
   // Prefill from Lightspeed when connected.
   let ls: { name: string; email: string | null; phone: string | null } | null = null;
@@ -209,6 +218,7 @@ export default async function StaffBookPage({ searchParams }: { searchParams: Pr
       {flash}
       {lsError && <Alert tone="warn">Couldn&apos;t read from Lightspeed ({lsError}). Fill the details in by hand.</Alert>}
       {!customerID && !saleID && <Alert tone="neutral">Opened without a Lightspeed customer. Search the order on <Link className="underline" href="/app/arrivals">Arrivals</Link> instead, or fill in a new pickup below.</Alert>}
+      {secondBike && <Alert tone="neutral">This customer already has a bike in Kickstand. If this sale is for that bike, use <strong>Book this bike</strong>; otherwise fill in the new pickup.</Alert>}
 
       <div className="grid gap-6 lg:grid-cols-2">
         {matches.length > 0 && (
