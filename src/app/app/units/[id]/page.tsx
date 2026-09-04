@@ -8,6 +8,7 @@ import { Timeline } from "@/components/timeline";
 import { Alert, Badge, Card, Dl, Field, Flash, PageHeader } from "@/components/ui";
 import { hasRole, requireUser } from "@/lib/auth";
 import { callDue, isReleasable, unitAgeDays } from "@/lib/clock";
+import { customerKey } from "@/lib/customers";
 import { formatMoney } from "@/lib/format";
 import { sp, type SearchParams } from "@/lib/flash";
 import { customerUrls } from "@/lib/messages";
@@ -228,7 +229,10 @@ export default async function UnitPage({ params, searchParams }: { params: Promi
           {order && (
             <Card title="Customer">
               <Dl items={[["Name", order.customerName], ["Email", order.customerEmail ?? "—"], ["Phone", order.customerPhone ?? "—"], ["SMS consent", order.smsConsent ? "yes" : "no"], ["Payment", order.paymentStatus === "deposit" ? `deposit · ${formatMoney(order.balanceCents)} due` : "paid"], ["Terms", `v${order.termsVersion}`], ["Notes", order.notes ?? "—"]]} />
-              <Link href={`/app/orders/${order.id}`} className="mt-3 inline-block text-sm text-accent underline">Edit order</Link>
+              <div className="mt-3 flex gap-4 text-sm">
+                <Link href={`/app/orders/${order.id}`} className="text-accent underline">Edit order</Link>
+                <Link href={`/app/customers/${encodeURIComponent(customerKey(order))}`} className="text-accent underline">View customer</Link>
+              </div>
             </Card>
           )}
         </div>

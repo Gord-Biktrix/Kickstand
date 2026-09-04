@@ -9,6 +9,7 @@ import { getAvailability } from "@/lib/availability";
 import type { DaySummary } from "@/lib/capacity";
 import { sp, type SearchParams } from "@/lib/flash";
 import { formatMoney } from "@/lib/format";
+import { customerKey } from "@/lib/customers";
 import { getConnection, LightspeedClient, type SaleLineInfo } from "@/lib/lightspeed";
 import { logger } from "@/lib/logger";
 import { getUnitView } from "@/lib/queries";
@@ -186,9 +187,9 @@ export default async function StaffBookPage({ searchParams }: { searchParams: Pr
           Found {withUnit[0].order.customerName}&apos;s {withUnit[0].unit.model} (box {withUnit[0].unit.boxTag}).{" "}
           <Link className="underline" href={`/app/book?unit=${withUnit[0].unit.id}`}>Continue to the slot picker →</Link>
         </Alert>
-        <p className="mt-3 text-sm text-muted">
-          Different bike?{" "}
-          <Link className="underline" href={`/app/book?${returnQuery}&new=1`}>Start a new pickup for this customer →</Link>
+        <p className="mt-3 flex flex-wrap gap-4 text-sm text-muted">
+          <span>Different bike? <Link className="underline" href={`/app/book?${returnQuery}&new=1`}>Start a new pickup for this customer →</Link></span>
+          <Link className="underline" href={`/app/customers/${encodeURIComponent(customerKey(withUnit[0].order))}`}>View customer</Link>
         </p>
       </div>
     );
@@ -222,7 +223,7 @@ export default async function StaffBookPage({ searchParams }: { searchParams: Pr
       {flash}
       {lsError && <Alert tone="warn">Couldn&apos;t read from Lightspeed ({lsError}). Fill the details in by hand.</Alert>}
       {!customerID && !saleID && <Alert tone="neutral">Opened without a Lightspeed customer. Search the order on <Link className="underline" href="/app/arrivals">Arrivals</Link> instead, or fill in a new pickup below.</Alert>}
-      {secondBike && <Alert tone="neutral">This customer already has a bike in Kickstand. If this sale is for that bike, use <strong>Book this bike</strong>; otherwise fill in the new pickup.</Alert>}
+      {secondBike && <Alert tone="neutral">This customer already has a bike in Kickstand. If this sale is for that bike, use <strong>Book this bike</strong>; otherwise fill in the new pickup. <Link className="underline" href={`/app/customers/${encodeURIComponent(customerKey(withUnit[0].order))}`}>View customer</Link></Alert>}
 
       <div className="grid gap-6 lg:grid-cols-2">
         {matches.length > 0 && (

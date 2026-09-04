@@ -29,7 +29,10 @@ export default async function StaffLayout({ children }: { children: React.ReactN
               }))}
             />
           </nav>
-          <div className="ml-auto flex items-center gap-3 text-xs text-muted">
+          <form action="/app/search" role="search" className="ml-auto">
+            <input name="q" type="search" placeholder="Search customers" aria-label="Search customers" className="input h-8 w-44 text-sm sm:w-56" />
+          </form>
+          <div className="flex items-center gap-3 text-xs text-muted">
             {hasRole(user.role, "admin") && <Link href="/app/reports" className="hover:text-accent">Reports</Link>}
             <span className="hidden sm:inline">{user.name} · {user.role}</span>
             <form action={signOutAction}><button type="submit" className="btn btn-sm">Sign out</button></form>

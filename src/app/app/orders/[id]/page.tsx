@@ -7,6 +7,7 @@ import { StatusBadge } from "@/components/status-badge";
 import { Timeline } from "@/components/timeline";
 import { Card, Field, Flash, PageHeader } from "@/components/ui";
 import { requireUser } from "@/lib/auth";
+import { customerKey } from "@/lib/customers";
 import { sp, type SearchParams } from "@/lib/flash";
 import { orderTimeline, unitsForOrder } from "@/lib/queries";
 import { getShowroom } from "@/lib/showroom";
@@ -27,7 +28,7 @@ export default async function OrderPage({ params, searchParams }: { params: Prom
 
   return (
     <div>
-      <PageHeader title={order.customerName} subtitle={`${order.source} ${order.orderRef} · ordered ${formatLongDateFromLocal(order.orderDate)} · ${order.model} ${[order.size, order.colour].filter(Boolean).join(" · ")}`} action={<StatusBadge status={order.status} />} />
+      <PageHeader title={order.customerName} subtitle={`${order.source} ${order.orderRef} · ordered ${formatLongDateFromLocal(order.orderDate)} · ${order.model} ${[order.size, order.colour].filter(Boolean).join(" · ")}`} action={<div className="flex items-center gap-3"><Link href={`/app/customers/${encodeURIComponent(customerKey(order))}`} className="btn btn-sm">View customer</Link><StatusBadge status={order.status} /></div>} />
       <Flash ok={sp(q.ok)} error={sp(q.error)} />
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="space-y-6 lg:col-span-2">
