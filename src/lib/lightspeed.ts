@@ -52,6 +52,42 @@ export function setLightspeedFetch(f: typeof fetch | null) {
 const doFetch: typeof fetch = (...args) => (fetchOverride ?? fetch)(...args);
 
 /** Lightspeed returns an object for one result and an array for many; normalise. */
+export type SaleLineInfo = { description: string; qty: number; model: string; size: string | null; colour: string | null };
+
+/**
+ * Model / size / colour from a Lightspeed item. Biktrix item descriptions look like
+ * "86-Juggernaut Lite Plus - Limited Edition Green": a numeric vendor prefix, the matrix (model)
+ * name, then the variant values appended. Attributes come from the item's attribute set, whose
+ * names are matched loosely (Color/Colour, Size); the model is the matrix name when known,
+ * otherwise the description with the prefix and trailing variant values stripped.
+ */
+export function splitItemDescription(
+  description: string,
+  attributes: Record<string, string>,
+  matrixName: string | null = null,
+): { model: string; size: string | null; colour: string | null } {
+  const stripPrefix = (s: string) => s.replace(/^\s*\d+\s*-\s*/, "").trim();
+  const find = (re: RegExp) => Object.entries(attributes).find(([k]) => re.test(k))?.[1] ?? null;
+  const colour = find(/colou?r/i);
+  const size = find(/size/i);
+  let model = stripPrefix(matrixName ?? description);
+  if (!matrixName) {
+    // Variant values are appended in any order ("… - Blue / 19"); peel them off the end until none match.
+    const values = Object.values(attributes).filter(Boolean);
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const v of values) {
+        const re = new RegExp(`[\\s/-]*${v.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*$`, "i");
+        const next = model.replace(re, "").trim();
+        if (next !== model) { model = next; changed = true; }
+      }
+    }
+    model = model.replace(/[\s/-]+$/, "").trim();
+  }
+  return { model: model || stripPrefix(description), size, colour };
+}
+
 export function asList<T>(obj: Record<string, unknown> | undefined, key: string): T[] {
   const v = obj?.[key];
   if (v === undefined || v === null) return [];
@@ -251,19 +287,16 @@ export class LightspeedClient {
   }
 
   /** Sale lines with their item descriptions — the bike(s) the customer bought. */
-  async getSale(saleID: string): Promise<{ saleID: string; customerID: string | null; createDate: string | null; lines: { description: string; qty: number }[] } | null> {
+  async getSale(saleID: string): Promise<{ saleID: string; customerID: string | null; createDate: string | null; lines: SaleLineInfo[] } | null> {
     const res = await this.request<Record<string, unknown>>("GET", `Sale/${saleID}.json?load_relations=${encodeURIComponent('["SaleLines","SaleLines.Item"]')}`);
     const sale = res.Sale as Record<string, unknown> | undefined;
     if (!sale) return null;
-    const lines = asList<Record<string, unknown>>(sale.SaleLines as Record<string, unknown>, "SaleLine").map((l) => ({
-      description: String((l.Item as Record<string, unknown> | undefined)?.description ?? l.description ?? "").trim(),
-      qty: Number(l.unitQuantity ?? 1),
-    }));
+    const lines = await this.describeLines(asList<Record<string, unknown>>(sale.SaleLines as Record<string, unknown>, "SaleLine"));
     return {
       saleID: String(sale.saleID),
       customerID: sale.customerID && String(sale.customerID) !== "0" ? String(sale.customerID) : null,
       createDate: typeof sale.createTime === "string" ? sale.createTime.slice(0, 10) : null,
-      lines: lines.filter((l) => l.description),
+      lines,
     };
   }
 
@@ -272,19 +305,77 @@ export class LightspeedClient {
    * the customer's Special Order tab; in the API they are SaleLines with saleID 0, isSpecialOrder
    * true and the customerID set — Sale/{id} does not include them. Newest first.
    */
-  async getSpecialOrderLines(customerID: string): Promise<{ description: string; qty: number }[]> {
+  async getSpecialOrderLines(customerID: string): Promise<SaleLineInfo[]> {
     const res = await this.request<Record<string, unknown>>(
       "GET",
       `SaleLine.json?customerID=${encodeURIComponent(customerID)}&isSpecialOrder=true&load_relations=${encodeURIComponent('["Item"]')}`,
     );
-    return asList<Record<string, unknown>>(res, "SaleLine")
+    const rows = asList<Record<string, unknown>>(res, "SaleLine")
       .filter((l) => String(l.itemID ?? "0") !== "0" && String(l.isWorkorder) !== "true")
-      .sort((a, b) => String(b.createTime ?? "").localeCompare(String(a.createTime ?? "")))
-      .map((l) => ({
-        description: String((l.Item as Record<string, unknown> | undefined)?.description ?? l.description ?? "").trim(),
-        qty: Number(l.unitQuantity ?? 1),
-      }))
-      .filter((l) => l.description);
+      .sort((a, b) => String(b.createTime ?? "").localeCompare(String(a.createTime ?? "")));
+    return this.describeLines(rows);
+  }
+
+  /**
+   * Turn sale lines into model / size / colour. Lightspeed nests neither ItemAttributes nor
+   * ItemMatrix under a sale line (400), so each distinct item costs one extra call, plus one per
+   * matrix and one for the attribute-set names (cached on the client). Failures fall back to the
+   * plain description so the prefill never blocks the form.
+   */
+  private async describeLines(rows: Record<string, unknown>[]): Promise<SaleLineInfo[]> {
+    const out: SaleLineInfo[] = [];
+    for (const l of rows) {
+      const item = l.Item as Record<string, unknown> | undefined;
+      const description = String(item?.description ?? l.description ?? "").trim();
+      if (!description) continue;
+      const qty = Number(l.unitQuantity ?? 1);
+      const itemID = String(l.itemID ?? item?.itemID ?? "0");
+      let info: SaleLineInfo = { description, qty, ...splitItemDescription(description, {}) };
+      if (itemID !== "0") {
+        try {
+          info = { description, qty, ...(await this.describeItem(itemID, description)) };
+        } catch (err) {
+          logger.warn({ err: err instanceof Error ? err.message : String(err), itemID }, "lightspeed: item attributes unavailable");
+        }
+      }
+      out.push(info);
+    }
+    return out;
+  }
+
+  private attributeSets: Promise<Map<string, string[]>> | null = null;
+  private matrixNames = new Map<string, Promise<string>>();
+
+  private async describeItem(itemID: string, description: string): Promise<Omit<SaleLineInfo, "description" | "qty">> {
+    const res = await this.request<Record<string, unknown>>("GET", `Item/${itemID}.json?load_relations=${encodeURIComponent('["ItemAttributes"]')}`);
+    const item = (res.Item ?? {}) as Record<string, unknown>;
+    const attrs = (item.ItemAttributes ?? null) as Record<string, unknown> | null;
+    const named: Record<string, string> = {};
+    if (attrs) {
+      this.attributeSets ??= this.request<Record<string, unknown>>("GET", "ItemAttributeSet.json").then((r) => {
+        const m = new Map<string, string[]>();
+        for (const set of asList<Record<string, unknown>>(r, "ItemAttributeSet")) {
+          m.set(String(set.itemAttributeSetID), [String(set.attributeName1 ?? ""), String(set.attributeName2 ?? ""), String(set.attributeName3 ?? "")]);
+        }
+        return m;
+      });
+      const names = (await this.attributeSets).get(String(attrs.itemAttributeSetID ?? "")) ?? ["", "", ""];
+      (["attribute1", "attribute2", "attribute3"] as const).forEach((k, i) => {
+        const v = String(attrs[k] ?? "").trim();
+        if (v) named[names[i] || k] = v;
+      });
+    }
+    const matrixID = String(item.itemMatrixID ?? "0");
+    let matrixName: string | null = null;
+    if (matrixID !== "0") {
+      let p = this.matrixNames.get(matrixID);
+      if (!p) {
+        p = this.request<Record<string, unknown>>("GET", `ItemMatrix/${matrixID}.json`).then((r) => String((r.ItemMatrix as Record<string, unknown> | undefined)?.description ?? ""));
+        this.matrixNames.set(matrixID, p);
+      }
+      matrixName = (await p) || null;
+    }
+    return splitItemDescription(description, named, matrixName);
   }
 
   async createWorkorder(body: Record<string, unknown>): Promise<string> {

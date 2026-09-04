@@ -9,7 +9,7 @@ import { getAvailability } from "@/lib/availability";
 import type { DaySummary } from "@/lib/capacity";
 import { sp, type SearchParams } from "@/lib/flash";
 import { formatMoney } from "@/lib/format";
-import { getConnection, LightspeedClient } from "@/lib/lightspeed";
+import { getConnection, LightspeedClient, type SaleLineInfo } from "@/lib/lightspeed";
 import { logger } from "@/lib/logger";
 import { getUnitView } from "@/lib/queries";
 import { getShowroom } from "@/lib/showroom";
@@ -197,9 +197,9 @@ export default async function StaffBookPage({ searchParams }: { searchParams: Pr
 
   // Prefill from Lightspeed when connected.
   let ls: { name: string; email: string | null; phone: string | null } | null = null;
-  let sale: { createDate: string | null; lines: { description: string; qty: number }[] } | null = null;
+  let sale: { createDate: string | null; lines: SaleLineInfo[] } | null = null;
   let lsError: string | null = null;
-  let saleLines: { description: string; qty: number }[] = [];
+  let saleLines: SaleLineInfo[] = [];
   if ((customerID || saleID) && (await getConnection(db))) {
     try {
       const client = new LightspeedClient(db);
@@ -214,7 +214,7 @@ export default async function StaffBookPage({ searchParams }: { searchParams: Pr
     }
   }
   if (sale?.lines.length) saleLines = sale.lines;
-  const bikeGuess = saleLines[0]?.description ?? "";
+  const bike = saleLines[0];
 
   return (
     <div>
@@ -260,11 +260,11 @@ export default async function StaffBookPage({ searchParams }: { searchParams: Pr
             <Field label="Email" htmlFor="customer_email"><input id="customer_email" name="customer_email" type="email" className="input" defaultValue={ls?.email ?? ""} /></Field>
             <Field label="Mobile" htmlFor="customer_phone"><input id="customer_phone" name="customer_phone" className="input" defaultValue={ls?.phone ?? ""} /></Field>
             <Field label="Model" htmlFor="model" hint={saleLines.length > 1 ? `Sale lines: ${saleLines.map((l) => l.description).join("; ")}` : undefined}>
-              <input id="model" name="model" required className="input" defaultValue={bikeGuess} />
+              <input id="model" name="model" required className="input" defaultValue={bike?.model ?? ""} />
             </Field>
             <div className="grid grid-cols-2 gap-3">
-              <Field label="Size" htmlFor="size"><input id="size" name="size" className="input" /></Field>
-              <Field label="Colour" htmlFor="colour"><input id="colour" name="colour" className="input" /></Field>
+              <Field label="Size" htmlFor="size"><input id="size" name="size" className="input" defaultValue={bike?.size ?? ""} /></Field>
+              <Field label="Colour" htmlFor="colour"><input id="colour" name="colour" className="input" defaultValue={bike?.colour ?? ""} /></Field>
             </div>
             <Field label="Box tag (optional)" htmlFor="box_tag" hint="Blank uses the sale number."><input id="box_tag" name="box_tag" className="input" /></Field>
             <Field label="Order date" htmlFor="order_date"><input id="order_date" name="order_date" type="date" className="input" defaultValue={sale?.createDate ?? toLocalDate(now, tz)} /></Field>
