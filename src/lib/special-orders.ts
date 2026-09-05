@@ -14,6 +14,7 @@ import { logEvent } from "./events";
 import { getConnection, LightspeedClient, type SaleLineInfo } from "./lightspeed";
 import { logger } from "./logger";
 import type { ShowroomCtx } from "./showroom";
+import { normalizeEmail, normalizePhone } from "./customers";
 import { toLocalDate } from "./time";
 
 export type SpecialOrderLine = {
@@ -67,7 +68,7 @@ export class LightspeedSpecialOrderSource implements SpecialOrderSource {
   }
 }
 
-export type SyncSummary = { seen: number; bikes: number; created: number; updated: number; skippedParts: number; errors: string[] };
+export type SyncSummary = { seen: number; bikes: number; created: number; adopted: number; updated: number; skippedParts: number; errors: string[] };
 
 export async function syncSpecialOrders(
   dbx: Db,
@@ -80,7 +81,7 @@ export async function syncSpecialOrders(
   if (!args.source && !(await getConnection(dbx))) throw new Error("Lightspeed is not connected");
   const source = args.source ?? new LightspeedSpecialOrderSource(dbx);
   const since = new Date(now.getTime() - (args.sinceDays ?? 180) * 86_400_000).toISOString();
-  const summary: SyncSummary = { seen: 0, bikes: 0, created: 0, updated: 0, skippedParts: 0, errors: [] };
+  const summary: SyncSummary = { seen: 0, bikes: 0, created: 0, adopted: 0, updated: 0, skippedParts: 0, errors: [] };
 
   const lines = await source.lines(shopID, since);
   summary.seen = lines.length;
@@ -94,6 +95,13 @@ export async function syncSpecialOrders(
     .from(orders)
     .where(and(eq(orders.showroomId, showroom.id), inArray(orders.lsSaleLineId, bikeLines.map((l) => l.saleLineID))));
   const byLine = new Map(existing.map((o) => [o.lsSaleLineId!, o]));
+  // Orders that came in another way (CSV import, Add an order, the register button) have no line id.
+  // If one is open for the same person and the same model, adopt it rather than creating a twin.
+  const unlinked = await dbx
+    .select()
+    .from(orders)
+    .where(and(eq(orders.showroomId, showroom.id), eq(orders.status, "open"), isNull(orders.lsSaleLineId)));
+  const norm = (v: string | null | undefined) => (v ?? "").trim().toLowerCase();
 
   // Customer lookups dominate the run time (one Lightspeed call each); fetch them in parallel, a few at a time.
   const customerIds = [...new Set(bikeLines.map((l) => l.customerID))];
@@ -123,7 +131,23 @@ export async function syncSpecialOrders(
         colour: line.bike.colour,
         lsCustomerId: line.customerID,
       };
-      const prev = byLine.get(line.saleLineID);
+      let prev = byLine.get(line.saleLineID);
+      if (!prev) {
+        const idx = unlinked.findIndex(
+          (o) =>
+            norm(o.model) === norm(fields.model) &&
+            (o.lsCustomerId === line.customerID ||
+              (!!normalizePhone(o.customerPhone) && normalizePhone(o.customerPhone) === normalizePhone(cust.phone)) ||
+              (!!normalizeEmail(o.customerEmail) && normalizeEmail(o.customerEmail) === normalizeEmail(cust.email))),
+        );
+        if (idx >= 0) {
+          const [adopted] = unlinked.splice(idx, 1);
+          await dbx.update(orders).set({ lsSaleLineId: line.saleLineID, lsCustomerId: line.customerID }).where(eq(orders.id, adopted.id));
+          await logEvent(dbx, { showroomId: showroom.id, orderId: adopted.id, type: "order_updated", actor: args.actor, payload: { source: "lightspeed_special_order", linked_sale_line_id: line.saleLineID, adopted: true } });
+          prev = { ...adopted, lsSaleLineId: line.saleLineID, lsCustomerId: line.customerID };
+          summary.adopted++;
+        }
+      }
       if (!prev) {
         const [created] = await dbx
           .insert(orders)

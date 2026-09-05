@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { db } from "@/db/client";
+import { AutoSubmitSelect } from "@/components/auto-submit-select";
 import { BulkSelect } from "@/components/bulk-select";
 import { ConfirmButton } from "@/components/confirm-button";
 import { StatusBadge } from "@/components/status-badge";
@@ -215,10 +216,10 @@ export default async function BikesPage({ searchParams }: { searchParams: Promis
         action={
           <form action="/app/bikes#on-order" className="flex flex-wrap items-center gap-2">
             <input type="hidden" name="filter" value={filter} />
-            <select name="model" defaultValue={modelFilter} className="input h-8 w-auto py-0 text-sm" aria-label="Model">
+            <AutoSubmitSelect name="model" defaultValue={modelFilter} className="input h-8 w-auto py-0 text-sm" ariaLabel="Model">
               <option value="">All models</option>
               {models.map((m) => <option key={m} value={m}>{m} ({onOrderAll.filter((o) => o.model === m).length})</option>)}
-            </select>
+            </AutoSubmitSelect>
             <input name="oq" defaultValue={onOrderText} placeholder="Customer, colour, size or sale #" className="input h-8 w-52 text-sm" />
             <button type="submit" className="btn btn-sm">Filter</button>
             {(modelFilter || onOrderText) && <Link href="/app/bikes#on-order" className="btn btn-sm">Clear</Link>}

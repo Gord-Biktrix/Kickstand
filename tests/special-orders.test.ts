@@ -64,6 +64,20 @@ describe("special-order sync", () => {
     expect(log).toHaveLength(3);
   });
 
+  it("adopts an imported or manual order for the same customer and model instead of duplicating it", async () => {
+    const imported = await makeOrder(db, showroom, { orderRef: "CSV-1", source: "manual", customerName: "Test Test", customerPhone: "604 555 0100", customerEmail: null, model: "Juggernaut Lite Plus - Limited Edition", lsCustomerId: null });
+    const other = await makeOrder(db, showroom, { orderRef: "CSV-2", source: "manual", customerName: "Test Test", customerPhone: "604 555 0100", model: "Stunner Go" });
+    const src = new FakeSource([line({})], { "9020": { name: "Test Test", email: "t@x.ca", phone: "+16045550100" } });
+    const r = await syncSpecialOrders(db, { showroom, actor: "test", source: src });
+    expect(r).toMatchObject({ bikes: 1, created: 0, adopted: 1 });
+    const [o] = await db.select().from(orders).where(eq(orders.id, imported.id));
+    expect(o.lsSaleLineId).toBe("75843");
+    expect(o.lsCustomerId).toBe("9020");
+    const [untouched] = await db.select().from(orders).where(eq(orders.id, other.id));
+    expect(untouched.lsSaleLineId).toBeNull();
+    expect(await db.select().from(orders).where(eq(orders.showroomId, showroom.id))).toHaveLength(2);
+  });
+
   it("lists only orders without a box as on order", async () => {
     const received = await makeOrder(db, showroom, { orderRef: "R-1" });
     await makeUnit(db, showroom, received.id);

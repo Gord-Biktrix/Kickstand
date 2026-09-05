@@ -327,7 +327,7 @@ export async function syncSpecialOrdersAction(returnTo: string) {
     const showroom = await currentShowroom(user);
     const r = await syncSpecialOrders(db, { showroom, actor: user.id });
     const tail = r.errors.length ? ` · ${r.errors.length} skipped (see logs)` : "";
-    return `Lightspeed sync: ${r.bikes} bike special order${r.bikes === 1 ? "" : "s"} open — ${r.created} new, ${r.updated} updated, ${r.skippedParts} parts/accessories ignored${tail}.`;
+    return `Lightspeed sync: ${r.bikes} bike special order${r.bikes === 1 ? "" : "s"} open — ${r.created} new${r.adopted ? `, ${r.adopted} matched to existing orders` : ""}, ${r.updated} updated, ${r.skippedParts} parts/accessories ignored${tail}.`;
   });
 }
 
