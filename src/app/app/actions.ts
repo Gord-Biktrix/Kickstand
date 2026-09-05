@@ -16,6 +16,7 @@ import { normalizeTime } from "@/lib/time";
 import { attachUnit, completeHandover, createOrder, deleteUnit, detachUnit, grantExtension, inviteAllReceived, inviteUnit, markReady, receiveUnit, resendInvite, retagUnit, startBuild, waiveStorage } from "@/lib/units";
 import { currentShowroom } from "@/lib/current-showroom";
 import { syncSpecialOrders } from "@/lib/special-orders";
+import { deleteView, saveView, syncWorkorders } from "@/lib/workorders";
 
 /** Run a mutation and land back on `returnTo` with a flash; auth errors surface the same way. */
 async function run(returnTo: string, fn: () => Promise<string | void>): Promise<never> {
@@ -327,6 +328,37 @@ export async function syncSpecialOrdersAction(returnTo: string) {
     const r = await syncSpecialOrders(db, { showroom, actor: user.id });
     const tail = r.errors.length ? ` · ${r.errors.length} skipped (see logs)` : "";
     return `Lightspeed sync: ${r.bikes} bike special order${r.bikes === 1 ? "" : "s"} open — ${r.created} new, ${r.updated} updated, ${r.skippedParts} parts/accessories ignored${tail}.`;
+  });
+}
+
+// ---- Work orders (Lightspeed mirror + custom views) ----------------------------
+
+export async function syncWorkordersAction(returnTo: string) {
+  return run(safeReturn(returnTo, "/app/workorders"), async () => {
+    const user = await requireActor("staff");
+    const showroom = await currentShowroom(user);
+    const r = await syncWorkorders(db, { showroom, actor: user.id });
+    return `Lightspeed sync: ${r.open} open work orders — ${r.added} new, ${r.updated} changed, ${r.closed} closed since last time.`;
+  });
+}
+
+export async function saveViewAction(formData: FormData) {
+  return run("/app/settings/views", async () => {
+    const user = await requireActor("manager");
+    const showroom = await currentShowroom(user);
+    const id = str(formData, "id") || undefined;
+    const statusIds = formData.getAll("status_ids").map((v) => Number(v));
+    const v = await saveView(db, { showroom, id, name: str(formData, "name"), statusIds, actor: user.id });
+    return `${id ? "Updated" : "Created"} view “${v.name}” (${v.statusIds.length} status${v.statusIds.length === 1 ? "" : "es"}).`;
+  });
+}
+
+export async function deleteViewAction(id: string) {
+  return run("/app/settings/views", async () => {
+    const user = await requireActor("manager");
+    const showroom = await currentShowroom(user);
+    await deleteView(db, showroom, id);
+    return "View deleted.";
   });
 }
 

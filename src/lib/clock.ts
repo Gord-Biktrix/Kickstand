@@ -7,6 +7,7 @@ import { logger } from "./logger";
 import { METRIC, sendUnitMessage, type MessageOutcome } from "./messages";
 import { getCapacityConfig, listShowrooms, patchShowroomSettings, type ShowroomCtx } from "./showroom";
 import { syncSpecialOrders } from "./special-orders";
+import { syncWorkorders } from "./workorders";
 import { storageDueCents, storageEnabledFor } from "./storage";
 import { addLocalDays, daysBetween, formatDateTime, localHour, startOfLocalDay, toLocalDate, weekdayOf } from "./time";
 
@@ -62,6 +63,11 @@ export async function runClock(dbx: Db, opts: ClockOptions = {}): Promise<ClockS
         await syncSpecialOrders(dbx, { showroom, actor: "clock", now });
       } catch (err) {
         logger.warn({ err: err instanceof Error ? err.message : String(err), showroom: showroom.slug }, "clock: special-order sync skipped");
+      }
+      try {
+        await syncWorkorders(dbx, { showroom, actor: "clock", now });
+      } catch (err) {
+        logger.warn({ err: err instanceof Error ? err.message : String(err), showroom: showroom.slug }, "clock: work-order sync skipped");
       }
     }
   }

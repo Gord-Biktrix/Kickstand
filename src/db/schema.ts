@@ -1,21 +1,5 @@
 import { sql } from "drizzle-orm";
-import {
-  boolean,
-  check,
-  date,
-  index,
-  integer,
-  jsonb,
-  pgTable,
-  primaryKey,
-  smallint,
-  text,
-  time,
-  timestamp,
-  unique,
-  uniqueIndex,
-  uuid,
-} from "drizzle-orm/pg-core";
+import { boolean, check, date, index, integer, jsonb, pgTable, primaryKey, smallint, text, time, timestamp, unique, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 
 const id = () => uuid("id").primaryKey().defaultRandom();
 const timestamps = {
@@ -272,6 +256,65 @@ export type LightspeedConnection = typeof lightspeedConnections.$inferSelect;
 export type StaffUser = typeof staffUsers.$inferSelect;
 export type CapacityRule = typeof capacityRules.$inferSelect;
 export type CapacityOverride = typeof capacityOverrides.$inferSelect;
+/** Lightspeed work-order statuses (account-wide), mirrored for the Work orders page and custom views. */
+export const lsWorkorderStatuses = pgTable("ls_workorder_statuses", {
+  id: integer("id").primaryKey(),
+  name: text("name").notNull(),
+  systemValue: text("system_value"),
+  sortOrder: integer("sort_order").notNull().default(0),
+  htmlColor: text("html_color"),
+  archived: boolean("archived").notNull().default(false),
+  syncedAt: timestamp("synced_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * Read-only mirror of the shop's open Lightspeed work orders (not paid, not archived). Refreshed by the
+ * clock and the Sync button; rows that are no longer open are deleted. `unit_id` links the ones Kickstand
+ * created (units.ls_workorder_id).
+ */
+export const lsWorkorders = pgTable(
+  "ls_workorders",
+  {
+    id: text("id").primaryKey(), // Lightspeed workorderID
+    showroomId: uuid("showroom_id")
+      .notNull()
+      .references(() => showrooms.id),
+    statusId: integer("status_id").notNull(),
+    customerId: text("customer_id"),
+    customerName: text("customer_name").notNull().default(""),
+    item: text("item").notNull().default(""),
+    serial: text("serial"),
+    note: text("note").notNull().default(""),
+    hookIn: text("hook_in"),
+    hookOut: text("hook_out"),
+    employeeId: text("employee_id"),
+    saleId: text("sale_id"),
+    timeIn: timestamp("time_in", { withTimezone: true }),
+    etaOut: timestamp("eta_out", { withTimezone: true }),
+    lsUpdatedAt: timestamp("ls_updated_at", { withTimezone: true }),
+    unitId: uuid("unit_id"),
+    syncedAt: timestamp("synced_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("ls_workorders_showroom_status_idx").on(t.showroomId, t.statusId)],
+);
+
+/** A staff-defined view over the work-order mirror: a name plus the Lightspeed statuses it includes. */
+export const workorderViews = pgTable("workorder_views", {
+  id: id(),
+  showroomId: uuid("showroom_id")
+    .notNull()
+    .references(() => showrooms.id),
+  name: text("name").notNull(),
+  statusIds: jsonb("status_ids").$type<number[]>().notNull().default([]),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdBy: text("created_by"),
+  ...timestamps,
+});
+
+export type LsWorkorder = typeof lsWorkorders.$inferSelect;
+export type LsWorkorderStatus = typeof lsWorkorderStatuses.$inferSelect;
+export type WorkorderView = typeof workorderViews.$inferSelect;
+
 export type Order = typeof orders.$inferSelect;
 export type NewOrder = typeof orders.$inferInsert;
 export type Unit = typeof units.$inferSelect;

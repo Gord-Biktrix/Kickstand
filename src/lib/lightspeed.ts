@@ -317,6 +317,11 @@ export class LightspeedClient {
     return this.describeSaleLines(rows);
   }
 
+  /** Public paginated fetch for other modules (work-order mirror). */
+  listAllRows(path: string, key: string, max = 2000): Promise<Record<string, unknown>[]> {
+    return this.listAll(path, key, max);
+  }
+
   /** Follow Lightspeed's `@attributes.next` cursor and return every row of a collection. */
   private async listAll(path: string, key: string, max = 2000): Promise<Record<string, unknown>[]> {
     const out: Record<string, unknown>[] = [];
