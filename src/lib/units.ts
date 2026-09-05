@@ -732,3 +732,34 @@ export async function deleteUnit(
     return { boxTag: unit.boxTag, orderDeleted };
   });
 }
+
+/**
+ * Invite straight from the "On order" list: the box is received under the order's own reference
+ * (so no separate Receive step) and the customer is texted their booking link. One order at a
+ * time so a bike without contact details never blocks the rest.
+ */
+export async function inviteOrders(
+  dbx: Db,
+  args: { showroom: ShowroomCtx; orderIds: string[]; actor: string; now?: Date },
+): Promise<{ invited: number; skipped: string[] }> {
+  let invited = 0;
+  const skipped: string[] = [];
+  for (const orderId of args.orderIds) {
+    const [order] = await dbx.select().from(orders).where(and(eq(orders.id, orderId), eq(orders.showroomId, args.showroom.id)));
+    if (!order) { skipped.push(`${orderId}: not found`); continue; }
+    if (!order.customerEmail && !order.customerPhone) { skipped.push(`${order.customerName}: no phone or email on the order`); continue; }
+    try {
+      const existing = await dbx
+        .select()
+        .from(units)
+        .where(and(eq(units.orderId, order.id), inArray(units.status, ["received", "invited", "booked", "building", "ready"])));
+      const unit = existing[0] ?? (await receiveUnit(dbx, { showroom: args.showroom, orderId: order.id, boxTag: order.orderRef, actor: args.actor, now: args.now }));
+      if (unit.status !== "received") { skipped.push(`${order.customerName}: already ${unit.status}`); continue; }
+      await inviteUnit(dbx, { showroom: args.showroom, unitId: unit.id, actor: args.actor, now: args.now });
+      invited++;
+    } catch (err) {
+      skipped.push(`${order.customerName}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  return { invited, skipped };
+}

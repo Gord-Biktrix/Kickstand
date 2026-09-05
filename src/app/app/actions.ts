@@ -13,7 +13,7 @@ import { normalizePhone } from "@/lib/phone";
 import { FLAG_KEYS, PROGRAM_KEYS, settingsSchema, validateSettings, type ProgramSettings } from "@/lib/settings";
 import { getCapacityConfig, patchShowroomSettings } from "@/lib/showroom";
 import { normalizeTime } from "@/lib/time";
-import { attachUnit, completeHandover, createOrder, deleteUnit, detachUnit, grantExtension, inviteAllReceived, inviteUnit, markReady, receiveUnit, resendInvite, retagUnit, startBuild, waiveStorage } from "@/lib/units";
+import { attachUnit, completeHandover, createOrder, deleteUnit, detachUnit, grantExtension, inviteAllReceived, inviteOrders, inviteUnit, markReady, receiveUnit, resendInvite, retagUnit, startBuild, waiveStorage } from "@/lib/units";
 import { currentShowroom } from "@/lib/current-showroom";
 import { syncSpecialOrders } from "@/lib/special-orders";
 import { deleteView, saveView, syncWorkorders } from "@/lib/workorders";
@@ -328,6 +328,19 @@ export async function syncSpecialOrdersAction(returnTo: string) {
     const r = await syncSpecialOrders(db, { showroom, actor: user.id });
     const tail = r.errors.length ? ` · ${r.errors.length} skipped (see logs)` : "";
     return `Lightspeed sync: ${r.bikes} bike special order${r.bikes === 1 ? "" : "s"} open — ${r.created} new, ${r.updated} updated, ${r.skippedParts} parts/accessories ignored${tail}.`;
+  });
+}
+
+/** "On order" list → tick bikes → Send invites: receive under the sale reference and text the booking link. */
+export async function inviteOrdersAction(returnTo: string, formData: FormData) {
+  const ids = formData.getAll("order_ids").map(String).filter(Boolean);
+  return run(safeReturn(returnTo, "/app/bikes"), async () => {
+    const user = await requireActor("staff");
+    const showroom = await currentShowroom(user);
+    if (ids.length === 0) throw new Error("Tick at least one bike first.");
+    const r = await inviteOrders(db, { showroom, orderIds: ids, actor: user.id });
+    const tail = r.skipped.length ? ` · skipped ${r.skipped.length}: ${r.skipped.slice(0, 3).join("; ")}${r.skipped.length > 3 ? "; …" : ""}` : "";
+    return `Invites sent: ${r.invited}${tail}`;
   });
 }
 

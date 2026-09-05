@@ -11,7 +11,7 @@ import { sp, type SearchParams } from "@/lib/flash";
 import { allBikes, type BikeRow } from "@/lib/queries";
 import { ordersOnOrder } from "@/lib/special-orders";
 import { daysBetween, formatDateTime, formatLongDate, formatLongDateFromLocal, formatShortDateFromLocal, toLocalDate } from "@/lib/time";
-import { bulkBikesAction, inviteUnitAction, markReadyAction, startBuildAction, syncSpecialOrdersAction } from "../actions";
+import { bulkBikesAction, inviteOrdersAction, inviteUnitAction, markReadyAction, startBuildAction, syncSpecialOrdersAction } from "../actions";
 import { currentShowroom } from "@/lib/current-showroom";
 
 // Lightspeed syncs run inside this route (server actions / cron); Vercel Hobby caps requests at 10s by default, 60s allowed.
@@ -52,8 +52,14 @@ export default async function BikesPage({ searchParams }: { searchParams: Promis
   const filter = (FILTERS.some((f) => f.key === sp(q.filter)) ? sp(q.filter) : "all") as FilterKey;
   const text = (sp(q.q) ?? "").trim().toLowerCase();
   const date = /^\d{4}-\d{2}-\d{2}$/.test(sp(q.date) ?? "") ? sp(q.date)! : null;
-  const [all, onOrder] = await Promise.all([allBikes(db, showroom, now), ordersOnOrder(db, showroom)]);
+  const [all, onOrderAll] = await Promise.all([allBikes(db, showroom, now), ordersOnOrder(db, showroom)]);
   const canSync = !!showroom.settings.lightspeed.shop_id;
+  // "On order" filter: exact model from the dropdown, or free text across model / customer / ref / colour / size.
+  const modelFilter = sp(q.model) ?? "";
+  const onOrderText = (sp(q.oq) ?? "").trim().toLowerCase();
+  const models = [...new Set(onOrderAll.map((o) => o.model))].sort();
+  const onOrder = onOrderAll.filter((o) => (!modelFilter || o.model === modelFilter) && (!onOrderText || [o.model, o.size, o.colour, o.customerName, o.orderRef, o.customerPhone].filter(Boolean).join(" ").toLowerCase().includes(onOrderText)));
+  const ON_ORDER_RETURN = `/app/bikes?filter=${filter}${modelFilter ? `&model=${encodeURIComponent(modelFilter)}` : ""}${onOrderText ? `&oq=${encodeURIComponent(onOrderText)}` : ""}#on-order`;
   const rows = all.filter((r) => matches(r, filter)).filter((r) => !date || r.appointment?.onDate === date).filter((r) => {
     if (!text) return true;
     const hay = [r.unit.model, r.unit.boxTag, r.unit.size, r.unit.colour, r.order?.customerName, r.order?.orderRef, r.order?.customerPhone, r.order?.customerEmail].filter(Boolean).join(" ").toLowerCase();
@@ -202,24 +208,65 @@ export default async function BikesPage({ searchParams }: { searchParams: Promis
         </Card>
         </>
       )}
-      <Card title={`On order — not arrived yet (${onOrder.length})`} className="mt-6">
-        {onOrder.length === 0 ? (
+      <Card
+        id="on-order"
+        title={`On order — not arrived yet (${onOrderAll.length}${onOrder.length !== onOrderAll.length ? `, showing ${onOrder.length}` : ""})`}
+        className="mt-6"
+        action={
+          <form action="/app/bikes#on-order" className="flex flex-wrap items-center gap-2">
+            <input type="hidden" name="filter" value={filter} />
+            <select name="model" defaultValue={modelFilter} className="input h-8 w-auto py-0 text-sm" aria-label="Model">
+              <option value="">All models</option>
+              {models.map((m) => <option key={m} value={m}>{m} ({onOrderAll.filter((o) => o.model === m).length})</option>)}
+            </select>
+            <input name="oq" defaultValue={onOrderText} placeholder="Customer, colour, size or sale #" className="input h-8 w-52 text-sm" />
+            <button type="submit" className="btn btn-sm">Filter</button>
+            {(modelFilter || onOrderText) && <Link href="/app/bikes#on-order" className="btn btn-sm">Clear</Link>}
+          </form>
+        }
+      >
+        {onOrderAll.length === 0 ? (
           <p className="text-sm text-muted">No open orders waiting for a box.{canSync && " Bike special orders sync from Lightspeed every hour."}</p>
+        ) : onOrder.length === 0 ? (
+          <p className="text-sm text-muted">Nothing matches this filter.</p>
         ) : (
-          <ul className="divide-y divide-border text-sm">
-            {onOrder.map((o) => (
-              <li key={o.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
-                <span>
-                  <Link className="font-medium hover:text-accent" href={`/app/orders/${o.id}`}>{o.model}</Link>
-                  {[o.size, o.colour].filter(Boolean).length > 0 && <span className="text-muted"> · {[o.size, o.colour].filter(Boolean).join(" · ")}</span>}
-                  <span className="text-muted"> · </span>
-                  <Link className="hover:text-accent" href={`/app/customers/${encodeURIComponent(customerKey(o))}`}>{o.customerName}</Link>
-                  <span className="text-muted"> · {o.source} {o.orderRef} · ordered {formatShortDateFromLocal(o.orderDate)} ({daysBetween(o.orderDate, today)}d ago)</span>
-                </span>
-                <Link href={`/app/arrivals?q=${encodeURIComponent(o.orderRef)}`} className="btn btn-sm">Receive</Link>
-              </li>
-            ))}
-          </ul>
+          <>
+            {/* Tick bikes, Send invites: each is received under its sale reference and the customer is texted their booking link. */}
+            <form id="onorder" action={inviteOrdersAction.bind(null, ON_ORDER_RETURN)} className="mb-3 flex flex-wrap items-center gap-3">
+              <BulkSelect total={onOrder.length} name="order_ids" label="Select bikes to invite" />
+              <div className="ml-auto flex items-center gap-2">
+                <span className="text-xs text-muted">Inviting receives the bike under its sale # and texts the booking link.</span>
+                <button type="submit" className="btn btn-primary btn-sm">Send invites</button>
+              </div>
+            </form>
+            <div className="overflow-x-auto">
+              <table className="table">
+                <thead><tr><th className="w-8"></th><th>Bike</th><th>Customer</th><th>Ordered</th><th></th></tr></thead>
+                <tbody>
+                  {onOrder.map((o) => (
+                    <tr key={o.id}>
+                      <td><input type="checkbox" name="order_ids" value={o.id} form="onorder" className="h-4 w-4" aria-label={`Select ${o.model} for ${o.customerName}`} /></td>
+                      <td>
+                        <Link className="font-medium hover:text-accent" href={`/app/orders/${o.id}`}>{o.model}</Link>
+                        <p className="text-xs text-muted">{[o.size, o.colour].filter(Boolean).join(" · ") || "—"}</p>
+                      </td>
+                      <td>
+                        <Link className="hover:text-accent" href={`/app/customers/${encodeURIComponent(customerKey(o))}`}>{o.customerName}</Link>
+                        <p className="text-xs text-muted">{o.customerPhone ?? o.customerEmail ?? <span className="text-danger">no contact</span>}</p>
+                      </td>
+                      <td className="text-xs text-muted">{formatShortDateFromLocal(o.orderDate)} · {daysBetween(o.orderDate, today)}d · {o.source} {o.orderRef}</td>
+                      <td className="text-right">
+                        <div className="flex justify-end gap-1">
+                          <form action={inviteOrdersAction.bind(null, ON_ORDER_RETURN)}><input type="hidden" name="order_ids" value={o.id} /><button type="submit" className="btn btn-sm" disabled={!o.customerEmail && !o.customerPhone}>Invite</button></form>
+                          <Link href={`/app/arrivals?q=${encodeURIComponent(o.orderRef)}`} className="btn btn-sm" title="Receive with a specific box tag first">Receive</Link>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
       </Card>
       <p className="mt-4 text-xs text-muted">Message failures and day-capacity conflicts are on <Link className="underline" href="/app/watchlist">Alerts</Link>.</p>

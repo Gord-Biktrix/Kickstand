@@ -23,9 +23,9 @@ export function Alert({ tone = "neutral", children }: { tone?: Tone; children: R
   );
 }
 
-export function Card({ children, className = "", title, action }: { children: ReactNode; className?: string; title?: ReactNode; action?: ReactNode }) {
+export function Card({ children, className = "", title, action, id }: { children: ReactNode; className?: string; title?: ReactNode; id?: string; action?: ReactNode }) {
   return (
-    <section className={`card ${className}`}>
+    <section id={id} className={`card ${className}`}>
       {(title || action) && (
         <header className="mb-3 flex items-start justify-between gap-3">
           {title && <h2 className="text-base font-semibold">{title}</h2>}
