@@ -272,8 +272,16 @@ export async function staffPrepareUnitAction(formData: FormData) {
         : [];
       if (existing) {
         const [live] = await db.select({ id: units.id }).from(units).where(and(eq(units.orderId, existing.id), inArray(units.status, ["received", "invited", "booked", "building", "ready"]))).limit(1);
-        if (live) redirect(`/app/book?unit=${live.id}`);
-        orderId = existing.id;
+        if (live && !bool(formData, "force_new")) redirect(`/app/book?unit=${live.id}`);
+        if (!live) orderId = existing.id;
+        // force_new: a second bike on the same sale. One order per bike, so number it 44511-2, -3, …
+        if (live) {
+          for (let n = 2; n < 50; n++) {
+            const candidate = `${ref}-${n}`;
+            const [taken] = await db.select({ id: orders.id }).from(orders).where(and(eq(orders.showroomId, showroom.id), eq(orders.source, source), eq(orders.orderRef, candidate))).limit(1);
+            if (!taken) { formData.set("order_ref", candidate); break; }
+          }
+        }
       }
     }
     if (!orderId) {

@@ -305,8 +305,9 @@ export default async function StaffBookPage({ searchParams }: { searchParams: Pr
             <input type="hidden" name="return_query" value={returnQuery} />
             <input type="hidden" name="ls_customer_id" value={customerID || ""} />
             <input type="hidden" name="source" value="lightspeed" />
+            {forceNew && <input type="hidden" name="force_new" value="1" />}
             <Field label="Customer name" htmlFor="customer_name"><input id="customer_name" name="customer_name" required className="input" defaultValue={ls?.name ?? ""} /></Field>
-            <Field label="Sale / order #" htmlFor="order_ref" hint="Lightspeed sale number. Any unique reference works."><input id="order_ref" name="order_ref" required className="input" defaultValue={saleID || (customerID ? `C${customerID}-${toLocalDate(now, tz)}` : "")} /></Field>
+            <Field label="Sale / order #" htmlFor="order_ref" hint={forceNew && withUnit.some((m) => m.order.orderRef === saleID) ? `Second bike on sale ${saleID} — it will be saved as ${saleID}-2 so each bike has its own number.` : "Lightspeed sale number. Any unique reference works."}><input id="order_ref" name="order_ref" required className="input" defaultValue={saleID || (customerID ? `C${customerID}-${toLocalDate(now, tz)}` : "")} /></Field>
             <Field label="Email" htmlFor="customer_email"><input id="customer_email" name="customer_email" type="email" className="input" defaultValue={ls?.email ?? ""} /></Field>
             <Field label="Mobile" htmlFor="customer_phone"><input id="customer_phone" name="customer_phone" className="input" defaultValue={ls?.phone ?? ""} /></Field>
             <Field label="Model" htmlFor="model" hint={saleLines.length > 1 ? `Sale lines: ${saleLines.map((l) => l.description).join("; ")}` : undefined}>
