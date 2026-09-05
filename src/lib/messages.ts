@@ -6,7 +6,7 @@ import { lightspeedEnabled, syncUnitToLightspeed } from "./lightspeed";
 import { logger } from "./logger";
 import { getNotifier, type Profile } from "./notifier";
 import type { ShowroomCtx } from "./showroom";
-import { formatLongDate } from "./time";
+import { daysBetween, formatLongDate, toLocalDate } from "./time";
 import { decryptToken } from "./tokens";
 
 export const METRIC = {
@@ -89,7 +89,20 @@ export function commonProperties(
     sms_consent: order?.smsConsent ?? false,
     storage_rate_display: `${formatMoney(showroom.settings.storage_rate_cents)}/day`,
     storage_cap_display: formatMoney(showroom.settings.storage_cap_cents),
+    ...orderKind(unit, order, tz),
   };
+}
+
+/**
+ * Was this a pre-order the customer waited for, or a stock bike bought days ago? Copy differs
+ * ("worth the wait" vs "we need ~48h to build it") but the event is the same, so Klaviyo branches on
+ * `order_kind`. A Lightspeed special order, or an order placed 3+ days before the invite, is a pre-order.
+ */
+export function orderKind(unit: Pick<Unit, "invitedAt" | "receivedAt">, order: Pick<Order, "orderDate" | "lsSaleLineId"> | null, tz: string): { order_kind: "preorder" | "stock" | ""; days_waited: number | "" } {
+  if (!order) return { order_kind: "", days_waited: "" };
+  const at = unit.invitedAt ?? unit.receivedAt ?? new Date();
+  const waited = Math.max(0, daysBetween(order.orderDate, toLocalDate(at, tz)));
+  return { order_kind: order.lsSaleLineId || waited >= 3 ? "preorder" : "stock", days_waited: waited };
 }
 
 export type MessageArgs = {

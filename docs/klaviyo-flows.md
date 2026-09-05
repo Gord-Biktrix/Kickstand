@@ -34,16 +34,21 @@ a pickup the customer already booked: "your second bike is here — we've added 
 ---
 
 ## 1. Pickup: Bike Arrived  — the invite (unit received, link minted)
-Extra: none beyond the common set.
+Extra: `order_kind` (`preorder` = a Lightspeed special order or an order placed 3+ days before the invite;
+`stock` = bought within the last couple of days), `days_waited`, `early_bird_deadline`, `reward_text`,
+`days_left_display`, and for a later bike that joined an existing visit `joined_existing_pickup` + `slot_start_local`.
+
+The same event covers a pre-sale someone waited weeks for and a floor bike bought yesterday, so keep the
+base copy neutral and let one line vary on `order_kind`.
 
 **SMS**
-> hi {{ person.first_name|default:"there" }}, your {{ event.model }} has arrived at {{ event.showroom }}!
-> Pick your collection time here: {{ event.booking_url }}
-> Please book by {{ event.book_by_date }}. Reply STOP to opt out.
+> {% if event.joined_existing_pickup %}Good news {{ person.first_name|default:"there" }} — your {% if event.bike_count > 1 %}other bikes are{% else %}{{ event.model }} is{% endif %} here too. We've added it to your pickup on {{ event.slot_start_local }}; nothing to do. Change it: {{ event.manage_url }}{% else %}Great news {{ person.first_name|default:"there" }}: your {% if event.bike_count > 1 %}{{ event.bike_count }} bikes are{% else %}{{ event.model }} is{% endif %} here and heading into the workshop.{% if event.order_kind == "preorder" %} Thanks for your patience — worth the wait.{% endif %} Pick a collection time and we'll have {% if event.bike_count > 1 %}them{% else %}it{% endif %} built, checked and ready: {{ event.booking_url }} Please book by {{ event.book_by_date }}.{% endif %}
 
-**Email** (subject: *Your {{ event.model }} is here — pick your collection time*)
-Same content, plus what happens at pickup (fit, 21-point check, ~30 min) and the free hold until
-`{{ event.pickup_by_date }}`. Button → `booking_url`.
+**Email** (subject: *Pick a time to collect your {% if event.bike_count > 1 %}bikes{% else %}{{ event.model }}{% endif %}*)
+Same structure as the Booked template: greeting; the neutral line above; `{% if event.order_kind == "stock" %}`
+"Builds take about 48 hours, so the earliest slots are two days out." `{% else %}` "Thanks for your patience."
+`{% endif %}`; a **Pick my collection time** button → `booking_url`; what happens at pickup; the free hold until
+`{{ event.pickup_by_date }}` and what happens after (`storage_rate_display` for terms v2); the balance line if any.
 
 ## 2. Pickup: Booked
 Extra: `slot_start_local`, `slot_end_local`, `calendar_ics_url`, `storage_estimate_display`.
