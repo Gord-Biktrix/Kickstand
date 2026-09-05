@@ -3,12 +3,13 @@ import { NavLinks } from "@/components/nav-links";
 import { hasRole, requireUser } from "@/lib/auth";
 import { signOutAction } from "./actions";
 
+// Named after the questions staff ask, not the process steps: what's today, when is everything booked,
+// where is every bike, who is this customer. Receiving a box, the build board and the alerts live inside Bikes.
 const NAV = [
   { href: "/app", label: "Today", min: "staff", exact: true },
-  { href: "/app/schedule", label: "Schedule", min: "staff" },
-  { href: "/app/arrivals", label: "Arrivals", min: "staff" },
-  { href: "/app/build", label: "Build board", min: "staff" },
-  { href: "/app/watchlist", label: "Watchlist", min: "staff" },
+  { href: "/app/schedule", label: "Appointments", min: "staff" },
+  { href: "/app/bikes", label: "Bikes", min: "staff" },
+  { href: "/app/search", label: "Customers", min: "staff" },
   { href: "/app/settings", label: "Settings", min: "manager" },
 ] as const;
 

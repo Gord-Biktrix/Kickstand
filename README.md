@@ -87,6 +87,8 @@ Lightspeed R-Series is the messaging bridge to Ikeono. Kickstand mirrors every u
 
 ## Book pickup button
 
+**Navigation (2026-09-04):** Today · Appointments (`/app/schedule`) · Bikes (`/app/bikes`, every box in the building with filters All / Needs attention / Not booked / Booked / Building / Ready and inline Send invite / Build / Ready / Book) · Customers (`/app/search`) · Settings. Receiving a box (`/app/arrivals`) is a button on Bikes; the build board (`/app/build`) redirects to Bikes → Booked; the old Watchlist is `/app/watchlist` \"Alerts\" (message failures, day-capacity conflicts) linked from the foot of Bikes.
+
 **Bike page:** leads with the Pickup card — the booked slot with Build / Ready / Start handover / Reschedule / Cancel booking beside it (or Send invite / Book for customer when unbooked), then the customer, then dates and storage folded away. Staff cancel (`staffCancelBookingAction`) offers two reasons: *customer asked* (R8 cutoff applies, customer texted a rebook link) or *shop reason* (silent, never a no-show). Staff reschedule reuses the slot picker at `/app/book?unit=…&reschedule=1` and `rescheduleBooking` (customer-requested semantics).
 
 **Search and customers:** the header search (`/app/search?q=`) matches every order and box in any status by name, phone, email, sale number, box tag or model and groups results into customers; `/app/customers/<key>` shows one person's bikes (in progress and past), unreceived orders and history. Kickstand has no customer table — `src/lib/customers.ts` groups orders by Lightspeed customer ID, then phone, then email (the key is `ls:`/`ph:`/`em:`/`nm:` + value), so an old manual order and a Lightspeed one for the same phone appear together.

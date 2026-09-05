@@ -10,7 +10,7 @@ import { getShowroom } from "@/lib/showroom";
 import { formatDateTime, formatLongDate, formatLongDateFromLocal } from "@/lib/time";
 import { grantExtensionAction, resendInviteAction, retagUnitAction, waiveStorageAction } from "../actions";
 
-export const metadata = { title: "Watchlist" };
+export const metadata = { title: "Alerts" };
 
 const RETURN = "/app/watchlist";
 
@@ -98,7 +98,7 @@ export default async function WatchlistPage({ searchParams }: { searchParams: Pr
 
   return (
     <div>
-      <PageHeader title="Watchlist" subtitle={manager ? "Needs attention · manager view — actions require a reason and are logged." : "Needs attention · read-only — ask a manager for extensions, waivers and re-tags."} />
+      <PageHeader title="Alerts" subtitle={manager ? "Needs attention · manager view — actions require a reason and are logged." : "Needs attention · read-only — ask a manager for extensions, waivers and re-tags."} />
       <Flash ok={sp(q.ok)} error={sp(q.error)} />
       <div className="space-y-6">
         <Section title="Unbooked 7+ days" rows={w.unbooked7} ctx={ctx} />

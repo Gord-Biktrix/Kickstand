@@ -11,7 +11,7 @@ import { formatDateTime, formatLongDateFromLocal, toLocalDate } from "@/lib/time
 import { defaultTermsVersion, waitlistFor } from "@/lib/units";
 import { attachUnitAction, createOrderAction, inviteAllAction, inviteUnitAction, receiveUnitAction } from "../actions";
 
-export const metadata = { title: "Arrivals" };
+export const metadata = { title: "Receive a box" };
 
 export default async function ArrivalsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const q = await searchParams;
@@ -26,7 +26,7 @@ export default async function ArrivalsPage({ searchParams }: { searchParams: Pro
 
   return (
     <div>
-      <PageHeader title="Arrivals" subtitle="Receive a box, tag it to its order, then send the invite." />
+      <PageHeader title="Receive a box" subtitle="Receive a box, tag it to its order, then send the invite." />
       <Flash ok={sp(q.ok)} error={sp(q.error)} />
       <div className="grid gap-6 lg:grid-cols-2">
         <div className="space-y-4">

@@ -3,7 +3,7 @@ import type { Db } from "@/db/client";
 import { appointments, events, orders, units, type Appointment, type Order, type Unit } from "@/db/schema";
 import { buildDeadline } from "./build-schedule";
 import { effectiveCapacity } from "./capacity";
-import { callDue, isOverdue, unitAgeDays } from "./clock";
+import { callDue, isOverdue, isReleasable, unitAgeDays } from "./clock";
 import { getCapacityConfig, type ShowroomCtx } from "./showroom";
 import { storageDueCents } from "./storage";
 import { addLocalDays, dateRange, toLocalDate, type LocalDate } from "./time";
@@ -137,6 +137,75 @@ export async function searchOrders(dbx: Db, showroom: ShowroomCtx, q: string, li
     .orderBy(desc(orders.status), asc(orders.orderDate))
     .limit(limit);
   return rows;
+}
+
+/** One row of the Bikes page: every box in the building, with what it needs next. */
+export type BikeRow = UnitView & {
+  age: number | null;
+  callDue: boolean;
+  overdue: boolean;
+  releasable: boolean;
+  storageDueCents: number;
+  /** Build deadline for a booked pickup (null when there is no booking). */
+  buildBy: LocalDate | null;
+  buildDue: boolean;
+  /** Built (or building) but the booking was cancelled — needs a new time. */
+  needsRebooking: boolean;
+  /** Booked slot is in the past and nobody recorded the outcome. */
+  unrecorded: boolean;
+  /** Anything on this row that a person should act on today. */
+  attention: boolean;
+};
+
+export const IN_BUILDING = ["received", "invited", "booked", "building", "ready", "unassigned"] as const;
+
+export async function allBikes(dbx: Db, showroom: ShowroomCtx, now = new Date()): Promise<BikeRow[]> {
+  const tz = showroom.timezone;
+  const s = showroom.settings;
+  const today = toLocalDate(now, tz);
+  const [rows, booked, { rules, overrides }] = await Promise.all([
+    dbx
+      .select({ unit: units, order: orders })
+      .from(units)
+      .leftJoin(orders, eq(orders.id, units.orderId))
+      .where(and(eq(units.showroomId, showroom.id), inArray(units.status, [...IN_BUILDING]))),
+    dbx.select().from(appointments).where(and(eq(appointments.showroomId, showroom.id), eq(appointments.status, "booked"))),
+    getCapacityConfig(dbx, showroom.id),
+  ]);
+  const apptByUnit = new Map(booked.map((a) => [a.unitId, a]));
+  const out: BikeRow[] = rows.map(({ unit, order }) => {
+    const appointment = apptByUnit.get(unit.id) ?? null;
+    const deadline = appointment ? buildDeadline(showroom, appointment, rules, overrides) : null;
+    const overdue = isOverdue(unit, now);
+    const due = callDue(unit, now, tz);
+    const releasable = isReleasable(unit, s, now) && !appointment;
+    const needsRebooking = ["building", "ready"].includes(unit.status) && !appointment;
+    const unrecorded = !!appointment && appointment.startsAt < now;
+    const buildDue = !!deadline && unit.status === "booked" && deadline.date <= today;
+    return {
+      unit,
+      order,
+      appointment,
+      age: unitAgeDays(unit, now, tz),
+      callDue: due,
+      overdue,
+      releasable,
+      storageDueCents: storageDueCents(unit, order?.termsVersion ?? 1, s, now, tz),
+      buildBy: deadline?.date ?? null,
+      buildDue,
+      needsRebooking,
+      unrecorded,
+      attention: due || overdue || releasable || needsRebooking || unrecorded || buildDue || unit.status === "received" || unit.status === "unassigned",
+    };
+  });
+  // Soonest thing first: pickups by slot, then invited by age (oldest first), then boxes not yet invited.
+  const rank = (r: BikeRow) => (r.appointment ? 0 : r.unit.status === "invited" ? 1 : r.unit.status === "received" ? 2 : 3);
+  return out.sort((a, b) => {
+    const d = rank(a) - rank(b);
+    if (d !== 0) return d;
+    if (a.appointment && b.appointment) return a.appointment.startsAt.getTime() - b.appointment.startsAt.getTime();
+    return a.unit.receivedAt.getTime() - b.unit.receivedAt.getTime();
+  });
 }
 
 export type WatchRow = UnitView & {

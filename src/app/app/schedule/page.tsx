@@ -7,7 +7,7 @@ import { weekSchedule, type ScheduleRow } from "@/lib/queries";
 import { getShowroom } from "@/lib/showroom";
 import { addLocalDays, formatShortDateFromLocal, formatTime, toLocalDate, weekdayOf } from "@/lib/time";
 
-export const metadata = { title: "Schedule" };
+export const metadata = { title: "Appointments" };
 
 type View = "pickups" | "builds";
 
@@ -56,7 +56,7 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
   return (
     <div>
       <PageHeader
-        title="Schedule"
+        title="Appointments"
         subtitle={`Week of ${formatShortDateFromLocal(monday)} · ${total} ${view === "pickups" ? "pickup" : "build"}${total === 1 ? "" : "s"} · ${showroom.name}`}
         action={
           <div className="flex flex-wrap items-center gap-2 text-sm">
