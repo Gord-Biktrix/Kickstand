@@ -46,10 +46,19 @@ export class LightspeedSpecialOrderSource implements SpecialOrderSource {
   async lines(shopID: number, since: string): Promise<SpecialOrderLine[]> {
     const [rows, categories] = await Promise.all([this.client.listOpenSpecialOrderLines(shopID, since), this.client.listCategories()]);
     const usable = rows.filter((l) => String(l.itemID ?? "0") !== "0" && String(l.customerID ?? "0") !== "0" && String(l.isWorkorder) !== "true");
-    const described = await this.client.describeSaleLines(usable);
+    const category = (l: Record<string, unknown>) => categories.get(String((l.Item as Record<string, unknown> | undefined)?.categoryID ?? "")) ?? "";
+    // Only bikes get the per-item attribute lookups (one Lightspeed call each); parts are counted and skipped.
+    const bikes = usable.filter((l) => isBikeCategory(category(l)));
+    const parts = usable.filter((l) => !isBikeCategory(category(l)));
+    const described = await this.client.describeSaleLines(bikes);
     // describeSaleLines drops lines without a description; realign by index on the kept rows.
-    const kept = usable.filter((l) => String(((l.Item as Record<string, unknown> | undefined)?.description ?? l.description ?? "")).trim());
-    return kept.map((l, i) => ({
+    const kept = bikes.filter((l) => String(((l.Item as Record<string, unknown> | undefined)?.description ?? l.description ?? "")).trim());
+    const partLines: SpecialOrderLine[] = parts.map((l) => ({
+      saleLineID: String(l.saleLineID), customerID: String(l.customerID), itemID: String(l.itemID), categoryPath: category(l),
+      createTime: String(l.createTime ?? ""), qty: Number(l.unitQuantity ?? 1),
+      bike: { description: String((l.Item as Record<string, unknown> | undefined)?.description ?? ""), qty: Number(l.unitQuantity ?? 1), model: "", size: null, colour: null },
+    }));
+    return partLines.concat(kept.map((l, i) => ({
       saleLineID: String(l.saleLineID),
       customerID: String(l.customerID),
       itemID: String(l.itemID),
@@ -57,7 +66,7 @@ export class LightspeedSpecialOrderSource implements SpecialOrderSource {
       createTime: String(l.createTime ?? ""),
       qty: Number(l.unitQuantity ?? 1),
       bike: described[i],
-    }));
+    })));
   }
   customer(customerID: string): Promise<{ name: string; email: string | null; phone: string | null }> {
     const cached = this.customers.get(customerID);
