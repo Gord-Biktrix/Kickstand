@@ -88,7 +88,7 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
                 <div className="mb-2 flex items-baseline justify-between">
                   <Link href={`/app?date=${d.date}`} className={`text-sm font-semibold ${isToday ? "text-accent" : ""}`}>{formatShortDateFromLocal(d.date)}</Link>
                   <span className="text-xs text-muted">
-                    {d.closed ? "closed" : view === "pickups" ? `${d.pickups.length}/${d.capacity}` : `${d.builds.length} build${d.builds.length === 1 ? "" : "s"}`}
+                    {d.closed ? "closed" : view === "pickups" ? <Link href={`/app/bikes?filter=booked&date=${d.date}`} title="Open this day's bookings on Bikes (bulk cancel / build)" className="hover:text-accent">{`${d.pickups.length}/${d.capacity}`}</Link> : `${d.builds.length} build${d.builds.length === 1 ? "" : "s"}`}
                   </span>
                 </div>
                 {rows.length === 0 ? (

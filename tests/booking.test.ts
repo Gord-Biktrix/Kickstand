@@ -167,6 +167,30 @@ describe("cancel, reschedule, no-show (R8, R9)", () => {
     expect(u.noShowCount).toBe(1);
   });
 
+  it("a shop cancellation never counts as a no-show but still texts a rebook link; a staff mistake is silent", async () => {
+    const { unit } = await invitedUnit();
+    const startsAt = localToUtc("2026-09-08", "12:00", TZ);
+    await bookSlot(db, { showroom, unitId: unit.id, startsAt, createdBy: "customer", now: NOW });
+    const late = new Date(startsAt.getTime() - 3 * 3_600_000);
+    notifier.sent = [];
+    const res = await cancelBooking(db, { showroom, unitId: unit.id, reason: "shop", actor: "staff-1", now: late });
+    expect(res.lateChange).toBe(false);
+    expect(res.appointment.status).toBe("cancelled");
+    expect(res.appointment.cancelledReason).toBe("shop");
+    let [u] = await db.select().from(units).where(eq(units.id, unit.id));
+    expect(u.status).toBe("invited");
+    expect(u.noShowCount).toBe(0);
+    expect(notifier.sent.map((m) => m.metric)).toEqual(["Pickup: Cancelled"]);
+    expect(notifier.sent[0].properties.cancelled_by).toBe("shop");
+
+    await bookSlot(db, { showroom, unitId: unit.id, startsAt, createdBy: "staff-1", now: NOW });
+    notifier.sent = [];
+    await cancelBooking(db, { showroom, unitId: unit.id, reason: "staff", actor: "staff-1", now: late });
+    [u] = await db.select().from(units).where(eq(units.id, unit.id));
+    expect(u.noShowCount).toBe(0);
+    expect(notifier.sent).toEqual([]);
+  });
+
   it("reschedule links old → new and keeps the counters right", async () => {
     const { unit } = await invitedUnit();
     await bookSlot(db, { showroom, unitId: unit.id, startsAt: localToUtc("2026-09-08", "12:00", TZ), createdBy: "customer", now: NOW });

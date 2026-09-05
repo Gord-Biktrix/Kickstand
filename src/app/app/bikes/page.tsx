@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { db } from "@/db/client";
+import { BulkSelect } from "@/components/bulk-select";
 import { StatusBadge } from "@/components/status-badge";
 import { Badge, Card, Empty, Flash, PageHeader } from "@/components/ui";
 import { requireUser } from "@/lib/auth";
@@ -8,8 +9,8 @@ import { formatMoney } from "@/lib/format";
 import { sp, type SearchParams } from "@/lib/flash";
 import { allBikes, type BikeRow } from "@/lib/queries";
 import { getShowroom } from "@/lib/showroom";
-import { formatDateTime, formatLongDate, formatShortDateFromLocal, toLocalDate } from "@/lib/time";
-import { inviteUnitAction, markReadyAction, startBuildAction } from "../actions";
+import { formatDateTime, formatLongDate, formatLongDateFromLocal, formatShortDateFromLocal, toLocalDate } from "@/lib/time";
+import { bulkBikesAction, inviteUnitAction, markReadyAction, startBuildAction } from "../actions";
 
 export const metadata = { title: "Bikes" };
 
@@ -44,14 +45,15 @@ export default async function BikesPage({ searchParams }: { searchParams: Promis
   const today = toLocalDate(now, tz);
   const filter = (FILTERS.some((f) => f.key === sp(q.filter)) ? sp(q.filter) : "all") as FilterKey;
   const text = (sp(q.q) ?? "").trim().toLowerCase();
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(sp(q.date) ?? "") ? sp(q.date)! : null;
   const all = await allBikes(db, showroom, now);
-  const rows = all.filter((r) => matches(r, filter)).filter((r) => {
+  const rows = all.filter((r) => matches(r, filter)).filter((r) => !date || r.appointment?.onDate === date).filter((r) => {
     if (!text) return true;
     const hay = [r.unit.model, r.unit.boxTag, r.unit.size, r.unit.colour, r.order?.customerName, r.order?.orderRef, r.order?.customerPhone, r.order?.customerEmail].filter(Boolean).join(" ").toLowerCase();
     return hay.includes(text);
   });
   const counts = Object.fromEntries(FILTERS.map((f) => [f.key, all.filter((r) => matches(r, f.key)).length])) as Record<FilterKey, number>;
-  const RETURN = `/app/bikes?filter=${filter}${text ? `&q=${encodeURIComponent(text)}` : ""}`;
+  const RETURN = `/app/bikes?filter=${filter}${text ? `&q=${encodeURIComponent(text)}` : ""}${date ? `&date=${date}` : ""}`;
 
   const next = (r: BikeRow) => {
     const { unit, appointment } = r;
@@ -87,6 +89,11 @@ export default async function BikesPage({ searchParams }: { searchParams: Promis
         }
       />
       <Flash ok={sp(q.ok)} error={sp(q.error)} />
+      {date && (
+        <p className="mb-3 text-sm">
+          Showing bookings for <strong>{formatLongDateFromLocal(date)}</strong>. <Link className="underline" href={`/app/bikes?filter=${filter}`}>Show all days</Link>
+        </p>
+      )}
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <nav aria-label="Filter" className="flex flex-wrap gap-1">
@@ -106,16 +113,34 @@ export default async function BikesPage({ searchParams }: { searchParams: Promis
       {rows.length === 0 ? (
         <Empty>{all.length === 0 ? <>No bikes in the building. <Link className="underline" href="/app/arrivals">Receive a box</Link> to start.</> : "Nothing matches this filter."}</Empty>
       ) : (
+        <>
+        {/* Bulk bar: the row checkboxes below belong to this form via form="bulk", so the per-row buttons keep their own forms. */}
+        <form id="bulk" action={bulkBikesAction.bind(null, RETURN)} className="card mb-3 flex flex-wrap items-center gap-3 !py-2">
+          <BulkSelect total={rows.length} />
+          <div className="ml-auto flex flex-wrap items-center gap-2">
+            <button type="submit" name="op" value="invite" className="btn btn-sm">Send invites</button>
+            <button type="submit" name="op" value="build" className="btn btn-sm">Mark building</button>
+            <button type="submit" name="op" value="ready" className="btn btn-sm">Mark ready</button>
+            <span className="mx-1 h-6 border-l border-border" aria-hidden />
+            <select name="reason" className="input h-8 py-0 text-sm" defaultValue="shop" aria-label="Cancellation reason">
+              <option value="shop">Shop closed / can&apos;t make it — text a rebook link, no penalty</option>
+              <option value="customer">Customer asked — text a rebook link, cutoff applies</option>
+              <option value="staff">Mistake — no message, no penalty</option>
+            </select>
+            <button type="submit" name="op" value="cancel" className="btn btn-danger btn-sm" formNoValidate>Cancel bookings</button>
+          </div>
+        </form>
         <Card className="overflow-x-auto p-0">
           <table className="table">
             <thead>
-              <tr><th>Bike</th><th>Customer</th><th>Status</th><th>Next</th><th>Flags</th><th></th></tr>
+              <tr><th className="w-8"></th><th>Bike</th><th>Customer</th><th>Status</th><th>Next</th><th>Flags</th><th></th></tr>
             </thead>
             <tbody>
               {rows.map((r) => {
                 const { unit, order } = r;
                 return (
                   <tr key={unit.id} className={r.attention ? "bg-warn-soft/40" : undefined}>
+                    <td><input type="checkbox" name="unit_ids" value={unit.id} form="bulk" className="h-4 w-4" aria-label={`Select ${unit.model} box ${unit.boxTag}`} /></td>
                     <td>
                       <Link href={`/app/units/${unit.id}`} className="font-medium hover:text-accent">{unit.model}</Link>
                       <p className="text-xs text-muted">{[unit.size, unit.colour].filter(Boolean).join(" · ")}{[unit.size, unit.colour].some(Boolean) && " · "}box {unit.boxTag}</p>
@@ -160,6 +185,7 @@ export default async function BikesPage({ searchParams }: { searchParams: Promis
             </tbody>
           </table>
         </Card>
+        </>
       )}
       <p className="mt-4 text-xs text-muted">Message failures and day-capacity conflicts are on <Link className="underline" href="/app/watchlist">Alerts</Link>.</p>
     </div>

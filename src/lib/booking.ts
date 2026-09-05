@@ -240,8 +240,9 @@ export async function bookSlot(dbx: Db, args: BookArgs) {
 export type CancelArgs = {
   showroom: ShowroomCtx;
   unitId: string;
-  /** 'customer' applies the R8 cutoff; 'deferred' and 'staff' never count as a no-show. */
-  reason: "customer" | "staff" | "deferred";
+  /** 'customer' applies the R8 cutoff. 'shop' (we closed / can't make the slot) texts the customer a
+   *  rebook link with no penalty. 'deferred' and 'staff' never count as a no-show and send nothing. */
+  reason: "customer" | "shop" | "staff" | "deferred";
   actor: string;
   now?: Date;
   /** Reschedule sets this so no "Cancelled" message is queued. */
@@ -304,7 +305,7 @@ export async function cancelBookingTx(
   });
 
   const updatedUnit: Unit = { ...unit, ...unitPatch, noShowCount };
-  if (!args.silent && reason === "customer") {
+  if (!args.silent && (reason === "customer" || reason === "shop")) {
     outbox.push({
       showroom,
       unit: updatedUnit,
@@ -313,6 +314,8 @@ export async function cancelBookingTx(
       dedupeKey: active.id,
       actor,
       extra: {
+        // Klaviyo branches on this: "you cancelled" vs "sorry, we had to cancel — please pick a new time".
+        cancelled_by: reason,
         slot_start_local: formatDateTime(active.startsAt, tz),
         days_left_display: unit.pickupBy
           ? `${Math.max(0, Math.ceil(hoursBetween(now, unit.pickupBy) / 24))} days`

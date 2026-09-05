@@ -3,7 +3,7 @@
 import { and, eq } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { db } from "@/db/client";
-import { capacityOverrides, capacityRules, orders } from "@/db/schema";
+import { capacityOverrides, capacityRules, orders, units } from "@/db/schema";
 import { requireActor, signOut } from "@/lib/auth";
 import { BOOKING_ERROR_TEXT, BookingError, bookSlot, cancelBooking, recordNoShow, rescheduleBooking } from "@/lib/booking";
 import { validateImport } from "@/lib/csv";
@@ -312,16 +312,60 @@ export async function staffPrepareUnitAction(formData: FormData) {
 
 /** Staff cancels on the customer's behalf. "customer" applies the late-change rule and texts the
  *  customer a cancellation; "staff" is silent and never counts as a no-show. */
+type StaffCancelReason = "customer" | "shop" | "staff";
+function cancelReason(v: string): StaffCancelReason {
+  return v === "staff" || v === "shop" ? v : "customer";
+}
+
 export async function staffCancelBookingAction(unitId: string, returnTo: string, formData: FormData) {
-  const reason = str(formData, "reason") === "staff" ? "staff" : "customer";
+  const reason = cancelReason(str(formData, "reason"));
   return run(safeReturn(returnTo, `/app/units/${unitId}`), async () => {
     const user = await requireActor("staff");
     const showroom = await getShowroom(db);
     const res = await cancelBooking(db, { showroom, unitId, reason, actor: user.id });
     if (reason === "staff") return "Booking cancelled. No message was sent; the bike is back to invited.";
+    if (reason === "shop") return "Booking cancelled. The customer has been told we had to cancel and sent a link to pick a new time.";
     return res.lateChange
       ? "Booking cancelled inside the cutoff — it counts as a missed pickup. The customer has been sent a rebook link."
       : "Booking cancelled. The customer has been sent a message with their rebook link.";
+  });
+}
+
+/**
+ * Bulk actions from the Bikes page: the selected unit ids arrive as repeated `unit_ids` fields
+ * (checkboxes bound to the form with the `form` attribute) and `op` says what to do. Each bike is
+ * processed on its own so one failure (no contact details, not booked, …) never blocks the rest;
+ * the flash reports how many went through and why the others were skipped.
+ */
+export async function bulkBikesAction(returnTo: string, formData: FormData) {
+  const ids = formData.getAll("unit_ids").map(String).filter(Boolean);
+  const op = str(formData, "op");
+  const reason = cancelReason(str(formData, "reason"));
+  return run(safeReturn(returnTo, "/app/bikes"), async () => {
+    const user = await requireActor("staff");
+    const showroom = await getShowroom(db);
+    if (ids.length === 0) throw new Error("Tick at least one bike first.");
+    let done = 0;
+    const skipped: string[] = [];
+    for (const unitId of ids) {
+      try {
+        if (op === "invite") await inviteUnit(db, { showroom, unitId, actor: user.id });
+        else if (op === "build") await startBuild(db, { showroom, unitId, actor: user.id });
+        else if (op === "ready") await markReady(db, { showroom, unitId, actor: user.id });
+        else if (op === "cancel") await cancelBooking(db, { showroom, unitId, reason, actor: user.id });
+        else throw new Error(`Unknown bulk action "${op}"`);
+        done++;
+      } catch (err) {
+        const [u] = await db.select({ boxTag: units.boxTag }).from(units).where(eq(units.id, unitId));
+        skipped.push(`${u?.boxTag ?? unitId}: ${err instanceof BookingError ? BOOKING_ERROR_TEXT[err.code] : errorMessage(err)}`);
+      }
+    }
+    const verb = { invite: "Invites sent", build: "Marked building", ready: "Marked ready", cancel: "Bookings cancelled" }[op] ?? "Done";
+    const tail = skipped.length ? ` · skipped ${skipped.length}: ${skipped.slice(0, 3).join("; ")}${skipped.length > 3 ? "; …" : ""}` : "";
+    if (op === "cancel" && done > 0) {
+      return `${verb}: ${done}${reason === "staff" ? " (no messages sent)" : reason === "shop" ? " (customers told we had to cancel, with a rebook link)" : " (customers sent a rebook link)"}${tail}`;
+    }
+    return `${verb}: ${done}${tail}`;
   });
 }
 

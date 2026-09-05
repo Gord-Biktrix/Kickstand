@@ -142,7 +142,8 @@ export default async function UnitPage({ params, searchParams }: { params: Promi
                   <Field label="Who is cancelling?" htmlFor="cancel_reason">
                     <select id="cancel_reason" name="reason" className="input" defaultValue="customer">
                       <option value="customer">Customer asked — text them a rebook link</option>
-                      <option value="staff">Shop reason — no message, no penalty</option>
+                      <option value="shop">We have to cancel — text a rebook link, no penalty</option>
+                      <option value="staff">Mistake — no message, no penalty</option>
                     </select>
                   </Field>
                   <p className="text-xs text-muted">Customer cancellations inside {s.reschedule_cutoff_hours} hours count as a missed pickup. The slot is freed either way and the bike goes back to invited.</p>
