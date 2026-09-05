@@ -52,8 +52,41 @@ Extra: `slot_start_local`, `slot_end_local`, `calendar_ics_url`, `storage_estima
 > you're booked to collect your {{ event.model }} on {{ event.slot_start_local }} at {{ event.showroom }}, {{ event.showroom_address }}.
 > {% if event.balance_display %}Balance due at pickup: {{ event.balance_display }}. {% endif %}Change or cancel: {{ event.manage_url }}
 
-**Email** (subject: *Booked: {{ event.slot_start_local }}*) — add the calendar link `calendar_ics_url`,
-what to bring, and the balance line if present.
+**Email**
+
+Subject: `Your pickup is booked — {{ event.slot_start_local }}`
+Preview text: `{% if event.bike_count > 1 %}{{ event.bike_count }} bikes{% else %}{{ event.model }}{% endif %} at {{ event.showroom }}. Everything you need to know is inside.`
+
+Body (use a simple one-column template; headings in bold, one button):
+
+> Hi {{ person.first_name|default:"there" }},
+>
+> **You're booked.** {% if event.bike_count > 1 %}Your {{ event.bike_count }} bikes ({{ event.bikes|join:", " }}) are{% else %}Your {{ event.model }}{% if event.colour %} in {{ event.colour }}{% endif %} is{% endif %} being built for you and will be ready to collect on:
+>
+> **{{ event.slot_start_local }}**
+> {{ event.showroom }} · {{ event.showroom_address }}
+>
+> [Add to calendar]({{ event.calendar_ics_url }})
+>
+> **What happens at pickup** — allow about 45 minutes. We'll fit the bike to you, walk through the display, charging and locking, and do the 21-point safety check with you.
+>
+> **Please bring**
+> - Photo ID
+> - Your order confirmation (this email is fine)
+> {% if event.balance_display %}- The card you'd like to pay the remaining balance with — **{{ event.balance_display }}** is due at pickup{% endif %}
+>
+> **Need to change it?** You can reschedule or cancel up to 24 hours before your slot, free of charge, here:
+> [Manage my pickup]({{ event.manage_url }})
+> Inside 24 hours a change counts as a missed pickup, so please give us a shout early.
+>
+> Questions? Call {{ event.showroom }} on {{ event.showroom_phone }} or reply to this email.
+>
+> See you soon,
+> The Biktrix team
+
+Notes: button links use `event.manage_url` and `event.calendar_ics_url` (both absolute). Mark the email
+**transactional** too, Smart Sending off. Use the same body for **Pickup: Rescheduled** with the heading
+"Your pickup has moved" and a line "Previously: {{ event.old_slot_start_local }}".
 
 ## 3. Pickup: Reminder Day Before
 Extra: `slot_start_local`, `bring_list`, `built` (true/false).
