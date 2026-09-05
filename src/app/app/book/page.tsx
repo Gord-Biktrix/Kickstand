@@ -233,13 +233,15 @@ export default async function StaffBookPage({ searchParams }: { searchParams: Pr
       <div>
         <PageHeader title="Book pickup" />
         <Alert tone="ok">
-          Found {withUnit[0].order.customerName}&apos;s {withUnit[0].unit.model} (box {withUnit[0].unit.boxTag}).{" "}
-          <Link className="underline" href={`/app/book?unit=${withUnit[0].unit.id}`}>Continue to the slot picker →</Link>
+          {withUnit[0].order.customerName} already has a bike in Kickstand: <strong>{withUnit[0].unit.model}</strong> from sale {withUnit[0].order.orderRef}
+          {withUnit[0].unit.status === "booked" ? ", booked" : `, ${withUnit[0].unit.status}`}.
+          {saleID ? <> Lightspeed sent sale {saleID}.</> : <> Lightspeed sent no sale number with this press.</>}
         </Alert>
-        <p className="mt-3 flex flex-wrap gap-4 text-sm text-muted">
-          <span>Different bike? <Link className="underline" href={`/app/book?${returnQuery}&new=1`}>Start a new pickup for this customer →</Link></span>
-          <Link className="underline" href={`/app/customers/${encodeURIComponent(customerKey(withUnit[0].order))}`}>View customer</Link>
-        </p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <Link className="btn btn-primary" href={`/app/book?unit=${withUnit[0].unit.id}`}>Yes, this bike — continue</Link>
+          <Link className="btn" href={`/app/book?${returnQuery}&new=1`}>No, a different bike — new pickup</Link>
+          <Link className="btn" href={`/app/customers/${encodeURIComponent(customerKey(withUnit[0].order))}`}>View customer</Link>
+        </div>
       </div>
     );
   }
