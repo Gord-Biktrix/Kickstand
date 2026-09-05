@@ -115,19 +115,20 @@ export default async function BikesPage({ searchParams }: { searchParams: Promis
       ) : (
         <>
         {/* Bulk bar: the row checkboxes below belong to this form via form="bulk", so the per-row buttons keep their own forms. */}
-        <form id="bulk" action={bulkBikesAction.bind(null, RETURN)} className="card mb-3 flex flex-wrap items-center gap-3 !py-2">
+        <form id="bulk" action={bulkBikesAction.bind(null, RETURN)} className="card mb-3 flex flex-wrap items-center gap-x-4 gap-y-2 !py-2">
           <BulkSelect total={rows.length} />
-          <div className="ml-auto flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
             <button type="submit" name="op" value="invite" className="btn btn-sm">Send invites</button>
             <button type="submit" name="op" value="build" className="btn btn-sm">Mark building</button>
             <button type="submit" name="op" value="ready" className="btn btn-sm">Mark ready</button>
-            <span className="mx-1 h-6 border-l border-border" aria-hidden />
-            <select name="reason" className="input h-8 py-0 text-sm" defaultValue="shop" aria-label="Cancellation reason">
-              <option value="shop">Shop closed / can&apos;t make it — text a rebook link, no penalty</option>
-              <option value="customer">Customer asked — text a rebook link, cutoff applies</option>
-              <option value="staff">Mistake — no message, no penalty</option>
-            </select>
+          </div>
+          <div className="flex items-center gap-2">
             <button type="submit" name="op" value="cancel" className="btn btn-danger btn-sm" formNoValidate>Cancel bookings</button>
+            <select name="reason" className="input h-8 w-auto max-w-[16rem] py-0 text-sm" defaultValue="shop" aria-label="Cancellation reason">
+              <option value="shop">Shop closed — rebook link, no penalty</option>
+              <option value="customer">Customer asked — cutoff applies</option>
+              <option value="staff">Mistake — silent, no penalty</option>
+            </select>
           </div>
         </form>
         <Card className="overflow-x-auto p-0">
