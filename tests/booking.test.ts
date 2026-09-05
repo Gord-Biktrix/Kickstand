@@ -191,6 +191,19 @@ describe("cancel, reschedule, no-show (R8, R9)", () => {
     expect(notifier.sent).toEqual([]);
   });
 
+  it("rescheduling to the same time is a no-op: no cancel, no new row, no message", async () => {
+    const { unit } = await invitedUnit();
+    const startsAt = localToUtc("2026-09-08", "12:00", TZ);
+    await bookSlot(db, { showroom, unitId: unit.id, startsAt, createdBy: "customer", now: NOW });
+    notifier.sent = [];
+    const res = await rescheduleBooking(db, { showroom, unitId: unit.id, startsAt, actor: "customer", now: NOW });
+    expect(res.unchanged).toBe(true);
+    expect(notifier.sent).toEqual([]);
+    const rows = await db.select().from(appointments).where(eq(appointments.unitId, unit.id));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].status).toBe("booked");
+  });
+
   it("reschedule links old → new and keeps the counters right", async () => {
     const { unit } = await invitedUnit();
     await bookSlot(db, { showroom, unitId: unit.id, startsAt: localToUtc("2026-09-08", "12:00", TZ), createdBy: "customer", now: NOW });

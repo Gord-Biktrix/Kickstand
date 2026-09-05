@@ -1,6 +1,11 @@
+import { Suspense } from "react";
+import { PendingIndicator } from "@/components/pending-indicator";
+
 export default function CustomerLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex flex-1 flex-col">
+      {/* Same feedback as the staff app: the pressed button spins and a bar runs until the page changes. */}
+      <Suspense fallback={null}><PendingIndicator /></Suspense>
       <header className="border-b border-border bg-card">
         <div className="mx-auto flex w-full max-w-md items-center justify-between px-4 py-3">
           <span className="text-sm font-semibold uppercase tracking-widest text-accent">Biktrix</span>

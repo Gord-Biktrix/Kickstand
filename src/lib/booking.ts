@@ -420,6 +420,11 @@ export async function rescheduleBooking(dbx: Db, args: RescheduleArgs) {
     // The whole visit moves: cancel every bike's appointment (silently), rebook them together at the new time.
     const current = await activeAppointment(tx, args.unitId);
     if (!current) throw new BookingError("NO_APPOINTMENT");
+    // Same time again (a double-submit, or the customer re-confirming): nothing to move, nothing to send.
+    if (current.startsAt.getTime() === args.startsAt.getTime()) {
+      const { unit, order } = await loadUnitForUpdate(tx, args.unitId);
+      return { appointment: current, unit, order, previous: current, lateChange: false, unchanged: true as const };
+    }
     const visit = await groupUnitIds(tx, current);
     const newGroupId = visit.length > 1 ? randomUUID() : undefined;
     const summary = await describeUnits(tx, visit);
@@ -470,7 +475,7 @@ export async function rescheduleBooking(dbx: Db, args: RescheduleArgs) {
         calendar_ics_url: `${baseUrl()}/api/ics/${booked.appointment.id}`,
       },
     });
-    return { ...booked, previous: cancelled.appointment, lateChange: cancelled.lateChange };
+    return { ...booked, previous: cancelled.appointment, lateChange: cancelled.lateChange, unchanged: false as const };
   });
   await flushOutbox(dbx, outbox);
   return result;
