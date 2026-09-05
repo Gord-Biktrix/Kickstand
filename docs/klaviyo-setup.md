@@ -4,6 +4,9 @@ The API key is already in Vercel (health check shows `klaviyo_key: true`). Every
 Kickstand sends is an *event* in Klaviyo named `Pickup: …`. Klaviyo **flows** turn those events into texts
 and emails. Copy for each flow is in `klaviyo-flows.md`.
 
+## 0. Register the sending number (blocks everything else)
+Klaviyo → Settings → SMS: complete the **toll-free number registration** for the Biktrix Canada number. Until it is approved (up to 10 days) Klaviyo will not deliver any SMS to Canadian/US numbers, however the flows are set up. The SMS editor shows a red "Finish registering your toll free number" banner while this is pending.
+
 ## 1. Make the events exist
 Klaviyo only lists a metric in the flow builder after it has received one event of that kind.
 1. In Kickstand, book a test bike with **your own phone**, ticking "agrees to text reminders". → fires `Pickup: Booked`.

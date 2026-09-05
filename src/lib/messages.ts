@@ -40,8 +40,17 @@ export function metricEventType(metric: string): string {
   return "msg_" + metricKey(metric);
 }
 
+/**
+ * Public origin for customer links. APP_BASE_URL wins; when it is unset *or blank* (an empty
+ * Vercel variable produced texts with a bare "/b/…" path on 2026-09-05) fall back to the Vercel
+ * production host, then localhost.
+ */
 export function baseUrl(): string {
-  return (process.env.APP_BASE_URL ?? "http://localhost:3000").replace(/\/$/, "");
+  const configured = (process.env.APP_BASE_URL ?? "").trim();
+  if (configured) return configured.replace(/\/$/, "");
+  const vercel = (process.env.VERCEL_PROJECT_PRODUCTION_URL ?? process.env.VERCEL_URL ?? "").trim();
+  if (vercel) return `https://${vercel.replace(/^https?:\/\//, "")}`.replace(/\/$/, "");
+  return "http://localhost:3000";
 }
 
 export function customerUrls(unit: Pick<Unit, "tokenEnc">) {

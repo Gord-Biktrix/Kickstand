@@ -21,6 +21,10 @@ Use `{{ person.first_name|default:"there" }}` for the name.
 
 Links are long; let Klaviyo shorten them (message setting "Shorten links").
 
+**Sender prefix:** Klaviyo automatically prepends the account name ("Biktrix Canada:") to every SMS, so do **not** start the copy with "Biktrix:" — drop that word from the drafts below.
+
+**Before any text can go out:** Klaviyo → Settings → SMS → finish the **toll-free number registration** (business details form). Until Klaviyo shows the number as registered, it will not deliver SMS to Canadian or US numbers; the editor shows a red banner about it. Registration can take up to 10 days — start it now.
+
 **Several bikes in one visit:** every event also carries `bike_count` (number) and `bikes` (list, e.g.
 "Juggernaut Lite Plus 2.0 · Green"). Write copy that reads well either way:
 `{% if event.bike_count > 1 %}your {{ event.bike_count }} bikes{% else %}your {{ event.model }}{% endif %}`.
@@ -33,7 +37,7 @@ a pickup the customer already booked: "your second bike is here — we've added 
 Extra: none beyond the common set.
 
 **SMS**
-> Biktrix: hi {{ person.first_name|default:"there" }}, your {{ event.model }} has arrived at {{ event.showroom }}!
+> hi {{ person.first_name|default:"there" }}, your {{ event.model }} has arrived at {{ event.showroom }}!
 > Pick your collection time here: {{ event.booking_url }}
 > Please book by {{ event.book_by_date }}. Reply STOP to opt out.
 
@@ -45,7 +49,7 @@ Same content, plus what happens at pickup (fit, 21-point check, ~30 min) and the
 Extra: `slot_start_local`, `slot_end_local`, `calendar_ics_url`, `storage_estimate_display`.
 
 **SMS** (quiet hours OFF)
-> Biktrix: you're booked to collect your {{ event.model }} on {{ event.slot_start_local }} at {{ event.showroom }}, {{ event.showroom_address }}.
+> you're booked to collect your {{ event.model }} on {{ event.slot_start_local }} at {{ event.showroom }}, {{ event.showroom_address }}.
 > {% if event.balance_display %}Balance due at pickup: {{ event.balance_display }}. {% endif %}Change or cancel: {{ event.manage_url }}
 
 **Email** (subject: *Booked: {{ event.slot_start_local }}*) — add the calendar link `calendar_ics_url`,
@@ -55,14 +59,14 @@ what to bring, and the balance line if present.
 Extra: `slot_start_local`, `bring_list`, `built` (true/false).
 
 **SMS**
-> Biktrix: see you tomorrow, {{ event.slot_start_local }}, for your {{ event.model }} at {{ event.showroom }}.
+> see you tomorrow, {{ event.slot_start_local }}, for your {{ event.model }} at {{ event.showroom }}.
 > Bring: {{ event.bring_list }}. Need to change it? {{ event.manage_url }}
 
 ## 4. Pickup: Rescheduled
 Extra: `old_slot_start_local`, `slot_start_local`, `slot_end_local`, `late_change`, `calendar_ics_url`.
 
 **SMS** (quiet hours OFF)
-> Biktrix: your pickup has moved to {{ event.slot_start_local }} (was {{ event.old_slot_start_local }}).
+> your pickup has moved to {{ event.slot_start_local }} (was {{ event.old_slot_start_local }}).
 > Manage: {{ event.manage_url }}
 
 ## 5. Pickup: Cancelled
@@ -70,17 +74,17 @@ Extra: `cancelled_by` (`customer` or `shop`), `slot_start_local`, `days_left_dis
 Use a **conditional split on `event.cancelled_by`**:
 
 **SMS — `cancelled_by` = shop** (quiet hours OFF)
-> Biktrix: sorry — we've had to cancel your pickup on {{ event.slot_start_local }}. Your {{ event.model }} is safe with us.
+> sorry — we've had to cancel your pickup on {{ event.slot_start_local }}. Your {{ event.model }} is safe with us.
 > Please pick a new time: {{ event.rebook_url }}
 
 **SMS — `cancelled_by` = customer**
-> Biktrix: your pickup on {{ event.slot_start_local }} is cancelled. Your {{ event.model }} is held until {{ event.pickup_by_date }} — rebook any time: {{ event.rebook_url }}
+> your pickup on {{ event.slot_start_local }} is cancelled. Your {{ event.model }} is held until {{ event.pickup_by_date }} — rebook any time: {{ event.rebook_url }}
 
 ## 6. Pickup: Missed  — no-show recorded
 Extra: `slot_start_local`, `no_show_count`.
 
 **SMS**
-> Biktrix: we missed you at {{ event.slot_start_local }}. Your {{ event.model }} is still here — book a new time: {{ event.rebook_url }}
+> we missed you at {{ event.slot_start_local }}. Your {{ event.model }} is still here — book a new time: {{ event.rebook_url }}
 > Free hold ends {{ event.pickup_by_date }}.
 
 ---

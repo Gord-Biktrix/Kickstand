@@ -4,7 +4,7 @@ import type { Db, Tx } from "@/db/client";
 import { appointments, dayCounters, orders, units, type Appointment, type Order, type Unit } from "@/db/schema";
 import { effectiveCapacity, slotStarts } from "./capacity";
 import { logEvent } from "./events";
-import { flushOutbox, METRIC, type Outbox } from "./messages";
+import { baseUrl, flushOutbox, METRIC, type Outbox } from "./messages";
 import { getCapacityConfig, type ShowroomCtx } from "./showroom";
 import { storageEstimateCents } from "./storage";
 import {
@@ -252,7 +252,7 @@ export async function bookSlotTx(
       extra: {
         slot_start_local: formatDateTime(startsAt, tz),
         slot_end_local: formatDateTime(endsAt, tz),
-        calendar_ics_url: `${(process.env.APP_BASE_URL ?? "").replace(/\/$/, "")}/api/ics/${appointment.id}`,
+        calendar_ics_url: `${baseUrl()}/api/ics/${appointment.id}`,
         storage_estimate_display: formatMoneyOrEmpty(storageEstimate),
         bike_count: 1,
         bikes: [[unit.model, unit.colour, unit.size].filter(Boolean).join(" · ")],
@@ -467,7 +467,7 @@ export async function rescheduleBooking(dbx: Db, args: RescheduleArgs) {
         slot_start_local: formatDateTime(booked.appointment.startsAt, tz),
         slot_end_local: formatDateTime(booked.appointment.endsAt, tz),
         late_change: cancelled.lateChange,
-        calendar_ics_url: `${(process.env.APP_BASE_URL ?? "").replace(/\/$/, "")}/api/ics/${booked.appointment.id}`,
+        calendar_ics_url: `${baseUrl()}/api/ics/${booked.appointment.id}`,
       },
     });
     return { ...booked, previous: cancelled.appointment, lateChange: cancelled.lateChange };
