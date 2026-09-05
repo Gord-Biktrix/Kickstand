@@ -11,23 +11,22 @@ export const SHOWROOM_COOKIE = "ks_showroom";
 
 export type UserLike = Pick<StaffUser, "role" | "showroomId"> | null;
 
-/** Managers and admins, and anyone without a home showroom, may switch. Plain staff with a home are pinned. */
+/** Store access is by role: admins see every store and may switch; managers and staff are pinned to their home store. */
 export function canSwitchShowroom(user: UserLike): boolean {
-  if (!user) return false;
-  return user.showroomId === null || hasRole(user.role, "manager");
+  return !!user && hasRole(user.role, "admin");
 }
 
 /**
- * 1. Plain staff with a home showroom are pinned to it.
- * 2. Otherwise the cookie's slug, when it names a real showroom.
- * 3. Otherwise the user's home showroom, else the default slug, else the first showroom.
+ * 1. Managers and staff: their home showroom (staff_users.showroom_id); the default when none is set.
+ * 2. Admins: the cookie's slug when it names a real showroom, else their home, else the default.
  */
 export function pickShowroom(all: ShowroomCtx[], user: UserLike, cookieSlug: string | null | undefined, defaultSlug: string): ShowroomCtx {
   if (all.length === 0) throw new Error("No showrooms — run the seed");
   const home = user?.showroomId ? all.find((s) => s.id === user.showroomId) ?? null : null;
-  if (home && !canSwitchShowroom(user)) return home;
+  const fallback = home ?? all.find((s) => s.slug === defaultSlug) ?? all[0];
+  if (!canSwitchShowroom(user)) return fallback;
   const fromCookie = cookieSlug ? all.find((s) => s.slug === cookieSlug) ?? null : null;
-  return fromCookie ?? home ?? all.find((s) => s.slug === defaultSlug) ?? all[0];
+  return fromCookie ?? fallback;
 }
 
 /** The showroom whose Lightspeed shop id matches the button's `shopID`, or null when no store is live there yet. */

@@ -20,17 +20,22 @@ describe("showroom selection", () => {
     van = all.find((s) => s.slug === "vancouver")!;
   });
 
-  it("pins plain staff to their home store; managers and homeless users follow the cookie", () => {
+  it("pins staff and managers to their home store; only admins follow the cookie", () => {
     const all = [van, sask];
     const staffSask = { role: "staff" as const, showroomId: sask.id };
     expect(pickShowroom(all, staffSask, "vancouver", "vancouver").slug).toBe("saskatoon");
     expect(canSwitchShowroom(staffSask)).toBe(false);
     const managerSask = { role: "manager" as const, showroomId: sask.id };
-    expect(pickShowroom(all, managerSask, "vancouver", "vancouver").slug).toBe("vancouver");
-    expect(pickShowroom(all, managerSask, null, "vancouver").slug).toBe("saskatoon"); // home wins over default
+    expect(canSwitchShowroom(managerSask)).toBe(false);
+    expect(pickShowroom(all, managerSask, "vancouver", "vancouver").slug).toBe("saskatoon"); // cookie ignored
+    const managerNoHome = { role: "manager" as const, showroomId: null };
+    expect(pickShowroom(all, managerNoHome, "saskatoon", "vancouver").slug).toBe("vancouver"); // default, no switching
     const admin = { role: "admin" as const, showroomId: null };
+    expect(canSwitchShowroom(admin)).toBe(true);
     expect(pickShowroom(all, admin, "saskatoon", "vancouver").slug).toBe("saskatoon");
     expect(pickShowroom(all, admin, "nope", "vancouver").slug).toBe("vancouver");
+    const adminHomeSask = { role: "admin" as const, showroomId: sask.id };
+    expect(pickShowroom(all, adminHomeSask, null, "vancouver").slug).toBe("saskatoon"); // home before default
     expect(pickShowroom(all, null, null, "vancouver").slug).toBe("vancouver");
   });
 

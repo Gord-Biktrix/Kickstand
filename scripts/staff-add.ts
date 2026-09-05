@@ -12,7 +12,7 @@ import { showrooms, staffUsers } from "../src/db/schema";
  *   … --deactivate                         (keeps history, blocks sign-in)
  *
  * The email must also pass the allow-list (AUTH_ALLOWED_DOMAIN / AUTH_ALLOWED_EMAILS) before the
- * magic link is issued. Plain "staff" with a home showroom are pinned to that store in the app.
+ * magic link is issued. Give every manager and staff member a --showroom; only admins should use "all".
  */
 function arg(name: string, fallback?: string) {
   const i = process.argv.indexOf(`--${name}`);

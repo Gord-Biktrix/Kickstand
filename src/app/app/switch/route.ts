@@ -18,7 +18,7 @@ export async function GET(req: NextRequest) {
   const target = (await listShowrooms(db)).find((s) => s.slug === slug);
   if (!target) return NextResponse.redirect(new URL("/app?error=" + encodeURIComponent("Unknown showroom."), url));
   if (!canSwitchShowroom(user) && user.showroomId !== target.id) {
-    return NextResponse.redirect(new URL("/app?error=" + encodeURIComponent(`You're signed in for a different store. Ask a manager to move your account to ${target.name}.`), url));
+    return NextResponse.redirect(new URL("/app?error=" + encodeURIComponent(`Your account is for one store. Ask an admin to move it to ${target.name}.`), url));
   }
   const res = NextResponse.redirect(new URL(safeNext, url));
   res.cookies.set(SHOWROOM_COOKIE, target.slug, { path: "/app", httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", maxAge: 60 * 60 * 24 * 365 });
