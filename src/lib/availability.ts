@@ -19,6 +19,8 @@ export async function getAvailability(
     now?: Date;
     from?: LocalDate;
     to?: LocalDate;
+    /** Bikes being booked together; a day needs this many free places (capacity counts per bike). */
+    count?: number;
   },
 ): Promise<DaySummary[]> {
   const { showroom, unit, order } = args;
@@ -67,7 +69,8 @@ export async function getAvailability(
       now,
       invitedAt: unit.invitedAt!,
       pickupBy: unit.pickupBy!,
-      bookedCount: countByDate.get(date) ?? 0,
+      // Reserve the extra bikes of a multi-bike visit up front so "remaining" and "full" are right for this booking.
+      bookedCount: (countByDate.get(date) ?? 0) + Math.max(0, (args.count ?? 1) - 1),
       bookedStarts: startsByDate.get(date) ?? [],
       storageEstimate: (d) => storageEstimateCents(unit, termsVersion, settings, d, tz),
     };

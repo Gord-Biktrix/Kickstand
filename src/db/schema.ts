@@ -189,12 +189,15 @@ export const appointments = pgTable(
     status: text("status").notNull().default("booked"),
     cancelledReason: text("cancelled_reason"),
     replacedBy: uuid("replaced_by"),
+    /** Several bikes collected in one visit share a group id: one message, one reminder, one slot time; capacity counts each bike. */
+    groupId: uuid("group_id"),
     createdBy: text("created_by").notNull(),
     ...timestamps,
   },
   (t) => [
     index("appointments_day_booked").on(t.showroomId, t.onDate).where(sql`status = 'booked'`),
     index("appointments_unit_booked").on(t.unitId).where(sql`status = 'booked'`),
+    index("appointments_group").on(t.groupId).where(sql`group_id is not null`),
     check(
       "appointments_status_check",
       sql`${t.status} in ('booked','completed','no_show','cancelled')`,

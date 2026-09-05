@@ -1,4 +1,5 @@
-import { and, count, eq, sql } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
+import { and, count, eq, inArray, sql } from "drizzle-orm";
 import type { Db, Tx } from "@/db/client";
 import { appointments, dayCounters, orders, units, type Appointment, type Order, type Unit } from "@/db/schema";
 import { effectiveCapacity, slotStarts } from "./capacity";
@@ -101,7 +102,33 @@ export type BookArgs = {
   replacingAppointmentId?: string;
   /** Staff booking on the customer's behalf may skip min_lead_hours (bike already built, customer waiting). */
   allowShortNotice?: boolean;
+  /** Multi-bike visit: shared group id (see bookGroup). */
+  groupId?: string;
+  /** Group siblings: book without a message — the primary bike's message covers the visit. */
+  silent?: boolean;
+  /** Extra Klaviyo properties (bike_count, bikes) merged into the Booked message. */
+  extra?: Record<string, unknown>;
 };
+
+/** Units that share a visit with this appointment (the appointment's own unit first). */
+export async function groupUnitIds(tx: Tx | Db, appointment: Pick<Appointment, "id" | "unitId" | "groupId">): Promise<string[]> {
+  if (!appointment.groupId) return [appointment.unitId];
+  const rows = await tx
+    .select({ unitId: appointments.unitId })
+    .from(appointments)
+    .where(and(eq(appointments.groupId, appointment.groupId), eq(appointments.status, "booked")));
+  const ids = rows.map((r) => r.unitId);
+  return [appointment.unitId, ...ids.filter((id) => id !== appointment.unitId)];
+}
+
+/** "Model · colour" per bike, for the bikes/bike_count message properties. */
+export async function describeUnits(tx: Tx | Db, unitIds: string[]): Promise<{ bike_count: number; bikes: string[] }> {
+  if (unitIds.length === 0) return { bike_count: 0, bikes: [] };
+  const rows = await tx.select({ id: units.id, model: units.model, colour: units.colour, size: units.size }).from(units).where(inArray(units.id, unitIds));
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  const bikes = unitIds.map((id) => byId.get(id)).filter((u): u is NonNullable<typeof u> => !!u).map((u) => [u.model, u.colour, u.size].filter(Boolean).join(" · "));
+  return { bike_count: bikes.length, bikes };
+}
 
 /** §6.3 booking transaction body. Throws BookingError; the caller's transaction rolls back. */
 export async function bookSlotTx(
@@ -161,6 +188,8 @@ export async function bookSlotTx(
         eq(appointments.showroomId, showroom.id),
         eq(appointments.startsAt, startsAt),
         eq(appointments.status, "booked"),
+        // Bikes in the same visit share the time on purpose.
+        args.groupId ? sql`${appointments.groupId} is distinct from ${args.groupId}` : undefined,
       ),
     );
   if (atTime >= day.maxConcurrent) throw new BookingError("TIME_FULL");
@@ -177,6 +206,7 @@ export async function bookSlotTx(
       endsAt,
       status: "booked",
       createdBy,
+      groupId: args.groupId ?? null,
     })
     .returning();
 
@@ -211,7 +241,7 @@ export async function bookSlotTx(
 
   const updatedUnit: Unit = { ...unit, ...unitPatch };
   const storageEstimate = storageEstimateCents(unit, order?.termsVersion ?? 1, settings, date, tz);
-  if (!args.replacingAppointmentId) {
+  if (!args.replacingAppointmentId && !args.silent) {
     outbox.push({
       showroom,
       unit: updatedUnit,
@@ -224,6 +254,9 @@ export async function bookSlotTx(
         slot_end_local: formatDateTime(endsAt, tz),
         calendar_ics_url: `${(process.env.APP_BASE_URL ?? "").replace(/\/$/, "")}/api/ics/${appointment.id}`,
         storage_estimate_display: formatMoneyOrEmpty(storageEstimate),
+        bike_count: 1,
+        bikes: [[unit.model, unit.colour, unit.size].filter(Boolean).join(" · ")],
+        ...(args.extra ?? {}),
       },
     });
   }
@@ -233,6 +266,33 @@ export async function bookSlotTx(
 export async function bookSlot(dbx: Db, args: BookArgs) {
   const outbox: Outbox = [];
   const result = await dbx.transaction((tx) => bookSlotTx(tx, outbox, args));
+  await flushOutbox(dbx, outbox);
+  return result;
+}
+
+export type GroupBookArgs = Omit<BookArgs, "unitId" | "groupId" | "silent" | "extra" | "replacingAppointmentId"> & {
+  /** Primary bike first — its customer gets the one message. All must belong to the same customer (caller checks). */
+  unitIds: string[];
+};
+
+/**
+ * One visit, several bikes: every bike gets its own appointment row at the same time, sharing a
+ * group id; capacity counts each bike (build time is per bike); the customer gets one Booked message
+ * listing them all. One bike → identical to bookSlot.
+ */
+export async function bookGroup(dbx: Db, args: GroupBookArgs) {
+  const ids = [...new Set(args.unitIds)];
+  if (ids.length === 0) throw new BookingError("NOT_BOOKABLE", "No bikes selected");
+  const outbox: Outbox = [];
+  const result = await dbx.transaction(async (tx) => {
+    const groupId = ids.length > 1 ? randomUUID() : undefined;
+    const summary = await describeUnits(tx, ids);
+    const booked = [];
+    for (const [i, unitId] of ids.entries()) {
+      booked.push(await bookSlotTx(tx, outbox, { ...args, unitId, groupId, silent: i > 0, extra: i === 0 ? summary : undefined }));
+    }
+    return { groupId: groupId ?? null, primary: booked[0], all: booked };
+  });
   await flushOutbox(dbx, outbox);
   return result;
 }
@@ -247,6 +307,8 @@ export type CancelArgs = {
   now?: Date;
   /** Reschedule sets this so no "Cancelled" message is queued. */
   silent?: boolean;
+  /** Internal: set while cancelling the other bikes of a visit, so they don't cascade again. */
+  _inGroup?: boolean;
 };
 
 export async function cancelBookingTx(
@@ -263,6 +325,13 @@ export async function cancelBookingTx(
 
   const cutoff = addHours(active.startsAt, -showroom.settings.reschedule_cutoff_hours);
   const lateChange = reason === "customer" && now > cutoff;
+
+  // A visit is cancelled as a whole: the other bikes in the group go too, silently (one message covers it).
+  const visit = await groupUnitIds(tx, active);
+  if (!args._inGroup) {
+    for (const sibling of visit.slice(1)) await cancelBookingTx(tx, outbox, { ...args, unitId: sibling, silent: true, _inGroup: true });
+  }
+  const groupSummary = await describeUnits(tx, visit);
 
   const [appointment] = await tx
     .update(appointments)
@@ -316,6 +385,7 @@ export async function cancelBookingTx(
       extra: {
         // Klaviyo branches on this: "you cancelled" vs "sorry, we had to cancel — please pick a new time".
         cancelled_by: reason,
+        ...groupSummary,
         slot_start_local: formatDateTime(active.startsAt, tz),
         days_left_display: unit.pickupBy
           ? `${Math.max(0, Math.ceil(hoursBetween(now, unit.pickupBy) / 24))} days`
@@ -347,6 +417,12 @@ export type RescheduleArgs = {
 export async function rescheduleBooking(dbx: Db, args: RescheduleArgs) {
   const outbox: Outbox = [];
   const result = await dbx.transaction(async (tx) => {
+    // The whole visit moves: cancel every bike's appointment (silently), rebook them together at the new time.
+    const current = await activeAppointment(tx, args.unitId);
+    if (!current) throw new BookingError("NO_APPOINTMENT");
+    const visit = await groupUnitIds(tx, current);
+    const newGroupId = visit.length > 1 ? randomUUID() : undefined;
+    const summary = await describeUnits(tx, visit);
     const cancelled = await cancelBookingTx(tx, outbox, {
       showroom: args.showroom,
       unitId: args.unitId,
@@ -355,19 +431,28 @@ export async function rescheduleBooking(dbx: Db, args: RescheduleArgs) {
       now: args.now,
       silent: true,
     });
-    const booked = await bookSlotTx(tx, outbox, {
-      showroom: args.showroom,
-      unitId: args.unitId,
-      startsAt: args.startsAt,
-      createdBy: args.actor,
-      smsConsent: args.smsConsent,
-      now: args.now,
-      replacingAppointmentId: cancelled.appointment.id,
-    });
-    await tx
-      .update(appointments)
-      .set({ replacedBy: booked.appointment.id })
-      .where(eq(appointments.id, cancelled.appointment.id));
+    let booked!: Awaited<ReturnType<typeof bookSlotTx>>;
+    for (const [i, unitId] of visit.entries()) {
+      const [old] = await tx
+        .select()
+        .from(appointments)
+        .where(and(eq(appointments.unitId, unitId), eq(appointments.status, "cancelled"), current.groupId ? eq(appointments.groupId, current.groupId) : eq(appointments.id, cancelled.appointment.id)))
+        .orderBy(sql`${appointments.updatedAt} desc`)
+        .limit(1);
+      const b = await bookSlotTx(tx, outbox, {
+        showroom: args.showroom,
+        unitId,
+        startsAt: args.startsAt,
+        createdBy: args.actor,
+        smsConsent: args.smsConsent,
+        now: args.now,
+        replacingAppointmentId: old?.id ?? cancelled.appointment.id,
+        groupId: newGroupId,
+        silent: true,
+      });
+      if (old) await tx.update(appointments).set({ replacedBy: b.appointment.id }).where(eq(appointments.id, old.id));
+      if (i === 0) booked = b;
+    }
     const tz = args.showroom.timezone;
     outbox.push({
       showroom: args.showroom,
@@ -377,6 +462,7 @@ export async function rescheduleBooking(dbx: Db, args: RescheduleArgs) {
       dedupeKey: booked.appointment.id,
       actor: args.actor,
       extra: {
+        ...summary,
         old_slot_start_local: formatDateTime(cancelled.appointment.startsAt, tz),
         slot_start_local: formatDateTime(booked.appointment.startsAt, tz),
         slot_end_local: formatDateTime(booked.appointment.endsAt, tz),
@@ -404,25 +490,32 @@ export async function recordNoShow(
     if (!active) throw new BookingError("NO_APPOINTMENT");
     if (active.startsAt > now) throw new BookingError("SLOT_NOT_PASSED");
 
-    const [appointment] = await tx
-      .update(appointments)
-      .set({ status: "no_show" })
-      .where(eq(appointments.id, active.id))
-      .returning();
-    await decrementCounter(tx, showroom.id, active.onDate);
-    const noShowCount = await bumpNoShow(tx, unit, showroom.timezone, now);
-    const unitPatch: Partial<Unit> = {};
-    if (unit.status === "booked") unitPatch.status = "invited";
-    if (Object.keys(unitPatch).length) await tx.update(units).set(unitPatch).where(eq(units.id, unit.id));
-    await logEvent(tx, {
-      showroomId: showroom.id,
-      unitId: unit.id,
-      orderId: order?.id,
-      appointmentId: active.id,
-      type: "no_show",
-      actor,
-      payload: { no_show_count: noShowCount, starts_at: active.startsAt.toISOString() },
-    });
+    // The customer missed the visit, so every bike in it is a no-show; one message.
+    const visit = await groupUnitIds(tx, active);
+    const summary = await describeUnits(tx, visit);
+    let appointment!: Appointment;
+    let noShowCount = 0;
+    for (const unitId of visit) {
+      const { unit: u, order: o } = unitId === unit.id ? { unit, order } : await loadUnitForUpdate(tx, unitId);
+      const a = unitId === unit.id ? active : await activeAppointment(tx, unitId);
+      if (!a) continue;
+      const [updated] = await tx.update(appointments).set({ status: "no_show" }).where(eq(appointments.id, a.id)).returning();
+      await decrementCounter(tx, showroom.id, a.onDate);
+      const n = await bumpNoShow(tx, u, showroom.timezone, now);
+      const unitPatch: Partial<Unit> = {};
+      if (u.status === "booked") unitPatch.status = "invited";
+      if (Object.keys(unitPatch).length) await tx.update(units).set(unitPatch).where(eq(units.id, u.id));
+      await logEvent(tx, {
+        showroomId: showroom.id,
+        unitId: u.id,
+        orderId: o?.id,
+        appointmentId: a.id,
+        type: "no_show",
+        actor,
+        payload: { no_show_count: n, starts_at: a.startsAt.toISOString(), group_id: a.groupId },
+      });
+      if (unitId === unit.id) { appointment = updated; noShowCount = n; }
+    }
     const [fresh] = await tx.select().from(units).where(eq(units.id, unit.id));
     outbox.push({
       showroom,
@@ -431,7 +524,7 @@ export async function recordNoShow(
       metric: METRIC.missed,
       dedupeKey: active.id,
       actor,
-      extra: { second_missed: noShowCount >= 2 },
+      extra: { second_missed: noShowCount >= 2, ...summary },
     });
     return { appointment, unit: fresh, order, noShowCount };
   });

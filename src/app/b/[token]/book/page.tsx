@@ -3,6 +3,8 @@ import { redirect } from "next/navigation";
 import { db } from "@/db/client";
 import { Alert, Card } from "@/components/ui";
 import { getAvailability } from "@/lib/availability";
+import { groupUnitIds } from "@/lib/booking";
+import { bookableSiblings } from "@/lib/units";
 import { BOOKING_ERROR_TEXT, type BookingErrorCode } from "@/lib/booking";
 import type { DaySummary } from "@/lib/capacity";
 import { formatMoney } from "@/lib/format";
@@ -34,7 +36,10 @@ export default async function BookPage({ params, searchParams }: { params: Promi
 
   const tz = showroom.timezone;
   const s = showroom.settings;
-  const days = await getAvailability(db, { showroom, unit, order });
+  // Other bikes of theirs waiting in the building: offer to collect them in the same visit.
+  const siblings = reschedule ? [] : await bookableSiblings(db, showroom, unit, order);
+  const visitSize = reschedule && appointment ? (await groupUnitIds(db, appointment)).length : 1 + siblings.length;
+  const days = await getAvailability(db, { showroom, unit, order, count: visitSize });
   const openDays = days.filter((d) => !d.day.closed && !d.beyondHorizon);
   const selectedDate = sp(q.date);
   const selectedTime = sp(q.time);
@@ -59,7 +64,7 @@ export default async function BookPage({ params, searchParams }: { params: Promi
         <Link href={selected ? base : `/b/${token}`} className="text-sm text-accent underline">← Back</Link>
         <h1 className="mt-2 text-2xl font-semibold">{reschedule ? "Pick a new time" : "Pick a time"}</h1>
         <p className="mt-1 text-sm text-muted">
-          {unit.model} · {showroom.name}. Pickups take about 45 minutes. We need {s.min_lead_hours} hours&apos; notice to build your bike.
+          {unit.model}{siblings.length > 0 && <> and {siblings.length} more bike{siblings.length === 1 ? "" : "s"}</>} · {showroom.name}. Pickups take about 45 minutes. We need {s.min_lead_hours} hours&apos; notice to build your bike{visitSize > 1 ? "s" : ""}.
         </p>
       </div>
       {errorCode && BOOKING_ERROR_TEXT[errorCode] && <Alert tone="danger">{BOOKING_ERROR_TEXT[errorCode]}</Alert>}
@@ -89,6 +94,18 @@ export default async function BookPage({ params, searchParams }: { params: Promi
                 </Alert>
               )}
               {order && order.balanceCents > 0 && <p className="text-sm text-muted">Balance due at handover: {formatMoney(order.balanceCents)}.</p>}
+              {siblings.length > 0 && (
+                <fieldset className="rounded-lg border border-border p-3">
+                  <legend className="px-1 text-sm font-medium">Collect together</legend>
+                  <p className="mb-2 text-xs text-muted">Your {unit.model} is booked for this time. Tick any other bikes to collect in the same visit.</p>
+                  {siblings.map((sib) => (
+                    <label key={sib.unit.id} className="flex items-start gap-3 py-1 text-sm">
+                      <input type="checkbox" name="unit_ids" value={sib.unit.id} defaultChecked className="mt-1 h-4 w-4 rounded border-border accent-accent" />
+                      <span>{sib.unit.model}{[sib.unit.size, sib.unit.colour].filter(Boolean).length > 0 && <span className="text-muted"> · {[sib.unit.size, sib.unit.colour].filter(Boolean).join(" · ")}</span>}</span>
+                    </label>
+                  ))}
+                </fieldset>
+              )}
               <label className="flex items-start gap-3 text-sm">
                 <input type="checkbox" name="sms_consent" defaultChecked={order?.smsConsent ?? false} className="mt-1 h-4 w-4 rounded border-border accent-accent" />
                 <span>Text me reminders about this pickup{order?.customerPhone ? ` at ${order.customerPhone}` : ""}. Standard rates apply; reply STOP to opt out.</span>

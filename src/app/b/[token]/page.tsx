@@ -4,6 +4,7 @@ import { Alert, Card, Dl, LinkButton } from "@/components/ui";
 import { formatMoney } from "@/lib/format";
 import { sp, type SearchParams } from "@/lib/flash";
 import { appointmentHistory, getUnitByToken } from "@/lib/queries";
+import { visitMates } from "@/lib/units";
 import { getShowroom, getShowroomById } from "@/lib/showroom";
 import { storageDueCents, storageEnabledFor } from "@/lib/storage";
 import { formatDateTime, formatLongDate, formatTime } from "@/lib/time";
@@ -77,6 +78,7 @@ export default async function LandingPage({ params, searchParams }: { params: Pr
     );
   }
 
+  const mates = appointment ? await visitMates(db, appointment) : [];
   if (appointment) {
     const built = unit.status === "building" || unit.status === "ready";
     return (
@@ -87,6 +89,7 @@ export default async function LandingPage({ params, searchParams }: { params: Pr
           <p className="text-xs font-medium uppercase tracking-wide text-muted">Pickup</p>
           <p className="mt-1 text-xl font-semibold">{formatLongDate(appointment.startsAt, tz)}</p>
           <p className="text-lg">{formatTime(appointment.startsAt, tz)} – {formatTime(appointment.endsAt, tz)}</p>
+          {mates.length > 0 && <p className="mt-1 text-sm text-muted">Collecting {mates.length + 1} bikes: {[unit, ...mates].map((m) => m.model).join(", ")}.</p>}
           <p className="mt-2 text-sm text-muted">{showroom.addressLine}</p>
           {built && <p className="mt-3 rounded-lg bg-ok-soft px-3 py-2 text-sm text-ok">Your bike is built and charging.</p>}
           {due > 0 && <p className="mt-3 rounded-lg bg-warn-soft px-3 py-2 text-sm text-warn">Storage of {formatMoney(due)} is payable at pickup.</p>}

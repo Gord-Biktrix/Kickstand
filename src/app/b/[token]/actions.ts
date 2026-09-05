@@ -2,11 +2,11 @@
 
 import { redirect } from "next/navigation";
 import { db } from "@/db/client";
-import { BookingError, bookSlot, cancelBooking, rescheduleBooking } from "@/lib/booking";
+import { BookingError, bookGroup, cancelBooking, rescheduleBooking } from "@/lib/booking";
 import { bool, str } from "@/lib/flash";
 import { getUnitByToken } from "@/lib/queries";
 import { getShowroomById } from "@/lib/showroom";
-import { detachUnit, UnitError } from "@/lib/units";
+import { bookableSiblings, detachUnit, UnitError } from "@/lib/units";
 
 async function load(token: string) {
   const view = await getUnitByToken(db, token);
@@ -29,7 +29,10 @@ export async function bookAction(token: string, formData: FormData) {
       const res = await rescheduleBooking(db, { showroom, unitId: view.unit.id, startsAt, actor: "customer", smsConsent });
       late = res.lateChange;
     } else {
-      await bookSlot(db, { showroom, unitId: view.unit.id, startsAt, createdBy: "customer", smsConsent });
+      // Other bikes ticked under "Collect together" — only ones that really are theirs and bookable.
+      const wanted = new Set(formData.getAll("unit_ids").map(String));
+      const siblings = (await bookableSiblings(db, showroom, view.unit, view.order)).map((sib) => sib.unit.id).filter((id) => wanted.has(id));
+      await bookGroup(db, { showroom, unitIds: [view.unit.id, ...siblings], startsAt, createdBy: "customer", smsConsent });
     }
   } catch (err) {
     if (err instanceof BookingError) code = err.code;

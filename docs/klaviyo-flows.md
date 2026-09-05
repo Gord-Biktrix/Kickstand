@@ -21,6 +21,12 @@ Use `{{ person.first_name|default:"there" }}` for the name.
 
 Links are long; let Klaviyo shorten them (message setting "Shorten links").
 
+**Several bikes in one visit:** every event also carries `bike_count` (number) and `bikes` (list, e.g.
+"Juggernaut Lite Plus 2.0 · Green"). Write copy that reads well either way:
+`{% if event.bike_count > 1 %}your {{ event.bike_count }} bikes{% else %}your {{ event.model }}{% endif %}`.
+Bike Arrived may also carry `joined_existing_pickup: true` with `slot_start_local` — the new bike has been added to
+a pickup the customer already booked: "your second bike is here — we've added it to your pickup on {{ event.slot_start_local }}".
+
 ---
 
 ## 1. Pickup: Bike Arrived  — the invite (unit received, link minted)

@@ -7,6 +7,8 @@ import { StatusBadge } from "@/components/status-badge";
 import { Alert, Card, Field, Flash, PageHeader } from "@/components/ui";
 import { requireUser } from "@/lib/auth";
 import { getAvailability } from "@/lib/availability";
+import { groupUnitIds } from "@/lib/booking";
+import { bookableSiblings } from "@/lib/units";
 import type { DaySummary } from "@/lib/capacity";
 import { sp, type SearchParams } from "@/lib/flash";
 import { formatMoney } from "@/lib/format";
@@ -64,7 +66,9 @@ export default async function StaffBookPage({ searchParams }: { searchParams: Pr
     if (!["invited", "building", "ready", ...(reschedule ? ["booked"] : [])].includes(unit.status)) {
       return <div><PageHeader title="Book pickup" />{flash}<Alert tone="warn">This unit is {unit.status} and can&apos;t be booked. <Link className="underline" href={`/app/units/${unit.id}`}>Open the unit</Link>.</Alert></div>;
     }
-    const days = (await getAvailability(db, { showroom, unit, order, now })).filter((d) => !d.day.closed && !d.beyondHorizon);
+    const siblings = reschedule ? [] : await bookableSiblings(db, showroom, unit, order);
+    const visitSize = reschedule && appointment ? (await groupUnitIds(db, appointment)).length : 1 + siblings.length;
+    const days = (await getAvailability(db, { showroom, unit, order, now, count: visitSize })).filter((d) => !d.day.closed && !d.beyondHorizon);
     const selectedDate = sp(q.date);
     const selectedTime = sp(q.time);
     const shortNotice = sp(q.short) === "1";
@@ -77,7 +81,7 @@ export default async function StaffBookPage({ searchParams }: { searchParams: Pr
       <div>
         <PageHeader
           title={reschedule ? "Reschedule pickup" : "Book pickup"}
-          subtitle={<>{order?.customerName ?? "—"} · {unit.model} · {[unit.size, unit.colour].filter(Boolean).join(" · ")} · box {unit.boxTag} · <StatusBadge status={unit.status} /></>}
+          subtitle={<>{order?.customerName ?? "—"} · {unit.model} · {[unit.size, unit.colour].filter(Boolean).join(" · ")} · box {unit.boxTag} · <StatusBadge status={unit.status} />{visitSize > 1 && <> · {visitSize} bikes in this visit</>}</>}
           action={<Link href={`/app/units/${unit.id}`} className="btn btn-sm">Back to bike</Link>}
         />
         {flash}
@@ -98,6 +102,18 @@ export default async function StaffBookPage({ searchParams }: { searchParams: Pr
                 {slot.reason === "too_early" && shortNotice && <Alert tone="warn">Inside the {showroom.settings.min_lead_hours}-hour notice window. Make sure the bike can be built in time.</Alert>}
                 {slot.storageApplies && slot.storageEstimateCents > 0 && <Alert tone="warn">Storage of about {formatMoney(slot.storageEstimateCents)} will be due at pickup.</Alert>}
                 {order && order.balanceCents > 0 && <p className="text-sm text-muted">Balance due at handover: {formatMoney(order.balanceCents)}.</p>}
+                {siblings.length > 0 && (
+                  <fieldset className="rounded-lg border border-border p-3">
+                    <legend className="px-1 text-sm font-medium">Collect together</legend>
+                    <p className="mb-2 text-xs text-muted">This customer has other bikes in the building. Ticked bikes are booked into the same visit (each counts against capacity).</p>
+                    {siblings.map((sib) => (
+                      <label key={sib.unit.id} className="flex items-start gap-3 py-1 text-sm">
+                        <input type="checkbox" name="unit_ids" value={sib.unit.id} defaultChecked className="mt-1 h-4 w-4" />
+                        <span>{sib.unit.model} <span className="text-muted">· {[sib.unit.size, sib.unit.colour].filter(Boolean).join(" · ")} · box {sib.unit.boxTag} · {sib.order.source} {sib.order.orderRef}</span></span>
+                      </label>
+                    ))}
+                  </fieldset>
+                )}
                 <label className="flex items-start gap-3 text-sm">
                   <input type="checkbox" name="sms_consent" defaultChecked={order?.smsConsent ?? false} className="mt-1 h-4 w-4" />
                   <span>Customer agrees to text reminders{order?.customerPhone ? ` at ${order.customerPhone}` : ""}.</span>

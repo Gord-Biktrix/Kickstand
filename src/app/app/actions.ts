@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { db } from "@/db/client";
 import { capacityOverrides, capacityRules, orders, units } from "@/db/schema";
 import { requireActor, signOut } from "@/lib/auth";
-import { BOOKING_ERROR_TEXT, BookingError, bookSlot, cancelBooking, recordNoShow, rescheduleBooking } from "@/lib/booking";
+import { BOOKING_ERROR_TEXT, BookingError, bookGroup, cancelBooking, recordNoShow, rescheduleBooking } from "@/lib/booking";
 import { validateImport } from "@/lib/csv";
 import { logEvent } from "@/lib/events";
 import { bool, dollarsToCents, errorMessage, num, str, withFlash } from "@/lib/flash";
@@ -13,7 +13,7 @@ import { normalizePhone } from "@/lib/phone";
 import { FLAG_KEYS, PROGRAM_KEYS, settingsSchema, validateSettings, type ProgramSettings } from "@/lib/settings";
 import { getCapacityConfig, patchShowroomSettings } from "@/lib/showroom";
 import { normalizeTime } from "@/lib/time";
-import { attachUnit, completeHandover, createOrder, deleteUnit, detachUnit, grantExtension, inviteAllReceived, inviteOrders, inviteUnit, markReady, receiveUnit, resendInvite, retagUnit, startBuild, waiveStorage } from "@/lib/units";
+import { attachUnit, bookableSiblings, completeHandover, createOrder, deleteUnit, detachUnit, grantExtension, inviteAllReceived, inviteOrders, inviteUnit, inviteUnits, markReady, receiveUnit, resendInvite, retagUnit, startBuild, waiveStorage } from "@/lib/units";
 import { currentShowroom } from "@/lib/current-showroom";
 import { syncSpecialOrders } from "@/lib/special-orders";
 import { deleteView, saveView, syncWorkorders } from "@/lib/workorders";
@@ -404,10 +404,15 @@ export async function bulkBikesAction(returnTo: string, formData: FormData) {
     const deleteReason = str(formData, "delete_reason").trim() || "bulk delete from Bikes";
     let done = 0;
     const skipped: string[] = [];
+    if (op === "invite") {
+      // Grouped by customer: one text per person, siblings ride along (see inviteUnits).
+      const r = await inviteUnits(db, { showroom, unitIds: ids, actor: user.id });
+      const tail = r.skipped.length ? ` · skipped ${r.skipped.length}: ${r.skipped.slice(0, 3).join("; ")}${r.skipped.length > 3 ? "; …" : ""}` : "";
+      return `Invites sent: ${r.invited}${r.joined ? ` · ${r.joined} joined an existing pickup` : ""}${tail}`;
+    }
     for (const unitId of ids) {
       try {
-        if (op === "invite") await inviteUnit(db, { showroom, unitId, actor: user.id });
-        else if (op === "delete") await deleteUnit(db, { showroom, unitId, actor: user.id, reason: deleteReason });
+        if (op === "delete") await deleteUnit(db, { showroom, unitId, actor: user.id, reason: deleteReason });
         else if (op === "build") await startBuild(db, { showroom, unitId, actor: user.id });
         else if (op === "ready") await markReady(db, { showroom, unitId, actor: user.id });
         else if (op === "cancel") await cancelBooking(db, { showroom, unitId, reason, actor: user.id });
@@ -454,9 +459,13 @@ export async function staffBookAction(unitId: string, formData: FormData) {
   try {
     const user = await requireActor("staff");
     const showroom = await currentShowroom();
-    await bookSlot(db, {
+    const [primary] = await db.select().from(units).where(eq(units.id, unitId));
+    const [primaryOrder] = primary?.orderId ? await db.select().from(orders).where(eq(orders.id, primary.orderId)) : [];
+    const wanted = new Set(formData.getAll("unit_ids").map(String));
+    const siblings = primary ? (await bookableSiblings(db, showroom, primary, primaryOrder ?? null)).map((sib) => sib.unit.id).filter((id) => wanted.has(id)) : [];
+    await bookGroup(db, {
       showroom,
-      unitId,
+      unitIds: [unitId, ...siblings],
       startsAt,
       createdBy: user.id,
       smsConsent: bool(formData, "sms_consent"),

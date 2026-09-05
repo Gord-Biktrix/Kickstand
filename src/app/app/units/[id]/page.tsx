@@ -15,7 +15,7 @@ import { customerUrls } from "@/lib/messages";
 import { appointmentHistory, getUnitView, unitTimeline } from "@/lib/queries";
 import { storageDueCents, storageEnabledFor } from "@/lib/storage";
 import { formatDateTime, formatLongDate, formatLongDateFromLocal, formatTime } from "@/lib/time";
-import { HANDOVER_CHECKLIST, waitlistFor } from "@/lib/units";
+import { HANDOVER_CHECKLIST, visitMates, waitlistFor } from "@/lib/units";
 import {
   attachUnitAction,
   completeHandoverAction,
@@ -47,7 +47,7 @@ export default async function UnitPage({ params, searchParams }: { params: Promi
   const tz = showroom.timezone;
   const s = showroom.settings;
   const now = new Date();
-  const [events, history] = await Promise.all([unitTimeline(db, unit.id), appointmentHistory(db, unit.id)]);
+  const [events, history, mates] = await Promise.all([unitTimeline(db, unit.id), appointmentHistory(db, unit.id), appointment ? visitMates(db, appointment) : Promise.resolve([])]);
   const urls = customerUrls(unit);
   const termsVersion = order?.termsVersion ?? 1;
   const due = storageDueCents(unit, termsVersion, s, now, tz);
@@ -131,6 +131,11 @@ export default async function UnitPage({ params, searchParams }: { params: Promi
                 {unit.noShowCount > 0 && <> · {unit.noShowCount} no-show</>}
                 {appointment.startsAt < now && <> · <span className="text-warn">slot has passed</span></>}
               </p>
+              {mates.length > 0 && (
+                <p className="mt-1 text-sm">
+                  Same visit: {mates.map((m, i) => <span key={m.id}>{i > 0 && ", "}<Link className="underline" href={`/app/units/${m.id}`}>{m.model} (box {m.boxTag})</Link></span>)}. Reschedule or cancel moves all of them.
+                </p>
+              )}
             </div>
             <div className="flex flex-wrap items-start gap-2">
               {unit.status === "booked" && <form action={startBuildAction.bind(null, unit.id, RETURN)}><button type="submit" className="btn btn-primary">Build</button></form>}

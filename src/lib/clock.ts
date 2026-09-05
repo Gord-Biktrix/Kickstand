@@ -183,18 +183,27 @@ export async function runClockForShowroom(
           eq(appointments.onDate, tomorrow),
         ),
       );
+    const remindedGroups = new Set<string>();
     for (const { appointment, unit, order } of rows) {
+      // One reminder per visit, not per bike.
+      if (appointment.groupId) {
+        if (remindedGroups.has(appointment.groupId)) continue;
+        remindedGroups.add(appointment.groupId);
+      }
+      const visit = rows.filter((r) => (appointment.groupId ? r.appointment.groupId === appointment.groupId : r.appointment.id === appointment.id));
       tally(
         await sendUnitMessage(dbx, {
           showroom,
           unit,
           order,
           metric: METRIC.reminder,
-          dedupeKey: appointment.id,
+          dedupeKey: appointment.groupId ?? appointment.id,
           extra: {
             slot_start_local: formatDateTime(appointment.startsAt, tz),
             bring_list: "A copy of your order confirmation, photo ID, and the card used for any balance due",
-            built: ["building", "ready"].includes(unit.status),
+            built: visit.every((r) => ["building", "ready"].includes(r.unit.status)),
+            bike_count: visit.length,
+            bikes: visit.map((r) => [r.unit.model, r.unit.colour, r.unit.size].filter(Boolean).join(" · ")),
           },
         }),
       );
