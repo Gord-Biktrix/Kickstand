@@ -257,10 +257,7 @@ export default async function BikesPage({ searchParams }: { searchParams: Promis
                       </td>
                       <td className="text-xs text-muted">{formatShortDateFromLocal(o.orderDate)} · {daysBetween(o.orderDate, today)}d · {o.source} {o.orderRef}</td>
                       <td className="text-right">
-                        <div className="flex justify-end gap-1">
-                          <form action={inviteOrdersAction.bind(null, ON_ORDER_RETURN)}><input type="hidden" name="order_ids" value={o.id} /><button type="submit" className="btn btn-sm" disabled={!o.customerEmail && !o.customerPhone}>Invite</button></form>
-                          <Link href={`/app/arrivals?q=${encodeURIComponent(o.orderRef)}`} className="btn btn-sm" title="Receive with a specific box tag first">Receive</Link>
-                        </div>
+                        <form action={inviteOrdersAction.bind(null, ON_ORDER_RETURN)}><input type="hidden" name="order_ids" value={o.id} /><button type="submit" className="btn btn-sm" disabled={!o.customerEmail && !o.customerPhone} title={!o.customerEmail && !o.customerPhone ? "No phone or email on this order" : "Receive under the sale # and text the booking link"}>Invite</button></form>
                       </td>
                     </tr>
                   ))}
