@@ -137,6 +137,8 @@ export const orders = pgTable(
     notes: text("notes"),
     /** Lightspeed R-Series customerID once the order has been mirrored (README "Lightspeed bridge"). */
     lsCustomerId: text("ls_customer_id"),
+    /** Lightspeed special-order SaleLine this order was synced from (uncompleted lines have saleID 0). */
+    lsSaleLineId: text("ls_sale_line_id").unique(),
     ...timestamps,
   },
   (t) => [

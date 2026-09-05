@@ -292,7 +292,7 @@ export class LightspeedClient {
     const res = await this.request<Record<string, unknown>>("GET", `Sale/${saleID}.json?load_relations=${encodeURIComponent('["SaleLines","SaleLines.Item"]')}`);
     const sale = res.Sale as Record<string, unknown> | undefined;
     if (!sale) return null;
-    const lines = await this.describeLines(asList<Record<string, unknown>>(sale.SaleLines as Record<string, unknown>, "SaleLine"));
+    const lines = await this.describeSaleLines(asList<Record<string, unknown>>(sale.SaleLines as Record<string, unknown>, "SaleLine"));
     return {
       saleID: String(sale.saleID),
       customerID: sale.customerID && String(sale.customerID) !== "0" ? String(sale.customerID) : null,
@@ -314,7 +314,36 @@ export class LightspeedClient {
     const rows = asList<Record<string, unknown>>(res, "SaleLine")
       .filter((l) => String(l.itemID ?? "0") !== "0" && String(l.isWorkorder) !== "true")
       .sort((a, b) => String(b.createTime ?? "").localeCompare(String(a.createTime ?? "")));
-    return this.describeLines(rows);
+    return this.describeSaleLines(rows);
+  }
+
+  /** Follow Lightspeed's `@attributes.next` cursor and return every row of a collection. */
+  private async listAll(path: string, key: string, max = 2000): Promise<Record<string, unknown>[]> {
+    const out: Record<string, unknown>[] = [];
+    let url: string | null = path;
+    while (url && out.length < max) {
+      const res: Record<string, unknown> = await this.request<Record<string, unknown>>("GET", url);
+      out.push(...asList<Record<string, unknown>>(res, key));
+      const next = (res["@attributes"] as { next?: string } | undefined)?.next;
+      url = next ? next.replace(/^.*\/Account\/\d+\//, "") : null;
+    }
+    return out;
+  }
+
+  /**
+   * Uncompleted special-order lines for a shop (saleID 0 — see getSpecialOrderLines). Raw rows with
+   * Item loaded; `since` (ISO) trims old ones — the shop has hundreds of stale open special orders.
+   */
+  async listOpenSpecialOrderLines(shopID: number, since?: string): Promise<Record<string, unknown>[]> {
+    const q = new URLSearchParams({ isSpecialOrder: "true", saleID: "0", shopID: String(shopID), limit: "100", load_relations: '["Item"]' });
+    if (since) q.set("createTime", `>,${since}`);
+    return this.listAll(`SaleLine.json?${q.toString()}`, "SaleLine");
+  }
+
+  /** categoryID → full path ("Bikes/Juggernauts/Ultra FS"). */
+  async listCategories(): Promise<Map<string, string>> {
+    const rows = await this.listAll("Category.json?limit=100", "Category");
+    return new Map(rows.map((c) => [String(c.categoryID), String(c.fullPathName ?? c.name ?? "")]));
   }
 
   /**
@@ -323,7 +352,7 @@ export class LightspeedClient {
    * matrix and one for the attribute-set names (cached on the client). Failures fall back to the
    * plain description so the prefill never blocks the form.
    */
-  private async describeLines(rows: Record<string, unknown>[]): Promise<SaleLineInfo[]> {
+  async describeSaleLines(rows: Record<string, unknown>[]): Promise<SaleLineInfo[]> {
     const out: SaleLineInfo[] = [];
     for (const l of rows) {
       const item = l.Item as Record<string, unknown> | undefined;

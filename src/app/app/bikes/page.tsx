@@ -9,8 +9,9 @@ import { customerKey } from "@/lib/customers";
 import { formatMoney } from "@/lib/format";
 import { sp, type SearchParams } from "@/lib/flash";
 import { allBikes, type BikeRow } from "@/lib/queries";
-import { formatDateTime, formatLongDate, formatLongDateFromLocal, formatShortDateFromLocal, toLocalDate } from "@/lib/time";
-import { bulkBikesAction, inviteUnitAction, markReadyAction, startBuildAction } from "../actions";
+import { ordersOnOrder } from "@/lib/special-orders";
+import { daysBetween, formatDateTime, formatLongDate, formatLongDateFromLocal, formatShortDateFromLocal, toLocalDate } from "@/lib/time";
+import { bulkBikesAction, inviteUnitAction, markReadyAction, startBuildAction, syncSpecialOrdersAction } from "../actions";
 import { currentShowroom } from "@/lib/current-showroom";
 
 export const metadata = { title: "Bikes" };
@@ -48,7 +49,8 @@ export default async function BikesPage({ searchParams }: { searchParams: Promis
   const filter = (FILTERS.some((f) => f.key === sp(q.filter)) ? sp(q.filter) : "all") as FilterKey;
   const text = (sp(q.q) ?? "").trim().toLowerCase();
   const date = /^\d{4}-\d{2}-\d{2}$/.test(sp(q.date) ?? "") ? sp(q.date)! : null;
-  const all = await allBikes(db, showroom, now);
+  const [all, onOrder] = await Promise.all([allBikes(db, showroom, now), ordersOnOrder(db, showroom)]);
+  const canSync = !!showroom.settings.lightspeed.shop_id;
   const rows = all.filter((r) => matches(r, filter)).filter((r) => !date || r.appointment?.onDate === date).filter((r) => {
     if (!text) return true;
     const hay = [r.unit.model, r.unit.boxTag, r.unit.size, r.unit.colour, r.order?.customerName, r.order?.orderRef, r.order?.customerPhone, r.order?.customerEmail].filter(Boolean).join(" ").toLowerCase();
@@ -85,6 +87,7 @@ export default async function BikesPage({ searchParams }: { searchParams: Promis
         subtitle={`${all.length} in the building · ${showroom.name}`}
         action={
           <div className="flex gap-2">
+            {canSync && <form action={syncSpecialOrdersAction.bind(null, RETURN)}><button type="submit" className="btn btn-sm" title="Pull new bike special orders from Lightspeed now (also runs hourly)">Sync from Lightspeed</button></form>}
             <Link href="/app/arrivals" className="btn btn-sm">Receive a box</Link>
             <Link href="/app/book" className="btn btn-primary btn-sm">Book pickup</Link>
           </div>
@@ -196,6 +199,26 @@ export default async function BikesPage({ searchParams }: { searchParams: Promis
         </Card>
         </>
       )}
+      <Card title={`On order — not arrived yet (${onOrder.length})`} className="mt-6">
+        {onOrder.length === 0 ? (
+          <p className="text-sm text-muted">No open orders waiting for a box.{canSync && " Bike special orders sync from Lightspeed every hour."}</p>
+        ) : (
+          <ul className="divide-y divide-border text-sm">
+            {onOrder.map((o) => (
+              <li key={o.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
+                <span>
+                  <Link className="font-medium hover:text-accent" href={`/app/orders/${o.id}`}>{o.model}</Link>
+                  {[o.size, o.colour].filter(Boolean).length > 0 && <span className="text-muted"> · {[o.size, o.colour].filter(Boolean).join(" · ")}</span>}
+                  <span className="text-muted"> · </span>
+                  <Link className="hover:text-accent" href={`/app/customers/${encodeURIComponent(customerKey(o))}`}>{o.customerName}</Link>
+                  <span className="text-muted"> · {o.source} {o.orderRef} · ordered {formatShortDateFromLocal(o.orderDate)} ({daysBetween(o.orderDate, today)}d ago)</span>
+                </span>
+                <Link href={`/app/arrivals?q=${encodeURIComponent(o.orderRef)}`} className="btn btn-sm">Receive</Link>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
       <p className="mt-4 text-xs text-muted">Message failures and day-capacity conflicts are on <Link className="underline" href="/app/watchlist">Alerts</Link>.</p>
     </div>
   );

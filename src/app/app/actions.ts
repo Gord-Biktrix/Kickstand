@@ -15,6 +15,7 @@ import { getCapacityConfig, patchShowroomSettings } from "@/lib/showroom";
 import { normalizeTime } from "@/lib/time";
 import { attachUnit, completeHandover, createOrder, deleteUnit, detachUnit, grantExtension, inviteAllReceived, inviteUnit, markReady, receiveUnit, resendInvite, retagUnit, startBuild, waiveStorage } from "@/lib/units";
 import { currentShowroom } from "@/lib/current-showroom";
+import { syncSpecialOrders } from "@/lib/special-orders";
 
 /** Run a mutation and land back on `returnTo` with a flash; auth errors surface the same way. */
 async function run(returnTo: string, fn: () => Promise<string | void>): Promise<never> {
@@ -315,6 +316,17 @@ export async function staffCancelBookingAction(unitId: string, returnTo: string,
     return res.lateChange
       ? "Booking cancelled inside the cutoff — it counts as a missed pickup. The customer has been sent a rebook link."
       : "Booking cancelled. The customer has been sent a message with their rebook link.";
+  });
+}
+
+/** Pull new bike special orders from Lightspeed now (the clock also does this hourly). */
+export async function syncSpecialOrdersAction(returnTo: string) {
+  return run(safeReturn(returnTo, "/app/bikes"), async () => {
+    const user = await requireActor("staff");
+    const showroom = await currentShowroom(user);
+    const r = await syncSpecialOrders(db, { showroom, actor: user.id });
+    const tail = r.errors.length ? ` · ${r.errors.length} skipped (see logs)` : "";
+    return `Lightspeed sync: ${r.bikes} bike special order${r.bikes === 1 ? "" : "s"} open — ${r.created} new, ${r.updated} updated, ${r.skippedParts} parts/accessories ignored${tail}.`;
   });
 }
 

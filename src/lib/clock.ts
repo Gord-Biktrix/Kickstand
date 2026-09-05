@@ -6,6 +6,7 @@ import { formatMoney } from "./format";
 import { logger } from "./logger";
 import { METRIC, sendUnitMessage, type MessageOutcome } from "./messages";
 import { getCapacityConfig, listShowrooms, patchShowroomSettings, type ShowroomCtx } from "./showroom";
+import { syncSpecialOrders } from "./special-orders";
 import { storageDueCents, storageEnabledFor } from "./storage";
 import { addLocalDays, daysBetween, formatDateTime, localHour, startOfLocalDay, toLocalDate, weekdayOf } from "./time";
 
@@ -27,6 +28,8 @@ export type ClockSummary = {
 };
 
 export type ClockOptions = {
+  /** Tests: skip the Lightspeed special-order pull. */
+  skipSpecialOrders?: boolean;
   now?: Date;
   /** Run the daily actions regardless of local hour (tests, manual replay). Dedupe still applies. */
   forceDaily?: boolean;
@@ -53,6 +56,14 @@ export async function runClock(dbx: Db, opts: ClockOptions = {}): Promise<ClockS
   const summaries: ClockSummary[] = [];
   for (const showroom of await listShowrooms(dbx)) {
     summaries.push(await runClockForShowroom(dbx, showroom, now, opts));
+    // Pull new bike special orders from Lightspeed every tick (best-effort; the tick must not fail on it).
+    if (showroom.settings.lightspeed.shop_id && !opts.skipSpecialOrders) {
+      try {
+        await syncSpecialOrders(dbx, { showroom, actor: "clock", now });
+      } catch (err) {
+        logger.warn({ err: err instanceof Error ? err.message : String(err), showroom: showroom.slug }, "clock: special-order sync skipped");
+      }
+    }
   }
   return summaries;
 }

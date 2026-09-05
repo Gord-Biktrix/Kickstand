@@ -15,6 +15,13 @@
       "when": 1788464621546,
       "tag": "0001_quick_flatman",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1788629844351,
+      "tag": "0002_little_marvex",
+      "breakpoints": true
     }
   ]
 }
