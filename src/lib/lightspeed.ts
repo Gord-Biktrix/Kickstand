@@ -1,3 +1,4 @@
+import { formatInTimeZone } from "date-fns-tz";
 import { and, desc, eq } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import {
@@ -433,18 +434,24 @@ async function activeAppointment(dbx: Db, unitId: string): Promise<Appointment |
   return a ?? null;
 }
 
+/** "Saturday 10:00 am (5 Sep)" — weekday and time first, the date as a tie-breaker. Fits Hook Out. */
+function shortWhen(instant: Date, tz: string): string {
+  return `${formatInTimeZone(instant, tz, "EEEE h:mm aaa")} (${formatInTimeZone(instant, tz, "d MMM")})`;
+}
+
 function receiptNote(showroom: ShowroomCtx, unit: Unit, appt: Appointment | null, buildBy: LocalDate | null, assemblyDue: Date | null): string {
   const tz = showroom.timezone;
   const bike = [unit.model, unit.colour, unit.size].filter(Boolean).join(" · ");
   const slot = appt ? `CUSTOMER PICKUP ${formatDateTime(appt.startsAt, tz)}` : "Pickup not booked yet";
   const build = assemblyDue
-    ? `Build by ${formatDateTime(assemblyDue, tz)} (Due on this work order)`
+    ? `BUILD BY: ${formatDateTime(assemblyDue, tz)} (Due on this work order)`
     : buildBy
-      ? `Build by end of ${formatLongDateFromLocal(buildBy)}`
+      ? `BUILD BY: end of ${formatLongDateFromLocal(buildBy)}`
       : "";
   const hold = unit.pickupBy ? `Free hold until ${formatLongDate(unit.pickupBy, tz)}` : "";
   const urls = customerUrls(unit);
-  return [`PICKUP · ${bike} · box ${unit.boxTag}`, slot, build, hold, urls ? `Manage: ${urls.manage_url}` : ""]
+  // Build deadline before the pickup slot: the mechanic reads this top-down.
+  return [`PICKUP · ${bike} · box ${unit.boxTag}`, build, slot, hold, urls ? `Manage: ${urls.manage_url}` : ""]
     .filter(Boolean)
     .join("\n");
 }
@@ -506,11 +513,12 @@ export async function syncUnitToLightspeed(dbx: Db, args: SyncArgs): Promise<Syn
       ? assemblyDue
         ? {
             etaOut: assemblyDue.toISOString(),
-            hookOut: `PICKUP ${formatDateTime(appt.startsAt, showroom.timezone)} · build by ${formatDateTime(assemblyDue, showroom.timezone)}`,
+            // Build deadline first and loud — that is what the mechanic reads off Hook Out.
+            hookOut: `BUILD BY: ${shortWhen(assemblyDue, showroom.timezone)} · Pickup ${shortWhen(appt.startsAt, showroom.timezone)}`,
           }
         : {
             etaOut: appt.startsAt.toISOString(),
-            hookOut: `Build by ${formatShortDateFromLocal(buildBy!)} · Pickup ${formatDateTime(appt.startsAt, showroom.timezone)}`,
+            hookOut: `BUILD BY: end of ${formatShortDateFromLocal(buildBy!)} · Pickup ${shortWhen(appt.startsAt, showroom.timezone)}`,
           }
       : unit.pickupBy
         ? { etaOut: unit.pickupBy.toISOString(), hookOut: `Not booked · hold until ${formatLongDate(unit.pickupBy, showroom.timezone)}` }

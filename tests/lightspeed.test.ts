@@ -138,7 +138,7 @@ describe("Lightspeed bridge", () => {
       workorderStatusID: STATUSES.booked,
       etaOut: localToUtc("2026-09-05", "11:45", TZ).toISOString(),
       // Sat 5 Sep pickup → build by Fri 4 Sep (last open day before), pickup time preserved
-      hookOut: expect.stringMatching(/^Build by Fri 4 Sep · Pickup .*11:45/),
+      hookOut: expect.stringMatching(/^BUILD BY: end of Fri 4 Sep · Pickup Saturday 11:45 am \(5 Sep\)$/),
     });
     expect(ls.calls.filter((c) => c.method === "POST")).toHaveLength(0);
   });
@@ -186,9 +186,11 @@ describe("Lightspeed bridge", () => {
     let put = ls.calls.find((c) => c.method === "PUT")!;
     expect(put.body).toMatchObject({
       etaOut: localToUtc("2026-09-05", "10:00", TZ).toISOString(),
-      hookOut: expect.stringMatching(/^PICKUP Saturday 5 September at 2:45 pm · build by Saturday 5 September at 10:00 am$/),
+      hookOut: expect.stringMatching(/^BUILD BY: Saturday 10:00 am \(5 Sep\) · Pickup Saturday 2:45 pm \(5 Sep\)$/),
     });
-    expect(String(put.body!.note)).toContain("CUSTOMER PICKUP Saturday 5 September at 2:45 pm");
+    const note = String(put.body!.note);
+    expect(note).toContain("CUSTOMER PICKUP Saturday 5 September at 2:45 pm");
+    expect(note.indexOf("BUILD BY: Saturday 5 September at 10:00 am")).toBeLessThan(note.indexOf("CUSTOMER PICKUP"));
 
     // An early slot (Tuesday 12:00 → before the 10:00 cut? no: 12:00 is after 10:00, so same day) vs a slot before 10:00 is impossible here (window opens 12:00);
     // so check the previous-open-day branch with a 10:00 due time and a Saturday 11:00 slot → still same day (11:00 > 10:00).
