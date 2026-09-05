@@ -1,0 +1,74 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% if event.old_slot_start_local %}Your pickup has moved{% else %}Your pickup is booked{% endif %}</title>
+</head>
+<body style="margin:0;padding:0;background:#f4f4f2;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;color:#1c1c1a;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f2;">
+  <tr><td align="center" style="padding:24px 12px;">
+    <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:12px;overflow:hidden;">
+      <tr><td style="padding:28px 32px 8px;text-align:center;font-size:22px;font-weight:700;letter-spacing:0.12em;color:#c8451b;">BIKTRIX</td></tr>
+      <tr><td style="padding:8px 32px 0;font-size:16px;line-height:24px;">
+        Hi {{ person.first_name|default:"there" }},
+      </td></tr>
+      <tr><td style="padding:16px 32px 0;font-size:16px;line-height:24px;">
+        {% if event.old_slot_start_local %}
+          <strong>Your pickup has moved.</strong> Previously {{ event.old_slot_start_local }}. Your new time is:
+        {% else %}
+          <strong>You're booked.</strong>
+          {% if event.bike_count > 1 %}Your {{ event.bike_count }} bikes ({{ event.bikes|join:", " }}) are{% else %}Your {{ event.model }}{% if event.colour %} in {{ event.colour }}{% endif %} is{% endif %}
+          being built for you and will be ready to collect on:
+        {% endif %}
+      </td></tr>
+      <tr><td style="padding:16px 32px 0;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#fbf1ec;border-radius:10px;">
+          <tr><td style="padding:18px 20px;">
+            <div style="font-size:22px;font-weight:700;line-height:28px;">{{ event.slot_start_local }}</div>
+            <div style="font-size:15px;line-height:22px;color:#4a4a46;margin-top:4px;">{{ event.showroom }} · {{ event.showroom_address }}</div>
+          </td></tr>
+        </table>
+      </td></tr>
+      <tr><td style="padding:18px 32px 0;" align="left">
+        <table role="presentation" cellpadding="0" cellspacing="0"><tr>
+          <td style="border-radius:8px;background:#c8451b;">
+            <a href="{{ event.manage_url }}" style="display:inline-block;padding:12px 18px;color:#ffffff;text-decoration:none;font-weight:600;font-size:15px;">Manage my pickup</a>
+          </td>
+          <td style="width:10px;"></td>
+          <td style="border-radius:8px;border:1px solid #c8451b;">
+            <a href="{{ event.calendar_ics_url }}" style="display:inline-block;padding:11px 18px;color:#c8451b;text-decoration:none;font-weight:600;font-size:15px;">Add to calendar</a>
+          </td>
+        </tr></table>
+      </td></tr>
+      <tr><td style="padding:24px 32px 0;font-size:16px;line-height:24px;">
+        <strong>What happens at pickup</strong><br>
+        Allow about 45 minutes. We'll fit the bike to you, walk through the display, charging and locking, and do the 21-point safety check with you.
+      </td></tr>
+      <tr><td style="padding:16px 32px 0;font-size:16px;line-height:24px;">
+        <strong>Please bring</strong>
+        <ul style="margin:6px 0 0;padding-left:20px;">
+          <li>Photo ID</li>
+          <li>Your order confirmation (this email is fine)</li>
+          {% if event.balance_display %}<li>The card you'd like to pay the remaining balance with — <strong>{{ event.balance_display }}</strong> is due at pickup</li>{% endif %}
+        </ul>
+      </td></tr>
+      <tr><td style="padding:16px 32px 0;font-size:16px;line-height:24px;">
+        <strong>Need to change it?</strong><br>
+        You can reschedule or cancel up to 24 hours before your slot, free of charge, from <a href="{{ event.manage_url }}" style="color:#c8451b;">your pickup page</a>. Inside 24 hours a change counts as a missed pickup, so please give us a shout early.
+      </td></tr>
+      <tr><td style="padding:16px 32px 28px;font-size:16px;line-height:24px;">
+        Questions? Call {{ event.showroom }} on {{ event.showroom_phone }} or reply to this email.<br><br>
+        See you soon,<br>The Biktrix team
+      </td></tr>
+    </table>
+    <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;">
+      <tr><td style="padding:16px 12px;text-align:center;font-size:12px;line-height:18px;color:#7a7a74;">
+        {{ organization.name }} · {{ organization.full_address }}<br>
+        This is a service message about your order. {% unsubscribe 'Unsubscribe' %} from marketing emails.
+      </td></tr>
+    </table>
+  </td></tr>
+</table>
+</body>
+</html>
