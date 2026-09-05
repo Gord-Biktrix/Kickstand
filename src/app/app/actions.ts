@@ -1,6 +1,6 @@
 "use server";
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { db } from "@/db/client";
 import { capacityOverrides, capacityRules, orders, units } from "@/db/schema";
@@ -262,6 +262,20 @@ export async function staffPrepareUnitAction(formData: FormData) {
     const user = await requireActor("staff");
     const showroom = await currentShowroom();
     let orderId = str(formData, "order_id");
+    if (!orderId) {
+      // Double-submit or a re-press of the register button: the sale already exists as an open order.
+      // Reuse it — jump to its bike when there is one, otherwise receive against it — instead of failing.
+      const ref = str(formData, "order_ref").trim();
+      const source = (str(formData, "source") || "lightspeed") as "lightspeed" | "shopify" | "manual";
+      const [existing] = ref
+        ? await db.select().from(orders).where(and(eq(orders.showroomId, showroom.id), eq(orders.source, source), eq(orders.orderRef, ref), inArray(orders.status, ["open", "deferred"]))).limit(1)
+        : [];
+      if (existing) {
+        const [live] = await db.select({ id: units.id }).from(units).where(and(eq(units.orderId, existing.id), inArray(units.status, ["received", "invited", "booked", "building", "ready"]))).limit(1);
+        if (live) redirect(`/app/book?unit=${live.id}`);
+        orderId = existing.id;
+      }
+    }
     if (!orderId) {
       const phoneRaw = str(formData, "customer_phone");
       if (phoneRaw && !normalizePhone(phoneRaw)) throw new Error("Phone number could not be normalised");

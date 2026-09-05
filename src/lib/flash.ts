@@ -13,9 +13,14 @@ export function withFlash(path: string, flash: { ok?: string; error?: string }):
   return `${path}${path.includes("?") ? "&" : "?"}${qs}`;
 }
 
+/** Human-readable error for a flash. Database errors are summarised — staff never need the SQL. */
 export function errorMessage(err: unknown): string {
-  if (err instanceof Error) return err.message;
-  return String(err);
+  const raw = err instanceof Error ? err.message : String(err);
+  if (/^Failed query:/i.test(raw) || /duplicate key value|violates (unique|foreign key|check) constraint/i.test(raw)) {
+    if (/duplicate key|unique/i.test(raw)) return "That record already exists — check the list before creating it again.";
+    return "Something went wrong saving that. Nothing was changed; try again or ask an admin.";
+  }
+  return raw;
 }
 
 export function str(formData: FormData, key: string): string {
