@@ -1,0 +1,91 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% if event.joined_existing_pickup %}Your other bike is here too{% else %}Pick a time to collect your bike{% endif %}</title>
+</head>
+<body style="margin:0;padding:0;background:#f4f4f2;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;color:#1c1c1a;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f2;">
+  <tr><td align="center" style="padding:24px 12px;">
+    <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:12px;overflow:hidden;">
+      <tr><td style="padding:28px 32px 8px;text-align:center;font-size:22px;font-weight:700;letter-spacing:0.12em;color:#c8451b;">BIKTRIX</td></tr>
+      <tr><td style="padding:8px 32px 0;font-size:16px;line-height:24px;">
+        Hi {{ person.first_name|default:"there" }},
+      </td></tr>
+
+      {% if event.joined_existing_pickup %}
+      <tr><td style="padding:16px 32px 0;font-size:16px;line-height:24px;">
+        <strong>Good news — {% if event.bike_count > 1 %}your other bikes are{% else %}your {{ event.model }} is{% endif %} here too.</strong>
+        We've added {% if event.bike_count > 1 %}them{% else %}it{% endif %} to the pickup you already have booked, so there's nothing you need to do:
+      </td></tr>
+      <tr><td style="padding:16px 32px 0;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#fbf1ec;border-radius:10px;">
+          <tr><td style="padding:18px 20px;">
+            <div style="font-size:22px;font-weight:700;line-height:28px;">{{ event.slot_start_local }}</div>
+            <div style="font-size:15px;line-height:22px;color:#4a4a46;margin-top:4px;">{{ event.showroom }} · {{ event.showroom_address }}</div>
+          </td></tr>
+        </table>
+      </td></tr>
+      <tr><td style="padding:18px 32px 0;" align="left">
+        <table role="presentation" cellpadding="0" cellspacing="0"><tr>
+          <td style="border-radius:8px;border:1px solid #c8451b;">
+            <a href="{{ event.manage_url }}" style="display:inline-block;padding:11px 18px;color:#c8451b;text-decoration:none;font-weight:600;font-size:15px;">Change my pickup</a>
+          </td>
+        </tr></table>
+      </td></tr>
+
+      {% else %}
+      <tr><td style="padding:16px 32px 0;font-size:16px;line-height:24px;">
+        <strong>Great news: {% if event.bike_count > 1 %}your {{ event.bike_count }} bikes are{% else %}your {{ event.model }}{% if event.colour %} in {{ event.colour }}{% endif %} is{% endif %} here and heading into the workshop.</strong>
+        {% if event.order_kind == "preorder" %}Thanks for your patience — it was worth the wait.{% else %}Builds take about 48 hours, so the earliest collection slots are two days out.{% endif %}
+        Pick a time that suits you and we'll have {% if event.bike_count > 1 %}them{% else %}it{% endif %} built, checked and ready when you arrive.
+      </td></tr>
+      {% if event.bike_count > 1 %}
+      <tr><td style="padding:12px 32px 0;font-size:15px;line-height:22px;color:#4a4a46;">
+        {{ event.bikes|join:" · " }}
+      </td></tr>
+      {% endif %}
+      <tr><td style="padding:18px 32px 0;" align="left">
+        <table role="presentation" cellpadding="0" cellspacing="0"><tr>
+          <td style="border-radius:8px;background:#c8451b;">
+            <a href="{{ event.booking_url }}" style="display:inline-block;padding:12px 18px;color:#ffffff;text-decoration:none;font-weight:600;font-size:15px;">Pick my collection time</a>
+          </td>
+        </tr></table>
+      </td></tr>
+      <tr><td style="padding:16px 32px 0;font-size:15px;line-height:22px;color:#4a4a46;">
+        Please book by <strong>{{ event.book_by_date }}</strong>.{% if event.reward_text %} Book within 48 hours and we'll add {{ event.reward_text }} at pickup.{% endif %}
+      </td></tr>
+      {% endif %}
+
+      <tr><td style="padding:24px 32px 0;font-size:16px;line-height:24px;">
+        <strong>What happens at pickup</strong><br>
+        Allow about 45 minutes. We'll fit the bike to you, walk through the display, charging and locking, and do the 21-point safety check with you.
+      </td></tr>
+      <tr><td style="padding:16px 32px 0;font-size:16px;line-height:24px;">
+        <strong>Please bring</strong>
+        <ul style="margin:6px 0 0;padding-left:20px;">
+          <li>Photo ID</li>
+          <li>Your order confirmation (this email is fine)</li>
+          {% if event.balance_display %}<li>The card you'd like to pay the remaining balance with — <strong>{{ event.balance_display }}</strong> is due at pickup</li>{% endif %}
+        </ul>
+      </td></tr>
+      <tr><td style="padding:16px 32px 0;font-size:16px;line-height:24px;">
+        <strong>How long we hold it</strong><br>
+        We'll keep {% if event.bike_count > 1 %}your bikes{% else %}your bike{% endif %} safely for you until <strong>{{ event.pickup_by_date }}</strong> at no charge.{% if event.terms_version == 2 %} After that a storage fee of {{ event.storage_rate_display }} applies (capped at {{ event.storage_cap_display }}).{% endif %} Can't make it in that window? Just reply to this email and we'll sort something out.
+      </td></tr>
+      <tr><td style="padding:16px 32px 28px;font-size:16px;line-height:24px;">
+        Questions? Call {{ event.showroom }} on {{ event.showroom_phone }} or reply to this email.<br><br>
+        See you soon,<br>The Biktrix team
+      </td></tr>
+    </table>
+    <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;">
+      <tr><td style="padding:16px 12px;text-align:center;font-size:12px;line-height:18px;color:#7a7a74;">
+        {{ organization.name }} · {{ organization.full_address }}<br>
+        This is a service message about your order. {% unsubscribe 'Unsubscribe' %} from marketing emails.
+      </td></tr>
+    </table>
+  </td></tr>
+</table>
+</body>
+</html>
