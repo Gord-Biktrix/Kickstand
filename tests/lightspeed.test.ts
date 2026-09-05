@@ -2,7 +2,7 @@ import { desc, eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { Db } from "@/db/client";
 import { events, lightspeedConnections, orders, units } from "@/db/schema";
-import { bookSlot } from "@/lib/booking";
+import { bookSlot, cancelBooking, rescheduleBooking } from "@/lib/booking";
 import { saveConnection, setLightspeedFetch, statusNameFor, STATUS_KEYS } from "@/lib/lightspeed";
 import { MemoryNotifier, setNotifier } from "@/lib/notifier";
 import type { ShowroomCtx } from "@/lib/showroom";
@@ -224,6 +224,32 @@ describe("Lightspeed bridge", () => {
     const wo = ls.calls.find((c) => c.url.endsWith("Workorder.json"))!.body!;
     expect(wo).toMatchObject({ workorderStatusID: 1, etaOut: localToUtc("2026-09-05", "11:45", TZ).toISOString() });
     expect(ls.calls.find((c) => c.method === "PUT")!.body).toEqual({ workorderStatusID: 23 });
+  });
+
+  it("a reschedule or cancel updates an existing work order's dates even when the message has no mapped status", async () => {
+    const ls = fakeLightspeed();
+    setLightspeedFetch(ls.fetchImpl);
+    showroom = await withSettings(db, showroom, {
+      lightspeed: { enabled: true, shop_id: 3, employee_id: 27, open_status_id: 1, due_mode: "pickup", assembly_due_time_local: "10:00", statuses: { booked: 23 } },
+    });
+    const order = await makeOrder(db, showroom);
+    const unit = await makeUnit(db, showroom, order.id);
+    await inviteUnit(db, { showroom, unitId: unit.id, actor: "s", now: NOW });
+    await bookSlot(db, { showroom, unitId: unit.id, startsAt: localToUtc("2026-09-05", "11:45", TZ), createdBy: "customer", now: NOW });
+    ls.calls.length = 0;
+
+    const moved = localToUtc("2026-09-08", "12:00", TZ);
+    await rescheduleBooking(db, { showroom, unitId: unit.id, startsAt: moved, actor: "customer", now: NOW });
+    const put = ls.calls.find((c) => c.method === "PUT")!;
+    expect(put.body).toMatchObject({ etaOut: moved.toISOString() });
+    expect(put.body).not.toHaveProperty("workorderStatusID");
+    expect((await lastMessageEvent(unit.id)).payload.lightspeed).toMatchObject({ datesOnly: true, created: false });
+
+    ls.calls.length = 0;
+    await cancelBooking(db, { showroom, unitId: unit.id, reason: "customer", actor: "customer", now: NOW });
+    const put2 = ls.calls.find((c) => c.method === "PUT")!;
+    expect(String(put2.body!.hookOut)).toMatch(/^Not booked/);
+    expect(put2.body).not.toHaveProperty("workorderStatusID");
   });
 
   it("does nothing when the bridge is disabled", async () => {

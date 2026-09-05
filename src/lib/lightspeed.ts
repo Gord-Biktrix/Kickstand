@@ -455,7 +455,7 @@ export type SyncArgs = {
 };
 
 export type SyncResult =
-  | { workorderID: string; workorderStatusID: number; created: boolean }
+  | { workorderID: string; workorderStatusID: number | null; created: boolean; datesOnly?: boolean }
   | { skipped: true; reason: string };
 
 async function activeAppointment(dbx: Db, unitId: string): Promise<Appointment | null> {
@@ -500,12 +500,14 @@ export async function syncUnitToLightspeed(dbx: Db, args: SyncArgs): Promise<Syn
   const ls = showroom.settings.lightspeed;
   if (!lightspeedEnabled(showroom)) throw new LightspeedError("Lightspeed bridge is not enabled for this showroom");
   const key = metricKey(metric);
-  const statusID = ls.statuses[key];
-  // Unmapped messages are Klaviyo-only by design (README "Lightspeed bridge"): nothing to mirror.
-  if (statusID === undefined) return { skipped: true, reason: `no status mapped for '${key}'` };
+  const statusID: number | undefined = ls.statuses[key];
 
   // Re-read ids: the caller's snapshot may predate an earlier sync in the same flush.
   const [unit] = await dbx.select().from(units).where(eq(units.id, args.unit.id));
+  // Unmapped messages are Klaviyo-only for *status* purposes (README "Lightspeed bridge") — but when the
+  // work order already exists, its dates, Hook Out and note must still follow a reschedule or
+  // cancellation. So: no work order + unmapped → skip; existing work order → update dates, keep status.
+  if (statusID === undefined && !unit.lsWorkorderId) return { skipped: true, reason: `no status mapped for '${key}'` };
   const order = unit.orderId
     ? ((await dbx.select().from(orders).where(eq(orders.id, unit.orderId)))[0] ?? args.order)
     : args.order;
@@ -536,7 +538,7 @@ export async function syncUnitToLightspeed(dbx: Db, args: SyncArgs): Promise<Syn
   }
 
   const common: Record<string, unknown> = {
-    workorderStatusID: statusID,
+    ...(statusID !== undefined ? { workorderStatusID: statusID } : {}),
     note: receiptNote(showroom, unit, appt, buildBy, assemblyDue),
     internalNote: `Kickstand unit ${baseUrl()}/app/units/${unit.id}`,
     hookIn: unit.boxTag,
@@ -562,6 +564,7 @@ export async function syncUnitToLightspeed(dbx: Db, args: SyncArgs): Promise<Syn
   let workorderID = unit.lsWorkorderId;
   let created = false;
   if (!workorderID) {
+    if (statusID === undefined) return { skipped: true, reason: `no status mapped for '${key}'` };
     // Create in the neutral "Open" status, then apply the mapped status as a separate change so
     // Ikeono's status-change automations always see a transition (a work order that appears
     // already in a status is not reliably treated as a change).
@@ -581,6 +584,6 @@ export async function syncUnitToLightspeed(dbx: Db, args: SyncArgs): Promise<Syn
   } else {
     await client.updateWorkorder(workorderID, common);
   }
-  logger.info({ unitId: unit.id, workorderID, key, statusID, created }, "lightspeed sync");
-  return { workorderID, workorderStatusID: statusID, created };
+  logger.info({ unitId: unit.id, workorderID, key, statusID: statusID ?? null, created, datesOnly: statusID === undefined }, "lightspeed sync");
+  return { workorderID, workorderStatusID: statusID ?? null, created, ...(statusID === undefined ? { datesOnly: true } : {}) };
 }
