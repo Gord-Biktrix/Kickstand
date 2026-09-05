@@ -82,3 +82,44 @@ body {
     @apply mt-1 text-xs text-muted;
   }
 }
+
+/* Pending feedback (components/pending-indicator.tsx) */
+.pending-bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  height: 3px;
+  width: 100%;
+  z-index: 60;
+  background: linear-gradient(90deg, transparent 0%, var(--color-accent, #c8451b) 40%, var(--color-accent, #c8451b) 60%, transparent 100%);
+  background-size: 50% 100%;
+  animation: pending-slide 1s linear infinite;
+}
+@keyframes pending-slide {
+  from { background-position: -50% 0; }
+  to { background-position: 150% 0; }
+}
+button[aria-busy="true"] {
+  position: relative;
+  color: transparent !important;
+  pointer-events: none;
+  opacity: 0.85;
+}
+button[aria-busy="true"]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 1em;
+  height: 1em;
+  border: 2px solid currentColor;
+  border-color: rgba(0, 0, 0, 0.25);
+  border-top-color: var(--color-accent, #c8451b);
+  border-radius: 9999px;
+  animation: pending-spin 0.7s linear infinite;
+}
+.btn-primary[aria-busy="true"]::after, .btn-danger[aria-busy="true"]::after {
+  border-color: rgba(255, 255, 255, 0.35);
+  border-top-color: #fff;
+}
+@keyframes pending-spin { to { transform: rotate(360deg); } }

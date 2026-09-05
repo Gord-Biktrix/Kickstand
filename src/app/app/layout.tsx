@@ -1,5 +1,7 @@
+import { Suspense } from "react";
 import Link from "next/link";
 import { NavLinks } from "@/components/nav-links";
+import { PendingIndicator } from "@/components/pending-indicator";
 import { ShowroomSwitcher } from "@/components/showroom-switcher";
 import { db } from "@/db/client";
 import { canSwitchShowroom, currentShowroom } from "@/lib/current-showroom";
@@ -24,6 +26,7 @@ export default async function StaffLayout({ children }: { children: React.ReactN
   const switchable = canSwitchShowroom(user) && all.length > 1;
   return (
     <div className="flex flex-1 flex-col">
+      <Suspense fallback={null}><PendingIndicator /></Suspense>
       <header className="border-b border-border bg-card">
         <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3">
           <Link href="/app" className="text-sm font-semibold uppercase tracking-widest text-accent">Biktrix Pickups</Link>
