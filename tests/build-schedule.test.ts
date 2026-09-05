@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildDeadline } from "@/lib/build-schedule";
+import { buildDeadline, buildFeasibleAt } from "@/lib/build-schedule";
 import { DEFAULT_SETTINGS } from "@/lib/settings";
 import type { ShowroomCtx } from "@/lib/showroom";
 import { localToUtc } from "@/lib/time";
@@ -59,4 +59,16 @@ describe("buildDeadline", () => {
     // 16 hours = two shop days back
     expect(buildDeadline(showroom("lead", "10:00", 16), appt("2026-09-04", "12:00"), rules, [])).toEqual({ date: "2026-09-02", at: localToUtc("2026-09-02", "12:00", TZ) });
   });
+
+  it("lead mode: a slot is only feasible while its build deadline is still ahead", () => {
+    // Saturday 5 Sep 16:37: Tuesday 10:00 needs a Saturday 10:00 build → gone; Wednesday 10:00 → Tuesday 10:00 → fine.
+    const now = localToUtc("2026-09-05", "16:37", TZ);
+    expect(buildFeasibleAt(showroom("lead"), appt("2026-09-08", "10:00"), rules, [], now)).toBe(false);
+    expect(buildFeasibleAt(showroom("lead"), appt("2026-09-08", "16:00"), rules, [], now)).toBe(false);
+    expect(buildFeasibleAt(showroom("lead"), appt("2026-09-09", "10:00"), rules, [], now)).toBe(true);
+    // pickup mode: end of the previous open day
+    expect(buildFeasibleAt(showroom("pickup"), appt("2026-09-08", "12:00"), rules, [], now)).toBe(true); // Saturday still has hours left
+    expect(buildFeasibleAt(showroom("pickup"), appt("2026-09-08", "12:00"), rules, [], localToUtc("2026-09-06", "09:00", TZ))).toBe(false);
+  });
 });
+

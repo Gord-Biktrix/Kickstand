@@ -2,7 +2,7 @@ import type { Appointment } from "@/db/schema";
 import { formatInTimeZone } from "date-fns-tz";
 import { buildByDate, effectiveCapacity, type OverrideLike, type RuleLike } from "./capacity";
 import type { ShowroomCtx } from "./showroom";
-import { localToUtc, minutesToTime, timeToMinutes, type LocalDate } from "./time";
+import { endOfLocalDay, localToUtc, minutesToTime, timeToMinutes, type LocalDate } from "./time";
 
 /**
  * The assembly deadline for a booked pickup — one rule shared by the Build board, the Schedule
@@ -70,4 +70,22 @@ function leadDeadline(
     }
   }
   return { date, at: localToUtc(date, minutesToTime(Math.max(0, minutes)), tz) };
+}
+
+/**
+ * Is there still time to build for a pickup at `startsAt`? The deadline instant (or, in pickup
+ * mode, the end of the build-by day) must lie in the future. Used by the slot picker and the
+ * booking check so a Saturday-afternoon booking cannot pick Tuesday 10:00 when the build would
+ * have been due Saturday morning.
+ */
+export function buildFeasibleAt(
+  showroom: ShowroomCtx,
+  appt: Pick<Appointment, "onDate" | "startsAt">,
+  rules: RuleLike[],
+  overrides: OverrideLike[],
+  now: Date,
+): boolean {
+  const d = buildDeadline(showroom, appt, rules, overrides);
+  const deadline = d.at ?? endOfLocalDay(d.date, showroom.timezone);
+  return deadline.getTime() > now.getTime();
 }

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { and, count, eq, inArray, sql } from "drizzle-orm";
 import type { Db, Tx } from "@/db/client";
 import { appointments, dayCounters, orders, units, type Appointment, type Order, type Unit } from "@/db/schema";
+import { buildFeasibleAt } from "./build-schedule";
 import { effectiveCapacity, slotStarts } from "./capacity";
 import { logEvent } from "./events";
 import { baseUrl, flushOutbox, METRIC, type Outbox } from "./messages";
@@ -158,6 +159,11 @@ export async function bookSlotTx(
   if (!validStart) throw new BookingError("INVALID_SLOT");
   if (!args.allowShortNotice && startsAt < addHours(now, settings.min_lead_hours)) throw new BookingError("TOO_EARLY");
   if (startsAt < now) throw new BookingError("TOO_EARLY");
+  // The build must still be possible: the deadline for this slot has to be ahead of us (staff may override).
+  if (!args.allowShortNotice) {
+    const cfg = await getCapacityConfig(tx, showroom.id);
+    if (!buildFeasibleAt(showroom, { onDate: date, startsAt }, cfg.rules, cfg.overrides, now)) throw new BookingError("TOO_EARLY");
+  }
   const latestDate = addLocalDays(toLocalDate(unit.invitedAt, tz), settings.booking_horizon_days);
   if (date > latestDate) throw new BookingError("HORIZON");
 

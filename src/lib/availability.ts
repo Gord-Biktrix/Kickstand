@@ -1,6 +1,7 @@
 import { and, between, eq } from "drizzle-orm";
 import type { DbOrTx } from "@/db/client";
 import { appointments, dayCounters, type Order, type Unit } from "@/db/schema";
+import { buildFeasibleAt } from "./build-schedule";
 import { effectiveCapacity, summarizeDay, type DaySummary, type SlotContext } from "./capacity";
 import { getCapacityConfig, type ShowroomCtx } from "./showroom";
 import { storageEstimateCents } from "./storage";
@@ -73,6 +74,7 @@ export async function getAvailability(
       bookedCount: (countByDate.get(date) ?? 0) + Math.max(0, (args.count ?? 1) - 1),
       bookedStarts: startsByDate.get(date) ?? [],
       storageEstimate: (d) => storageEstimateCents(unit, termsVersion, settings, d, tz),
+      buildFeasible: (d, startsAt) => buildFeasibleAt(showroom, { onDate: d, startsAt }, rules, overrides, now),
     };
     return summarizeDay(date, day, ctx);
   });
