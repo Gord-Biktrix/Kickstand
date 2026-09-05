@@ -923,3 +923,32 @@ export async function visitMates(dbx: Db, appointment: Pick<Appointment, "id" | 
     .orderBy(asc(units.receivedAt));
   return rows.map((r) => r.unit);
 }
+
+/**
+ * Undo a receive / invite that shouldn't have happened yet (pressed Invite on the wrong row, box
+ * turned out to be the wrong bike): the unit is removed and the order goes back to "On order".
+ * Only for bikes nobody has booked; the customer's link stops working, nothing is sent.
+ */
+export async function unreceiveUnit(dbx: Db, args: { showroom: ShowroomCtx; unitId: string; actor: string }): Promise<{ orderRef: string }> {
+  return dbx.transaction(async (tx) => {
+    const [unit] = await tx.select().from(units).where(and(eq(units.id, args.unitId), eq(units.showroomId, args.showroom.id))).limit(1);
+    if (!unit) throw new UnitError("Bike not found");
+    if (!["received", "invited"].includes(unit.status)) throw new UnitError(`Only received or invited bikes can go back to On order (this one is ${unit.status})`);
+    const [booked] = await tx.select({ id: appointments.id }).from(appointments).where(and(eq(appointments.unitId, unit.id), eq(appointments.status, "booked"))).limit(1);
+    if (booked) throw new UnitError("Cancel the booking first");
+    const [order] = unit.orderId ? await tx.select().from(orders).where(eq(orders.id, unit.orderId)).limit(1) : [undefined];
+    if (!order) throw new UnitError("Bike has no order");
+    await tx.delete(appointments).where(eq(appointments.unitId, unit.id));
+    // Keep the order's history but drop the unit-level rows with the unit.
+    await tx.delete(events).where(eq(events.unitId, unit.id));
+    await tx.delete(units).where(eq(units.id, unit.id));
+    await logEvent(tx, {
+      showroomId: args.showroom.id,
+      orderId: order.id,
+      type: "unit_unreceived",
+      actor: args.actor,
+      payload: { box_tag: unit.boxTag, model: unit.model, status_before: unit.status, ls_workorder_id: unit.lsWorkorderId ?? null },
+    });
+    return { orderRef: order.orderRef };
+  });
+}

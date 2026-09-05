@@ -13,7 +13,7 @@ import { normalizePhone } from "@/lib/phone";
 import { FLAG_KEYS, PROGRAM_KEYS, settingsSchema, validateSettings, type ProgramSettings } from "@/lib/settings";
 import { getCapacityConfig, patchShowroomSettings } from "@/lib/showroom";
 import { normalizeTime } from "@/lib/time";
-import { attachUnit, bookableSiblings, completeHandover, createOrder, deleteUnit, detachUnit, grantExtension, inviteAllReceived, inviteOrders, inviteUnit, inviteUnits, markReady, receiveUnit, resendInvite, retagUnit, startBuild, waiveStorage } from "@/lib/units";
+import { attachUnit, bookableSiblings, completeHandover, createOrder, deleteUnit, detachUnit, grantExtension, inviteAllReceived, inviteOrders, inviteUnit, inviteUnits, markReady, receiveUnit, resendInvite, retagUnit, startBuild, unreceiveUnit, waiveStorage } from "@/lib/units";
 import { currentShowroom } from "@/lib/current-showroom";
 import { syncSpecialOrders } from "@/lib/special-orders";
 import { deleteView, saveView, syncWorkorders } from "@/lib/workorders";
@@ -394,6 +394,16 @@ export async function deleteViewAction(id: string) {
     const showroom = await currentShowroom(user);
     await deleteView(db, showroom, id);
     return "View deleted.";
+  });
+}
+
+/** Undo a receive/invite: the bike goes back to the On order list (unbooked bikes only). */
+export async function unreceiveUnitAction(unitId: string) {
+  return run("/app/bikes", async () => {
+    const user = await requireActor("staff");
+    const showroom = await currentShowroom(user);
+    const r = await unreceiveUnit(db, { showroom, unitId, actor: user.id });
+    return `Sale ${r.orderRef} is back under On order. The customer's link no longer works; nothing was sent.`;
   });
 }
 

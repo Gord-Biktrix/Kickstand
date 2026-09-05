@@ -29,6 +29,7 @@ import {
   retagUnitAction,
   staffCancelBookingAction,
   startBuildAction,
+  unreceiveUnitAction,
   waiveStorageAction,
 } from "../../actions";
 import { currentShowroom } from "@/lib/current-showroom";
@@ -185,6 +186,11 @@ export default async function UnitPage({ params, searchParams }: { params: Promi
               )}
               {["invited", "building", "ready"].includes(unit.status) && <Link href={`/app/book?unit=${unit.id}`} className="btn btn-primary">Book for customer</Link>}
               {unit.status === "invited" && <form action={resendInviteAction.bind(null, unit.id, RETURN)}><button type="submit" className="btn">Send invite again</button></form>}
+              {["received", "invited"].includes(unit.status) && (
+                <form action={unreceiveUnitAction.bind(null, unit.id)}>
+                  <ConfirmButton className="btn" message="Send this bike back to On order? The box is removed from the building and the customer's booking link stops working. Nothing is sent to the customer.">Back to On order</ConfirmButton>
+                </form>
+              )}
               {["building", "ready"].includes(unit.status) && !handover && <Link href={`${RETURN}?handover=1`} className="btn">Start handover</Link>}
               {unit.status === "building" && <form action={markReadyAction.bind(null, unit.id, RETURN)}><button type="submit" className="btn">Ready</button></form>}
             </div>
