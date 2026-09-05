@@ -70,7 +70,7 @@ async function activeAppointment(tx: Tx, unitId: string): Promise<Appointment | 
   return a ?? null;
 }
 
-async function decrementCounter(tx: Tx, showroomId: string, onDate: string) {
+export async function decrementCounter(tx: Tx, showroomId: string, onDate: string) {
   await tx
     .update(dayCounters)
     .set({ bookedCount: sql`greatest(${dayCounters.bookedCount} - 1, 0)` })

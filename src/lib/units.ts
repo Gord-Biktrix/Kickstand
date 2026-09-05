@@ -1,8 +1,8 @@
 import { and, asc, eq, inArray, notExists, sql } from "drizzle-orm";
 import type { Db, Tx } from "@/db/client";
-import { appointments, orders, units, type NewOrder, type Order, type StaffUser, type Unit } from "@/db/schema";
+import { appointments, events, orders, units, type NewOrder, type Order, type StaffUser, type Unit } from "@/db/schema";
 import { hasRole } from "./roles";
-import { cancelBookingTx } from "./booking";
+import { cancelBookingTx, decrementCounter } from "./booking";
 import { logEvent } from "./events";
 import { formatMoney } from "./format";
 import { flushOutbox, METRIC, type Outbox } from "./messages";
@@ -683,4 +683,52 @@ export function describeClock(unit: Unit, tz: string) {
     bookBy: unit.bookBy ? formatLongDate(unit.bookBy, tz) : "—",
     pickupBy: unit.pickupBy ? formatLongDate(unit.pickupBy, tz) : "—",
   };
+}
+
+/**
+ * Hard-delete a bike that should never have existed (test data, duplicate, wrong customer).
+ * Manager-only at the action layer. Removes the unit, its appointments and events, and the order
+ * when this was its only unit; frees any booked day's counter. Nothing is sent to the customer and
+ * Lightspeed is not touched — close the work order there by hand. One `unit_deleted` event is kept
+ * on the showroom (no unit/order id) so the deletion itself is still in the log.
+ */
+export async function deleteUnit(
+  dbx: Db,
+  args: { showroom: ShowroomCtx; unitId: string; actor: string; reason: string },
+): Promise<{ boxTag: string; orderDeleted: boolean }> {
+  return dbx.transaction(async (tx) => {
+    const [unit] = await tx.select().from(units).where(and(eq(units.id, args.unitId), eq(units.showroomId, args.showroom.id))).limit(1);
+    if (!unit) throw new Error("Bike not found");
+    const [order] = unit.orderId ? await tx.select().from(orders).where(eq(orders.id, unit.orderId)).limit(1) : [undefined];
+    const appts = await tx.select().from(appointments).where(eq(appointments.unitId, unit.id));
+    for (const a of appts) if (a.status === "booked") await decrementCounter(tx, args.showroom.id, a.onDate);
+    await tx.delete(events).where(eq(events.unitId, unit.id));
+    await tx.delete(appointments).where(eq(appointments.unitId, unit.id));
+    await tx.delete(units).where(eq(units.id, unit.id));
+    let orderDeleted = false;
+    if (order) {
+      const [remaining] = await tx.select({ n: sql<number>`count(*)::int` }).from(units).where(eq(units.orderId, order.id));
+      if (remaining.n === 0) {
+        await tx.delete(events).where(eq(events.orderId, order.id));
+        await tx.delete(orders).where(eq(orders.id, order.id));
+        orderDeleted = true;
+      }
+    }
+    await logEvent(tx, {
+      showroomId: args.showroom.id,
+      type: "unit_deleted",
+      actor: args.actor,
+      payload: {
+        reason: args.reason,
+        box_tag: unit.boxTag,
+        model: unit.model,
+        status: unit.status,
+        customer_name: order?.customerName ?? null,
+        order_ref: order?.orderRef ?? null,
+        ls_workorder_id: unit.lsWorkorderId ?? null,
+        order_deleted: orderDeleted,
+      },
+    });
+    return { boxTag: unit.boxTag, orderDeleted };
+  });
 }

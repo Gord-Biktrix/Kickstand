@@ -21,6 +21,7 @@ import {
   attachUnitAction,
   completeHandoverAction,
   deferUnitAction,
+  deleteUnitAction,
   grantExtensionAction,
   inviteUnitAction,
   markReadyAction,
@@ -297,6 +298,16 @@ export default async function UnitPage({ params, searchParams }: { params: Promi
                 </div>
               )}
               {unit.status === "picked_up" && <Alert tone="ok">Picked up {unit.pickedUpAt ? formatDateTime(unit.pickedUpAt, tz) : ""}.</Alert>}
+              {manager && (
+                <details>
+                  <summary className="btn w-full cursor-pointer list-none text-danger">Delete this bike</summary>
+                  <form action={deleteUnitAction.bind(null, unit.id)} className="mt-2 space-y-2">
+                    <p className="text-xs text-muted">For bikes that should never have existed — a test, a duplicate, the wrong customer. Removes the bike, its bookings and history{order ? ", and the order if this was its only bike" : ""}. Nothing is sent to the customer. Close any Lightspeed work order by hand.</p>
+                    <Field label="Reason" htmlFor="del_reason"><input id="del_reason" name="reason" required className="input" placeholder="e.g. test booking" /></Field>
+                    <ConfirmButton className="btn btn-danger btn-sm w-full" message={`Delete box ${unit.boxTag} and its history? This cannot be undone.`}>Delete permanently</ConfirmButton>
+                  </form>
+                </details>
+              )}
             </div>
           </Card>
 

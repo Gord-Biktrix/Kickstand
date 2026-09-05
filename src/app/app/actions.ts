@@ -13,21 +13,7 @@ import { normalizePhone } from "@/lib/phone";
 import { FLAG_KEYS, PROGRAM_KEYS, settingsSchema, validateSettings, type ProgramSettings } from "@/lib/settings";
 import { getCapacityConfig, getShowroom, patchShowroomSettings } from "@/lib/showroom";
 import { normalizeTime } from "@/lib/time";
-import {
-  attachUnit,
-  completeHandover,
-  createOrder,
-  detachUnit,
-  grantExtension,
-  inviteAllReceived,
-  inviteUnit,
-  markReady,
-  receiveUnit,
-  resendInvite,
-  retagUnit,
-  startBuild,
-  waiveStorage,
-} from "@/lib/units";
+import { attachUnit, completeHandover, createOrder, deleteUnit, detachUnit, grantExtension, inviteAllReceived, inviteUnit, markReady, receiveUnit, resendInvite, retagUnit, startBuild, waiveStorage } from "@/lib/units";
 
 /** Run a mutation and land back on `returnTo` with a flash; auth errors surface the same way. */
 async function run(returnTo: string, fn: () => Promise<string | void>): Promise<never> {
@@ -331,6 +317,18 @@ export async function staffCancelBookingAction(unitId: string, returnTo: string,
   });
 }
 
+/** Manager-only hard delete of a bike created by mistake (see deleteUnit). */
+export async function deleteUnitAction(unitId: string, formData: FormData) {
+  const reason = str(formData, "reason").trim();
+  return run("/app/bikes", async () => {
+    const user = await requireActor("manager");
+    const showroom = await getShowroom(db);
+    if (!reason) throw new Error("Give a reason for the delete.");
+    const res = await deleteUnit(db, { showroom, unitId, actor: user.id, reason });
+    return `Deleted box ${res.boxTag}${res.orderDeleted ? " and its order" : ""}. Nothing was sent to the customer; close any Lightspeed work order by hand.`;
+  });
+}
+
 /**
  * Bulk actions from the Bikes page: the selected unit ids arrive as repeated `unit_ids` fields
  * (checkboxes bound to the form with the `form` attribute) and `op` says what to do. Each bike is
@@ -342,14 +340,16 @@ export async function bulkBikesAction(returnTo: string, formData: FormData) {
   const op = str(formData, "op");
   const reason = cancelReason(str(formData, "reason"));
   return run(safeReturn(returnTo, "/app/bikes"), async () => {
-    const user = await requireActor("staff");
+    const user = await requireActor(op === "delete" ? "manager" : "staff");
     const showroom = await getShowroom(db);
     if (ids.length === 0) throw new Error("Tick at least one bike first.");
+    const deleteReason = str(formData, "delete_reason").trim() || "bulk delete from Bikes";
     let done = 0;
     const skipped: string[] = [];
     for (const unitId of ids) {
       try {
         if (op === "invite") await inviteUnit(db, { showroom, unitId, actor: user.id });
+        else if (op === "delete") await deleteUnit(db, { showroom, unitId, actor: user.id, reason: deleteReason });
         else if (op === "build") await startBuild(db, { showroom, unitId, actor: user.id });
         else if (op === "ready") await markReady(db, { showroom, unitId, actor: user.id });
         else if (op === "cancel") await cancelBooking(db, { showroom, unitId, reason, actor: user.id });
@@ -360,7 +360,7 @@ export async function bulkBikesAction(returnTo: string, formData: FormData) {
         skipped.push(`${u?.boxTag ?? unitId}: ${err instanceof BookingError ? BOOKING_ERROR_TEXT[err.code] : errorMessage(err)}`);
       }
     }
-    const verb = { invite: "Invites sent", build: "Marked building", ready: "Marked ready", cancel: "Bookings cancelled" }[op] ?? "Done";
+    const verb = { invite: "Invites sent", build: "Marked building", ready: "Marked ready", cancel: "Bookings cancelled", delete: "Deleted" }[op] ?? "Done";
     const tail = skipped.length ? ` · skipped ${skipped.length}: ${skipped.slice(0, 3).join("; ")}${skipped.length > 3 ? "; …" : ""}` : "";
     if (op === "cancel" && done > 0) {
       return `${verb}: ${done}${reason === "staff" ? " (no messages sent)" : reason === "shop" ? " (customers told we had to cancel, with a rebook link)" : " (customers sent a rebook link)"}${tail}`;

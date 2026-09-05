@@ -1,9 +1,10 @@
 import Link from "next/link";
 import { db } from "@/db/client";
 import { BulkSelect } from "@/components/bulk-select";
+import { ConfirmButton } from "@/components/confirm-button";
 import { StatusBadge } from "@/components/status-badge";
 import { Badge, Card, Empty, Flash, PageHeader } from "@/components/ui";
-import { requireUser } from "@/lib/auth";
+import { hasRole, requireUser } from "@/lib/auth";
 import { customerKey } from "@/lib/customers";
 import { formatMoney } from "@/lib/format";
 import { sp, type SearchParams } from "@/lib/flash";
@@ -38,7 +39,8 @@ function matches(r: BikeRow, f: FilterKey): boolean {
 /** Every bike in the building, one list, filtered by what it needs next. Replaces the Arrivals search, Build board and Watchlist as pages. */
 export default async function BikesPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const q = await searchParams;
-  await requireUser("staff");
+  const user = await requireUser("staff");
+  const manager = hasRole(user.role, "manager");
   const showroom = await getShowroom(db);
   const tz = showroom.timezone;
   const now = new Date();
@@ -130,6 +132,12 @@ export default async function BikesPage({ searchParams }: { searchParams: Promis
               <option value="staff">Mistake — silent, no penalty</option>
             </select>
           </div>
+          {manager && (
+            <div className="flex items-center gap-2">
+              <ConfirmButton name="op" value="delete" className="btn btn-danger btn-sm" message="Delete the selected bikes, their bookings and history? Nothing is sent to the customer. This cannot be undone.">Delete</ConfirmButton>
+              <input name="delete_reason" className="input h-8 w-40 py-0 text-sm" placeholder="Reason (e.g. test)" />
+            </div>
+          )}
         </form>
         <Card className="overflow-x-auto p-0">
           <table className="table">
