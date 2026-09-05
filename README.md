@@ -99,6 +99,7 @@ Staff can book on a customer's behalf at `/app/book` (also linked as **Book for 
 
 - **Manual clock run:** `curl -X POST -H "Authorization: Bearer $CRON_SECRET" "$APP_BASE_URL/api/cron/clock?force=daily"`
 - **Health:** `GET /api/health` reports DB connectivity and whether the Klaviyo key and cron secret are set.
+- **Klaviyo SMS consent:** the notifier registers *transactional* SMS consent for the customer's number (Profile Subscription bulk job) before the first event when `sms_consent` is true — Klaviyo will not text without it; flow messages must be marked transactional. Flow-by-flow copy and settings: `docs/klaviyo-flows.md`.
 - **Klaviyo:** twelve metrics named `Pickup: …` (see `METRIC` in `src/lib/messages.ts`); build one flow per metric. Every event carries `booking_url`, `manage_url`, `book_by_date`, `pickup_by_date`, `sms_consent` and the other §9.2 properties.
 - **Go-live flags:** `storage_fee_enabled=false`, `release_rule_enabled=false`, `defer_enabled=true`. Set `terms_v2_effective_date` only once the Appendix C paragraph is live at checkout.
 - **Lightspeed PoC:** `scripts/ls-poc.mjs` is a dependency-free CLI (`node scripts/ls-poc.mjs` lists commands; setup steps are in its header) that exercises the R-Series OAuth flow and creates/updates work orders with an ETA Out. It explores modelling the pickup slot as a Lightspeed work order, an alternative to the Sale/SaleLine polling seam in SPEC.md §12; nothing in the app depends on it. It reads `.env` from the directory you run it from, and the token pair rotates on every refresh.

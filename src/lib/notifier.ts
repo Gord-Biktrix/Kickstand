@@ -19,7 +19,10 @@ export interface Notifier {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-/** Klaviyo Create Event API. Flows own templates, channel and consent. */
+/** Phone numbers whose SMS consent this process has already registered — avoids a call per message. */
+const consentRegistered = new Set<string>();
+
+/** Klaviyo Create Event API. Flows own templates and channel; Kickstand registers SMS consent. */
 export class KlaviyoNotifier implements Notifier {
   constructor(
     private apiKey: string,
@@ -27,7 +30,50 @@ export class KlaviyoNotifier implements Notifier {
     private fetchImpl: typeof fetch = fetch,
   ) {}
 
+  private headers() {
+    return {
+      Authorization: `Klaviyo-API-Key ${this.apiKey}`,
+      revision: this.revision,
+      "Content-Type": "application/vnd.api+json",
+      Accept: "application/vnd.api+json",
+    };
+  }
+
+  /**
+   * Klaviyo will not text a number without recorded consent, whatever the flow says. The customer
+   * ticked "agrees to text reminders" at the counter or on the booking page, so register that as
+   * SMS *transactional* consent (pickup notices about their own order — not marketing). Flow
+   * messages must be marked transactional in Klaviyo to reach these profiles. Best-effort: a
+   * failure here is logged and the event still goes out (email flows still work).
+   */
+  private async registerSmsConsent(profile: Profile) {
+    if (!profile.phone || !profile.smsConsent || consentRegistered.has(profile.phone)) return;
+    const attrs: Record<string, unknown> = {
+      phone_number: profile.phone,
+      subscriptions: { sms: { transactional: { consent: "SUBSCRIBED" } } },
+    };
+    if (profile.email) attrs.email = profile.email;
+    const body = {
+      data: {
+        type: "profile-subscription-bulk-create-job",
+        attributes: { historical_import: false, profiles: { data: [{ type: "profile", attributes: attrs }] } },
+      },
+    };
+    try {
+      const res = await this.fetchImpl("https://a.klaviyo.com/api/profile-subscription-bulk-create-jobs", {
+        method: "POST",
+        headers: this.headers(),
+        body: JSON.stringify(body),
+      });
+      if (res.ok) consentRegistered.add(profile.phone);
+      else logger.warn({ status: res.status }, "klaviyo: sms consent not registered");
+    } catch (err) {
+      logger.warn({ err: err instanceof Error ? err.message : String(err) }, "klaviyo: sms consent not registered");
+    }
+  }
+
   async send(metric: string, profile: Profile, properties: Record<string, unknown>, uniqueId: string) {
+    await this.registerSmsConsent(profile);
     const profileAttrs: Record<string, unknown> = { properties: { sms_consent: profile.smsConsent } };
     if (profile.email) profileAttrs.email = profile.email;
     if (profile.phone) profileAttrs.phone_number = profile.phone;
@@ -52,12 +98,7 @@ export class KlaviyoNotifier implements Notifier {
       try {
         const res = await this.fetchImpl("https://a.klaviyo.com/api/events", {
           method: "POST",
-          headers: {
-            Authorization: `Klaviyo-API-Key ${this.apiKey}`,
-            revision: this.revision,
-            "Content-Type": "application/vnd.api+json",
-            Accept: "application/vnd.api+json",
-          },
+          headers: this.headers(),
           body: JSON.stringify(body),
         });
         if (res.ok) return;
