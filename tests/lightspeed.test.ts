@@ -66,7 +66,7 @@ beforeEach(async () => {
   setNotifier(notifier);
   await saveConnection(db, { accountId: "999", accessToken: "acc", refreshToken: "ref", expiresIn: 3600 });
   showroom = await withSettings(db, showroom, {
-    lightspeed: { enabled: true, shop_id: 3, employee_id: 27, open_status_id: 1, due_mode: "pickup", assembly_due_time_local: "10:00", statuses: STATUSES },
+    lightspeed: { enabled: true, shop_id: 3, employee_id: 27, open_status_id: 1, due_mode: "pickup", assembly_due_time_local: "10:00", assembly_lead_work_hours: 8, statuses: STATUSES },
   });
 });
 
@@ -175,7 +175,7 @@ describe("Lightspeed bridge", () => {
     const ls = fakeLightspeed();
     setLightspeedFetch(ls.fetchImpl);
     showroom = await withSettings(db, showroom, {
-      lightspeed: { enabled: true, shop_id: 3, employee_id: 27, open_status_id: 1, due_mode: "assembly", assembly_due_time_local: "10:00", statuses: STATUSES },
+      lightspeed: { enabled: true, shop_id: 3, employee_id: 27, open_status_id: 1, due_mode: "assembly", assembly_due_time_local: "10:00", assembly_lead_work_hours: 8, statuses: STATUSES },
     });
     const order = await makeOrder(db, showroom);
     const unit = await makeUnit(db, showroom, order.id);
@@ -199,7 +199,7 @@ describe("Lightspeed bridge", () => {
     const unit2 = await makeUnit(db, showroom, order2.id);
     await inviteUnit(db, { showroom, unitId: unit2.id, actor: "s", now: NOW });
     showroom = await withSettings(db, showroom, {
-      lightspeed: { enabled: true, shop_id: 3, employee_id: 27, open_status_id: 1, due_mode: "assembly", assembly_due_time_local: "16:00", statuses: STATUSES },
+      lightspeed: { enabled: true, shop_id: 3, employee_id: 27, open_status_id: 1, due_mode: "assembly", assembly_due_time_local: "16:00", assembly_lead_work_hours: 8, statuses: STATUSES },
     });
     ls.calls.length = 0;
     // 16:00 due time with a Saturday 11:00 slot → falls back to the previous open day (Friday) at 16:00
@@ -212,7 +212,7 @@ describe("Lightspeed bridge", () => {
     const ls = fakeLightspeed();
     setLightspeedFetch(ls.fetchImpl);
     showroom = await withSettings(db, showroom, {
-      lightspeed: { enabled: true, shop_id: 3, employee_id: 27, open_status_id: 1, due_mode: "pickup", assembly_due_time_local: "10:00", statuses: { booked: 23 } },
+      lightspeed: { enabled: true, shop_id: 3, employee_id: 27, open_status_id: 1, due_mode: "pickup", assembly_due_time_local: "10:00", assembly_lead_work_hours: 8, statuses: { booked: 23 } },
     });
     const order = await makeOrder(db, showroom);
     const unit = await makeUnit(db, showroom, order.id);
@@ -230,7 +230,7 @@ describe("Lightspeed bridge", () => {
     const ls = fakeLightspeed();
     setLightspeedFetch(ls.fetchImpl);
     showroom = await withSettings(db, showroom, {
-      lightspeed: { enabled: true, shop_id: 3, employee_id: 27, open_status_id: 1, due_mode: "pickup", assembly_due_time_local: "10:00", statuses: { booked: 23 } },
+      lightspeed: { enabled: true, shop_id: 3, employee_id: 27, open_status_id: 1, due_mode: "pickup", assembly_due_time_local: "10:00", assembly_lead_work_hours: 8, statuses: { booked: 23 } },
     });
     const order = await makeOrder(db, showroom);
     const unit = await makeUnit(db, showroom, order.id);
@@ -244,6 +244,7 @@ describe("Lightspeed bridge", () => {
     expect(put.body).toMatchObject({ etaOut: moved.toISOString() });
     expect(put.body).not.toHaveProperty("workorderStatusID");
     expect((await lastMessageEvent(unit.id)).payload.lightspeed).toMatchObject({ datesOnly: true, created: false });
+    expect(String(put.body!.note)).toContain("RESCHEDULED 1×: was Saturday 5 September at 11:45 am");
 
     ls.calls.length = 0;
     await cancelBooking(db, { showroom, unitId: unit.id, reason: "customer", actor: "customer", now: NOW });
@@ -256,7 +257,7 @@ describe("Lightspeed bridge", () => {
     const ls = fakeLightspeed();
     setLightspeedFetch(ls.fetchImpl);
     showroom = await withSettings(db, showroom, {
-      lightspeed: { enabled: false, shop_id: null, employee_id: null, open_status_id: 1, due_mode: "pickup", assembly_due_time_local: "10:00", statuses: {} },
+      lightspeed: { enabled: false, shop_id: null, employee_id: null, open_status_id: 1, due_mode: "pickup", assembly_due_time_local: "10:00", assembly_lead_work_hours: 8, statuses: {} },
     });
     const order = await makeOrder(db, showroom);
     const unit = await makeUnit(db, showroom, order.id);

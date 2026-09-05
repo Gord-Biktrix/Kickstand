@@ -10,7 +10,7 @@ config({ path: process.env.ENV_FILE ?? ".env.local" });
  * One-time setup for the Lightspeed bridge (README "Lightspeed bridge").
  *
  *   pnpm ls:setup --shop 3 --employee 27 [--map booked=23 --map completed=5 …] [--disable]
- *                 [--due pickup|assembly] [--due-time 10:00]
+ *                 [--due pickup|assembly|lead] [--due-time 10:00] [--lead-hours 8]
  *                 [--showroom vancouver] [--tokens scripts/.env] [--import-tokens]
  *
  * 1. Imports the OAuth token pair produced by scripts/ls-poc.mjs (LS_ACCESS_TOKEN,
@@ -121,7 +121,8 @@ async function main() {
       enabled,
       shop_id: shop,
       employee_id: employee,
-      ...(arg("due") ? { due_mode: arg("due") as "pickup" | "assembly" } : {}),
+      ...(arg("due") ? { due_mode: arg("due") as "pickup" | "assembly" | "lead" } : {}),
+      ...(arg("lead-hours") ? { assembly_lead_work_hours: Number(arg("lead-hours")) } : {}),
       ...(arg("due-time") ? { assembly_due_time_local: arg("due-time")! } : {}),
       statuses,
     },

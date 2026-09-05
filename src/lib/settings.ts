@@ -45,11 +45,13 @@ export const settingsSchema = z.object({
        * pickup day, or on the previous open day if the slot is earlier than that — and the pickup
        * time rides in Hook Out and the note instead.
        */
-      due_mode: z.enum(["pickup", "assembly"]).default("pickup"),
+      due_mode: z.enum(["pickup", "assembly", "lead"]).default("pickup"),
       assembly_due_time_local: z.string().regex(/^\d{2}:\d{2}$/).default("10:00"),
+      /** "lead" mode: build deadline = pickup minus this many working hours (a shop day counts as 8, so 8 = same time on the previous open day). */
+      assembly_lead_work_hours: z.number().int().min(1).max(80).default(8),
       statuses: z.record(z.string(), z.number().int()).default({}),
     })
-    .default({ enabled: false, shop_id: null, employee_id: null, open_status_id: 1, due_mode: "pickup", assembly_due_time_local: "10:00", statuses: {} }),
+    .default({ enabled: false, shop_id: null, employee_id: null, open_status_id: 1, due_mode: "pickup", assembly_due_time_local: "10:00", assembly_lead_work_hours: 8, statuses: {} }),
 });
 
 export type ProgramSettings = z.infer<typeof settingsSchema>;

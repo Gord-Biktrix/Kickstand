@@ -1,5 +1,5 @@
 import { formatInTimeZone } from "date-fns-tz";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import {
   appointments,
@@ -458,6 +458,15 @@ export type SyncResult =
   | { workorderID: string; workorderStatusID: number | null; created: boolean; datesOnly?: boolean }
   | { skipped: true; reason: string };
 
+/** Appointments this unit moved away from (oldest first) — cancelled rows that a reschedule replaced. */
+async function replacedAppointments(dbx: Db, unitId: string): Promise<Appointment[]> {
+  return dbx
+    .select()
+    .from(appointments)
+    .where(and(eq(appointments.unitId, unitId), sql`${appointments.replacedBy} is not null`))
+    .orderBy(appointments.createdAt);
+}
+
 async function activeAppointment(dbx: Db, unitId: string): Promise<Appointment | null> {
   const [a] = await dbx
     .select()
@@ -473,10 +482,17 @@ function shortWhen(instant: Date, tz: string): string {
   return `${formatInTimeZone(instant, tz, "EEEE h:mm aaa")} (${formatInTimeZone(instant, tz, "d MMM")})`;
 }
 
-function receiptNote(showroom: ShowroomCtx, unit: Unit, appt: Appointment | null, buildBy: LocalDate | null, assemblyDue: Date | null): string {
+function receiptNote(showroom: ShowroomCtx, unit: Unit, order: Order | null, appt: Appointment | null, buildBy: LocalDate | null, assemblyDue: Date | null, previous: Appointment[] = []): string {
   const tz = showroom.timezone;
   const bike = [unit.model, unit.colour, unit.size].filter(Boolean).join(" · ");
+  // The order (sale) number is what staff look up; the box tag only matters when it differs from it.
+  const ref = order?.orderRef ? `order #${order.orderRef}` : "";
+  const box = unit.boxTag && unit.boxTag !== order?.orderRef ? `box ${unit.boxTag}` : "";
   const slot = appt ? `CUSTOMER PICKUP ${formatDateTime(appt.startsAt, tz)}` : "Pickup not booked yet";
+  // Earlier bookings the customer moved away from — the mechanic can see the history at a glance.
+  const history = previous.length
+    ? `RESCHEDULED ${previous.length}×: was ${previous.map((p) => formatDateTime(p.startsAt, tz)).join(", then ")}`
+    : "";
   const build = assemblyDue
     ? `BUILD BY: ${formatDateTime(assemblyDue, tz)} (Due on this work order)`
     : buildBy
@@ -485,7 +501,7 @@ function receiptNote(showroom: ShowroomCtx, unit: Unit, appt: Appointment | null
   const hold = unit.pickupBy ? `Free hold until ${formatLongDate(unit.pickupBy, tz)}` : "";
   const urls = customerUrls(unit);
   // Build deadline before the pickup slot: the mechanic reads this top-down.
-  return [`PICKUP · ${bike} · box ${unit.boxTag}`, build, slot, hold, urls ? `Manage: ${urls.manage_url}` : ""]
+  return [["PICKUP", bike, ref, box].filter(Boolean).join(" · "), build, slot, history, hold, urls ? `Manage: ${urls.manage_url}` : ""]
     .filter(Boolean)
     .join("\n");
 }
@@ -539,7 +555,7 @@ export async function syncUnitToLightspeed(dbx: Db, args: SyncArgs): Promise<Syn
 
   const common: Record<string, unknown> = {
     ...(statusID !== undefined ? { workorderStatusID: statusID } : {}),
-    note: receiptNote(showroom, unit, appt, buildBy, assemblyDue),
+    note: receiptNote(showroom, unit, order, appt, buildBy, assemblyDue, await replacedAppointments(dbx, unit.id)),
     internalNote: `Kickstand unit ${baseUrl()}/app/units/${unit.id}`,
     hookIn: unit.boxTag,
     // ETA Out drives Lightspeed's work-order calendar and Ikeono's {ETA Out} smart field, so it is
