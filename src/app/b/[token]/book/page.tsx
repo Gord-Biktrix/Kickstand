@@ -52,8 +52,10 @@ export default async function BookPage({ params, searchParams }: { params: Promi
   const selected: DaySummary | undefined = selectedDate ? openDays.find((d) => d.date === selectedDate) : undefined;
   const slot = selected && selectedTime ? selected.slots.find((sl) => sl.startLocal === selectedTime) : undefined;
 
+  // Days too soon to build for are simply not offered (no "too soon" rows); full days stay visible as Full.
   const weeks = new Map<string, DaySummary[]>();
   for (const d of openDays) {
+    if (d.reason === "too_soon") continue;
     const k = mondayOf(d.date);
     weeks.set(k, [...(weeks.get(k) ?? []), d]);
   }
@@ -64,7 +66,7 @@ export default async function BookPage({ params, searchParams }: { params: Promi
         <Link href={selected ? base : `/b/${token}`} className="text-sm text-accent underline">← Back</Link>
         <h1 className="mt-2 text-2xl font-semibold">{reschedule ? "Pick a new time" : "Pick a time"}</h1>
         <p className="mt-1 text-sm text-muted">
-          {unit.model}{siblings.length > 0 && <> and {siblings.length} more bike{siblings.length === 1 ? "" : "s"}</>} · {showroom.name}. Pickups take about 45 minutes. We need {s.min_lead_hours} hours&apos; notice to build your bike{visitSize > 1 ? "s" : ""}.
+          {unit.model}{siblings.length > 0 && <> and {siblings.length} more bike{siblings.length === 1 ? "" : "s"}</>} · {showroom.name}. Pickups take about 45 minutes.
         </p>
       </div>
       {errorCode && BOOKING_ERROR_TEXT[errorCode] && <Alert tone="danger">{BOOKING_ERROR_TEXT[errorCode]}</Alert>}
@@ -119,7 +121,7 @@ export default async function BookPage({ params, searchParams }: { params: Promi
         </Card>
       ) : selected ? (
         <Card title={formatLongDateFromLocal(selected.date)}>
-          <p className="mb-3 text-sm text-muted">{selected.remaining} of {selected.day.capacity} pickups left this day.</p>
+          <p className="mb-3 text-sm text-muted">{selected.remaining} slot{selected.remaining === 1 ? "" : "s"} open this day.</p>
           {selected.storageEstimateCents > 0 && (
             <div className="mb-3"><Alert tone="warn">Storage of about {formatMoney(selected.storageEstimateCents)} applies for a pickup on this day.</Alert></div>
           )}
@@ -143,13 +145,13 @@ export default async function BookPage({ params, searchParams }: { params: Promi
         </Card>
       ) : (
         <div className="space-y-4">
-          {openDays.length === 0 && <Alert tone="warn">No open days in your booking window. Please call {showroom.phone ?? "the showroom"}.</Alert>}
+          {weeks.size === 0 && <Alert tone="warn">No open days in your booking window. Please call {showroom.phone ?? "the showroom"}.</Alert>}
           {[...weeks.entries()].map(([monday, list]) => (
             <Card key={monday} title={`Week of ${formatShortDateFromLocal(monday)}`}>
               <ul className="divide-y divide-border" aria-label="Open days">
                 {list.map((d) => {
                   const full = !d.bookable;
-                  const label = d.reason === "too_soon" ? "Too soon" : d.reason === "full" ? "Full" : d.reason === "closed" ? "Closed" : `${d.remaining} of ${d.day.capacity} left`;
+                  const label = d.reason === "full" ? "Full" : d.reason === "closed" ? "Closed" : `${d.remaining} slot${d.remaining === 1 ? "" : "s"} open`;
                   const inner = (
                     <>
                       <span className="font-medium">{formatShortDateFromLocal(d.date)}</span>
