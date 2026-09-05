@@ -424,7 +424,7 @@ export async function exportRows(dbx: Db, showroom: ShowroomCtx) {
 // ---- Schedule tab ----------------------------------------------------------
 
 export type ScheduleRow = UnitView & { appointment: Appointment; buildBy: LocalDate; buildAt: Date | null };
-export type ScheduleDay = { date: LocalDate; closed: boolean; capacity: number; pickups: ScheduleRow[]; builds: ScheduleRow[] };
+export type ScheduleDay = { date: LocalDate; closed: boolean; capacity: number; windowStart: string; windowEnd: string; pickups: ScheduleRow[]; builds: ScheduleRow[] };
 
 /**
  * Every booked pickup whose pickup day OR build day falls in [from, to], laid out per day twice:
@@ -456,6 +456,8 @@ export async function weekSchedule(dbx: Db, showroom: ShowroomCtx, from: LocalDa
       date,
       closed: day.closed,
       capacity: day.capacity,
+      windowStart: day.windowStart,
+      windowEnd: day.windowEnd,
       pickups: decorated.filter((r) => r.appointment.onDate === date),
       builds: decorated
         .filter((r) => r.buildBy === date)
