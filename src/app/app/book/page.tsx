@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db/client";
 import { orders, units } from "@/db/schema";
@@ -13,9 +14,10 @@ import { customerKey } from "@/lib/customers";
 import { getConnection, LightspeedClient, type SaleLineInfo } from "@/lib/lightspeed";
 import { logger } from "@/lib/logger";
 import { getUnitView } from "@/lib/queries";
-import { getShowroom } from "@/lib/showroom";
 import { formatLongDateFromLocal, formatShortDateFromLocal, formatTime, toLocalDate } from "@/lib/time";
 import { staffBookAction, staffPrepareUnitAction, staffRescheduleAction } from "../actions";
+import { currentShowroom, showroomForLightspeedShop } from "@/lib/current-showroom";
+import { listShowrooms } from "@/lib/showroom";
 
 export const metadata = { title: "Book pickup" };
 
@@ -36,7 +38,7 @@ const ACTIVE = ["received", "invited", "booked", "building", "ready"] as const;
 export default async function StaffBookPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const q = await searchParams;
   const user = await requireUser("staff");
-  const showroom = await getShowroom(db);
+  const showroom = await currentShowroom();
   const tz = showroom.timezone;
   const now = new Date();
   const flash = <Flash ok={sp(q.ok)} error={sp(q.error)} />;
@@ -166,6 +168,28 @@ export default async function StaffBookPage({ searchParams }: { searchParams: Pr
   // ── Step 1/2: from the Lightspeed button — find or prefill ─────────────────
   const customerID = sp(q.customerID) ?? "";
   const saleID = sp(q.saleID) ?? "";
+  // The button is account-wide in Lightspeed, so every store sees it. shopID tells us which register
+  // pressed it: switch to that store's showroom, or explain that pickups aren't live there yet.
+  const shopID = sp(q.shopID) ?? "";
+  if (shopID) {
+    const target = await showroomForLightspeedShop(db, shopID);
+    if (!target) {
+      return (
+        <div>
+          <PageHeader title="Book pickup" />
+          <Alert tone="neutral">
+            Pickup booking isn&apos;t live at this location yet (Lightspeed shop #{shopID}). Nothing has been booked — you can close this tab.
+            Live at: {(await listShowrooms(db)).filter((s) => s.settings.lightspeed.shop_id !== null).map((s) => s.name).join(", ") || "no store yet"}.
+          </Alert>
+        </div>
+      );
+    }
+    if (target.id !== showroom.id) {
+      const here = new URLSearchParams();
+      for (const [k, v] of Object.entries(q)) { const val = sp(v); if (val) here.set(k, val); }
+      redirect(`/app/switch?showroom=${encodeURIComponent(target.slug)}&next=${encodeURIComponent(`/app/book?${here.toString()}`)}`);
+    }
+  }
   const returnQuery = new URLSearchParams({ ...(customerID ? { customerID } : {}), ...(saleID ? { saleID } : {}) }).toString();
 
   // Existing Kickstand orders for this Lightspeed customer or sale, with any active unit.

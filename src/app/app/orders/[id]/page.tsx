@@ -10,9 +10,9 @@ import { requireUser } from "@/lib/auth";
 import { customerKey } from "@/lib/customers";
 import { sp, type SearchParams } from "@/lib/flash";
 import { orderTimeline, unitsForOrder } from "@/lib/queries";
-import { getShowroom } from "@/lib/showroom";
 import { formatDateTime, formatLongDateFromLocal } from "@/lib/time";
 import { updateOrderAction } from "../../actions";
+import { currentShowroom } from "@/lib/current-showroom";
 
 export const metadata = { title: "Order" };
 
@@ -20,7 +20,7 @@ export default async function OrderPage({ params, searchParams }: { params: Prom
   const { id } = await params;
   const q = await searchParams;
   await requireUser("staff");
-  const showroom = await getShowroom(db);
+  const showroom = await currentShowroom();
   const [order] = await db.select().from(orders).where(eq(orders.id, id)).limit(1);
   if (!order || order.showroomId !== showroom.id) notFound();
   const [units, events] = await Promise.all([unitsForOrder(db, order.id), orderTimeline(db, order.id)]);

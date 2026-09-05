@@ -6,17 +6,17 @@ import { hasRole, requireUser } from "@/lib/auth";
 import { formatMoney } from "@/lib/format";
 import { sp, type SearchParams } from "@/lib/flash";
 import { receivedNotInvited, searchOrders, unassignedUnits } from "@/lib/queries";
-import { getShowroom } from "@/lib/showroom";
 import { formatDateTime, formatLongDateFromLocal, toLocalDate } from "@/lib/time";
 import { defaultTermsVersion, waitlistFor } from "@/lib/units";
 import { attachUnitAction, createOrderAction, inviteAllAction, inviteUnitAction, receiveUnitAction } from "../actions";
+import { currentShowroom } from "@/lib/current-showroom";
 
 export const metadata = { title: "Receive a box" };
 
 export default async function ArrivalsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const q = await searchParams;
   const user = await requireUser("staff");
-  const showroom = await getShowroom(db);
+  const showroom = await currentShowroom();
   const query = sp(q.q) ?? "";
   const [results, pending, unassigned] = await Promise.all([searchOrders(db, showroom, query, 25), receivedNotInvited(db, showroom), unassignedUnits(db, showroom)]);
   const manager = hasRole(user.role, "manager");

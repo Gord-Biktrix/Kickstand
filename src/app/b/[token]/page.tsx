@@ -4,7 +4,7 @@ import { Alert, Card, Dl, LinkButton } from "@/components/ui";
 import { formatMoney } from "@/lib/format";
 import { sp, type SearchParams } from "@/lib/flash";
 import { appointmentHistory, getUnitByToken } from "@/lib/queries";
-import { getShowroom } from "@/lib/showroom";
+import { getShowroom, getShowroomById } from "@/lib/showroom";
 import { storageDueCents, storageEnabledFor } from "@/lib/storage";
 import { formatDateTime, formatLongDate, formatTime } from "@/lib/time";
 import { InvalidToken } from "./invalid";
@@ -23,9 +23,10 @@ const OK_TEXT: Record<string, string> = {
 export default async function LandingPage({ params, searchParams }: { params: Promise<{ token: string }>; searchParams: Promise<SearchParams> }) {
   const { token } = await params;
   const q = await searchParams;
-  const showroom = await getShowroom(db);
   const view = await getUnitByToken(db, token);
-  if (!view) return <InvalidToken showroom={showroom} />;
+  if (!view) return <InvalidToken showroom={await getShowroom(db)} />;
+  // The bike's own showroom — multi-store safe, whatever DEFAULT_SHOWROOM says.
+  const showroom = await getShowroomById(db, view.unit.showroomId);
   const { unit, order, appointment } = view;
   const tz = showroom.timezone;
   const s = showroom.settings;

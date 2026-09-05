@@ -5,8 +5,8 @@ import { Badge, Card, Empty, PageHeader } from "@/components/ui";
 import { requireUser } from "@/lib/auth";
 import { searchCustomers } from "@/lib/customers";
 import { sp, type SearchParams } from "@/lib/flash";
-import { getShowroom } from "@/lib/showroom";
 import { formatDateTime } from "@/lib/time";
+import { currentShowroom } from "@/lib/current-showroom";
 
 export const metadata = { title: "Search" };
 
@@ -14,7 +14,7 @@ export const metadata = { title: "Search" };
 export default async function SearchPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const q = sp((await searchParams).q) ?? "";
   await requireUser("staff");
-  const showroom = await getShowroom(db);
+  const showroom = await currentShowroom();
   const tz = showroom.timezone;
   const hits = await searchCustomers(db, showroom, q);
 

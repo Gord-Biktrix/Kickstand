@@ -13,7 +13,6 @@ import { formatMoney } from "@/lib/format";
 import { sp, type SearchParams } from "@/lib/flash";
 import { customerUrls } from "@/lib/messages";
 import { appointmentHistory, getUnitView, unitTimeline } from "@/lib/queries";
-import { getShowroom } from "@/lib/showroom";
 import { storageDueCents, storageEnabledFor } from "@/lib/storage";
 import { formatDateTime, formatLongDate, formatLongDateFromLocal, formatTime } from "@/lib/time";
 import { HANDOVER_CHECKLIST, waitlistFor } from "@/lib/units";
@@ -32,6 +31,7 @@ import {
   startBuildAction,
   waiveStorageAction,
 } from "../../actions";
+import { currentShowroom } from "@/lib/current-showroom";
 
 export const metadata = { title: "Bike" };
 
@@ -40,7 +40,7 @@ export default async function UnitPage({ params, searchParams }: { params: Promi
   const q = await searchParams;
   const user = await requireUser("staff");
   const manager = hasRole(user.role, "manager");
-  const showroom = await getShowroom(db);
+  const showroom = await currentShowroom();
   const view = await getUnitView(db, id);
   if (!view || view.unit.showroomId !== showroom.id) notFound();
   const { unit, order, appointment } = view;

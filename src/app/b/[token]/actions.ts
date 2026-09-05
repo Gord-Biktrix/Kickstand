@@ -5,13 +5,13 @@ import { db } from "@/db/client";
 import { BookingError, bookSlot, cancelBooking, rescheduleBooking } from "@/lib/booking";
 import { bool, str } from "@/lib/flash";
 import { getUnitByToken } from "@/lib/queries";
-import { getShowroom } from "@/lib/showroom";
+import { getShowroomById } from "@/lib/showroom";
 import { detachUnit, UnitError } from "@/lib/units";
 
 async function load(token: string) {
-  const showroom = await getShowroom(db);
   const view = await getUnitByToken(db, token);
   if (!view) redirect(`/b/${token}`);
+  const showroom = await getShowroomById(db, view.unit.showroomId);
   return { showroom, view };
 }
 

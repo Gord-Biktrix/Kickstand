@@ -4,8 +4,8 @@ import { StatusBadge } from "@/components/status-badge";
 import { Badge, Card, PageHeader } from "@/components/ui";
 import { sp, type SearchParams } from "@/lib/flash";
 import { weekSchedule, type ScheduleRow } from "@/lib/queries";
-import { getShowroom } from "@/lib/showroom";
 import { addLocalDays, formatShortDateFromLocal, formatTime, toLocalDate, weekdayOf } from "@/lib/time";
+import { currentShowroom } from "@/lib/current-showroom";
 
 export const metadata = { title: "Appointments" };
 
@@ -40,7 +40,7 @@ function BuildCard({ r, tz, now }: { r: ScheduleRow; tz: string; now: Date }) {
 
 export default async function SchedulePage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const q = await searchParams;
-  const showroom = await getShowroom(db);
+  const showroom = await currentShowroom();
   const tz = showroom.timezone;
   const now = new Date();
   const today = toLocalDate(now, tz);

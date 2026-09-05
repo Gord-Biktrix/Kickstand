@@ -4,8 +4,8 @@ import { requireUser } from "@/lib/auth";
 import { formatMoney } from "@/lib/format";
 import { sp, type SearchParams } from "@/lib/flash";
 import { pilotMetrics } from "@/lib/queries";
-import { getShowroom } from "@/lib/showroom";
 import { addLocalDays, toLocalDate } from "@/lib/time";
+import { currentShowroom } from "@/lib/current-showroom";
 
 export const metadata = { title: "Reports" };
 
@@ -16,7 +16,7 @@ const fixed = (n: number | null | undefined, digits = 1) => (n == null ? "—" :
 export default async function ReportsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const q = await searchParams;
   await requireUser("admin");
-  const showroom = await getShowroom(db);
+  const showroom = await currentShowroom();
   const today = toLocalDate(new Date(), showroom.timezone);
   const isDate = (v?: string) => !!v && /^\d{4}-\d{2}-\d{2}$/.test(v);
   const from = isDate(sp(q.from)) ? sp(q.from)! : addLocalDays(today, -30);

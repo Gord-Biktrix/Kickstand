@@ -2,7 +2,7 @@ import type { NextRequest } from "next/server";
 import { db } from "@/db/client";
 import { getCurrentUser, hasRole } from "@/lib/auth";
 import { exportRows } from "@/lib/queries";
-import { getShowroom } from "@/lib/showroom";
+import { currentShowroom } from "@/lib/current-showroom";
 
 function csv(rows: (string | number | null | undefined)[][]): string {
   return rows
@@ -14,7 +14,7 @@ export async function GET(request: NextRequest) {
   const user = await getCurrentUser();
   if (!user || !hasRole(user.role, "admin")) return new Response("Forbidden", { status: 403 });
   const type = request.nextUrl.searchParams.get("type") ?? "units";
-  const showroom = await getShowroom(db);
+  const showroom = await currentShowroom();
   const { unitRows, apptRows } = await exportRows(db, showroom);
   let body: string;
   if (type === "appointments") {

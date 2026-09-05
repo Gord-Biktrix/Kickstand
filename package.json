@@ -16,6 +16,8 @@
     "db:seed:sample": "tsx scripts/seed.ts --sample",
     "demo:invite": "tsx scripts/demo-invite.ts",
     "ls:setup": "tsx scripts/ls-setup.ts",
+    "showroom:add": "tsx scripts/showroom-add.ts",
+    "staff:add": "tsx scripts/staff-add.ts",
     "db:studio": "drizzle-kit studio"
   },
   "dependencies": {

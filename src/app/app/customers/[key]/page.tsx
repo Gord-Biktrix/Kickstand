@@ -7,8 +7,8 @@ import { Badge, Card, Dl, PageHeader } from "@/components/ui";
 import { requireUser } from "@/lib/auth";
 import { customerProfile } from "@/lib/customers";
 import { formatMoney } from "@/lib/format";
-import { getShowroom } from "@/lib/showroom";
 import { formatDateTime, formatLongDateFromLocal } from "@/lib/time";
+import { currentShowroom } from "@/lib/current-showroom";
 
 export const metadata = { title: "Customer" };
 
@@ -18,7 +18,7 @@ const BOOKABLE = ["invited", "building", "ready"];
 export default async function CustomerPage({ params }: { params: Promise<{ key: string }> }) {
   const { key } = await params;
   await requireUser("staff");
-  const showroom = await getShowroom(db);
+  const showroom = await currentShowroom();
   const profile = await customerProfile(db, showroom, decodeURIComponent(key));
   if (!profile) notFound();
   const tz = showroom.timezone;

@@ -5,9 +5,10 @@ import { requireUser } from "@/lib/auth";
 import { effectiveCapacity } from "@/lib/capacity";
 import { sp, type SearchParams } from "@/lib/flash";
 import { bookedCountsByDate } from "@/lib/queries";
-import { getCapacityConfig, getShowroom } from "@/lib/showroom";
+import { getCapacityConfig } from "@/lib/showroom";
 import { addLocalDays, dateRange, formatLongDateFromLocal, formatShortDateFromLocal, normalizeTime, toLocalDate } from "@/lib/time";
 import { deleteOverrideAction, saveCapacityTemplateAction, upsertOverrideAction } from "../../actions";
+import { currentShowroom } from "@/lib/current-showroom";
 
 export const metadata = { title: "Capacity" };
 
@@ -17,7 +18,7 @@ const hhmm = (t: string) => normalizeTime(t).slice(0, 5);
 export default async function CapacityPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const q = await searchParams;
   await requireUser("manager");
-  const showroom = await getShowroom(db);
+  const showroom = await currentShowroom();
   const today = toLocalDate(new Date(), showroom.timezone);
   const horizon = addLocalDays(today, 55);
   const { rules, overrides } = await getCapacityConfig(db, showroom.id);

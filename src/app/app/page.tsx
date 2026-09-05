@@ -6,16 +6,16 @@ import { getCurrentUser } from "@/lib/auth";
 import { formatMoney } from "@/lib/format";
 import { sp, type SearchParams } from "@/lib/flash";
 import { todayAppointments } from "@/lib/queries";
-import { getShowroom } from "@/lib/showroom";
 import { addLocalDays, formatLongDateFromLocal, formatTime, toLocalDate } from "@/lib/time";
 import { recordNoShowAction } from "./actions";
+import { currentShowroom } from "@/lib/current-showroom";
 
 export const metadata = { title: "Today" };
 
 export default async function TodayPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const q = await searchParams;
   await getCurrentUser();
-  const showroom = await getShowroom(db);
+  const showroom = await currentShowroom();
   const now = new Date();
   const today = toLocalDate(now, showroom.timezone);
   const date = /^\d{4}-\d{2}-\d{2}$/.test(sp(q.date) ?? "") ? sp(q.date)! : today;

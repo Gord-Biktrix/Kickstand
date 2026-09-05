@@ -11,9 +11,10 @@ import { logEvent } from "@/lib/events";
 import { bool, dollarsToCents, errorMessage, num, str, withFlash } from "@/lib/flash";
 import { normalizePhone } from "@/lib/phone";
 import { FLAG_KEYS, PROGRAM_KEYS, settingsSchema, validateSettings, type ProgramSettings } from "@/lib/settings";
-import { getCapacityConfig, getShowroom, patchShowroomSettings } from "@/lib/showroom";
+import { getCapacityConfig, patchShowroomSettings } from "@/lib/showroom";
 import { normalizeTime } from "@/lib/time";
 import { attachUnit, completeHandover, createOrder, deleteUnit, detachUnit, grantExtension, inviteAllReceived, inviteUnit, markReady, receiveUnit, resendInvite, retagUnit, startBuild, waiveStorage } from "@/lib/units";
+import { currentShowroom } from "@/lib/current-showroom";
 
 /** Run a mutation and land back on `returnTo` with a flash; auth errors surface the same way. */
 async function run(returnTo: string, fn: () => Promise<string | void>): Promise<never> {
@@ -42,7 +43,7 @@ export async function receiveUnitAction(formData: FormData) {
   const q = str(formData, "q");
   return run(`/app/arrivals${q ? `?q=${encodeURIComponent(q)}` : ""}`, async () => {
     const user = await requireActor("staff");
-    const showroom = await getShowroom(db);
+    const showroom = await currentShowroom();
     const unit = await receiveUnit(db, { showroom, orderId: str(formData, "order_id"), boxTag: str(formData, "box_tag"), actor: user.id });
     return `Received ${unit.boxTag}. Send the invite when ready.`;
   });
@@ -52,7 +53,7 @@ export async function createOrderAction(formData: FormData) {
   const ref = str(formData, "order_ref");
   return run(`/app/arrivals?q=${encodeURIComponent(ref)}`, async () => {
     const user = await requireActor("staff");
-    const showroom = await getShowroom(db);
+    const showroom = await currentShowroom();
     const source = str(formData, "source");
     const paymentStatus = str(formData, "payment_status");
     if (!["lightspeed", "shopify", "manual"].includes(source)) throw new Error("Choose a source");
@@ -89,7 +90,7 @@ export async function createOrderAction(formData: FormData) {
 export async function updateOrderAction(orderId: string, formData: FormData) {
   return run(`/app/orders/${orderId}`, async () => {
     const user = await requireActor("staff");
-    const showroom = await getShowroom(db);
+    const showroom = await currentShowroom();
     const phoneRaw = str(formData, "customer_phone");
     const phone = phoneRaw ? normalizePhone(phoneRaw) : null;
     if (phoneRaw && !phone) throw new Error("Phone number could not be normalised");
@@ -112,7 +113,7 @@ export async function updateOrderAction(orderId: string, formData: FormData) {
 export async function inviteUnitAction(unitId: string, returnTo: string) {
   return run(safeReturn(returnTo, "/app/arrivals"), async () => {
     const user = await requireActor("staff");
-    const showroom = await getShowroom(db);
+    const showroom = await currentShowroom();
     await inviteUnit(db, { showroom, unitId, actor: user.id });
     return "Invite sent. The clock has started.";
   });
@@ -121,7 +122,7 @@ export async function inviteUnitAction(unitId: string, returnTo: string) {
 export async function inviteAllAction() {
   return run("/app/arrivals", async () => {
     const user = await requireActor("staff");
-    const showroom = await getShowroom(db);
+    const showroom = await currentShowroom();
     const { invited, errors } = await inviteAllReceived(db, { showroom, actor: user.id });
     if (errors.length) throw new Error(`Invited ${invited}; ${errors.length} failed: ${errors.join("; ")}`);
     return `Invited ${invited} customer${invited === 1 ? "" : "s"}.`;
@@ -131,7 +132,7 @@ export async function inviteAllAction() {
 export async function resendInviteAction(unitId: string, returnTo: string) {
   return run(safeReturn(returnTo, `/app/units/${unitId}`), async () => {
     const user = await requireActor("staff");
-    const showroom = await getShowroom(db);
+    const showroom = await currentShowroom();
     const [outcome] = await resendInvite(db, { showroom, unitId, actor: user.id });
     if (outcome === "failed") throw new Error("Message could not be delivered — check the customer's contact details");
     return "Invite re-sent.";
@@ -143,7 +144,7 @@ export async function resendInviteAction(unitId: string, returnTo: string) {
 export async function startBuildAction(unitId: string, returnTo: string) {
   return run(safeReturn(returnTo, "/app/build"), async () => {
     const user = await requireActor("staff");
-    const showroom = await getShowroom(db);
+    const showroom = await currentShowroom();
     await startBuild(db, { showroom, unitId, actor: user.id });
     return "Marked as building.";
   });
@@ -152,7 +153,7 @@ export async function startBuildAction(unitId: string, returnTo: string) {
 export async function markReadyAction(unitId: string, returnTo: string) {
   return run(safeReturn(returnTo, "/app/build"), async () => {
     const user = await requireActor("staff");
-    const showroom = await getShowroom(db);
+    const showroom = await currentShowroom();
     await markReady(db, { showroom, unitId, actor: user.id });
     return "Marked as ready.";
   });
@@ -161,7 +162,7 @@ export async function markReadyAction(unitId: string, returnTo: string) {
 export async function recordNoShowAction(unitId: string, returnTo: string) {
   return run(safeReturn(returnTo, "/app"), async () => {
     const user = await requireActor("staff");
-    const showroom = await getShowroom(db);
+    const showroom = await currentShowroom();
     const res = await recordNoShow(db, { showroom, unitId, actor: user.id });
     return `No-show recorded (#${res.noShowCount}). The customer has been sent a rebook link.`;
   });
@@ -171,7 +172,7 @@ export async function completeHandoverAction(unitId: string, formData: FormData)
   let error: string | null = null;
   try {
     const user = await requireActor("staff");
-    const showroom = await getShowroom(db);
+    const showroom = await currentShowroom();
     await completeHandover(db, {
       showroom,
       unitId,
@@ -193,7 +194,7 @@ export async function completeHandoverAction(unitId: string, formData: FormData)
 export async function grantExtensionAction(unitId: string, returnTo: string, formData: FormData) {
   return run(safeReturn(returnTo, `/app/units/${unitId}`), async () => {
     const user = await requireActor("manager");
-    const showroom = await getShowroom(db);
+    const showroom = await currentShowroom();
     await grantExtension(db, { showroom, unitId, reason: str(formData, "reason"), user });
     return `Extended by ${showroom.settings.extension_days} days.`;
   });
@@ -202,7 +203,7 @@ export async function grantExtensionAction(unitId: string, returnTo: string, for
 export async function waiveStorageAction(unitId: string, returnTo: string, formData: FormData) {
   return run(safeReturn(returnTo, `/app/units/${unitId}`), async () => {
     const user = await requireActor("manager");
-    const showroom = await getShowroom(db);
+    const showroom = await currentShowroom();
     await waiveStorage(db, { showroom, unitId, amountCents: dollarsToCents(formData, "amount"), reason: str(formData, "reason"), actor: user.id });
     return "Storage waived.";
   });
@@ -211,7 +212,7 @@ export async function waiveStorageAction(unitId: string, returnTo: string, formD
 export async function retagUnitAction(unitId: string, returnTo: string, formData: FormData) {
   return run(safeReturn(returnTo, `/app/units/${unitId}`), async () => {
     const user = await requireActor("manager");
-    const showroom = await getShowroom(db);
+    const showroom = await currentShowroom();
     const res = await retagUnit(db, {
       showroom,
       unitId,
@@ -228,7 +229,7 @@ export async function retagUnitAction(unitId: string, returnTo: string, formData
 export async function deferUnitAction(unitId: string, returnTo: string, formData: FormData) {
   return run(safeReturn(returnTo, `/app/units/${unitId}`), async () => {
     const user = await requireActor("manager");
-    const showroom = await getShowroom(db);
+    const showroom = await currentShowroom();
     await detachUnit(db, { showroom, unitId, reason: "customer_deferred", actor: user.id, nextShipmentEta: str(formData, "next_shipment_eta") || null });
     return "Order deferred to the next shipment; unit is unassigned.";
   });
@@ -237,7 +238,7 @@ export async function deferUnitAction(unitId: string, returnTo: string, formData
 export async function attachUnitAction(unitId: string, returnTo: string, formData: FormData) {
   return run(safeReturn(returnTo, `/app/units/${unitId}`), async () => {
     const user = await requireActor("manager");
-    const showroom = await getShowroom(db);
+    const showroom = await currentShowroom();
     await attachUnit(db, { showroom, unitId, orderId: str(formData, "order_id"), actor: user.id });
     return "Unit attached and the new customer invited.";
   });
@@ -257,7 +258,7 @@ export async function staffPrepareUnitAction(formData: FormData) {
   let error: string | null = null;
   try {
     const user = await requireActor("staff");
-    const showroom = await getShowroom(db);
+    const showroom = await currentShowroom();
     let orderId = str(formData, "order_id");
     if (!orderId) {
       const phoneRaw = str(formData, "customer_phone");
@@ -307,7 +308,7 @@ export async function staffCancelBookingAction(unitId: string, returnTo: string,
   const reason = cancelReason(str(formData, "reason"));
   return run(safeReturn(returnTo, `/app/units/${unitId}`), async () => {
     const user = await requireActor("staff");
-    const showroom = await getShowroom(db);
+    const showroom = await currentShowroom();
     const res = await cancelBooking(db, { showroom, unitId, reason, actor: user.id });
     if (reason === "staff") return "Booking cancelled. No message was sent; the bike is back to invited.";
     if (reason === "shop") return "Booking cancelled. The customer has been told we had to cancel and sent a link to pick a new time.";
@@ -322,7 +323,7 @@ export async function deleteUnitAction(unitId: string, formData: FormData) {
   const reason = str(formData, "reason").trim();
   return run("/app/bikes", async () => {
     const user = await requireActor("manager");
-    const showroom = await getShowroom(db);
+    const showroom = await currentShowroom();
     if (!reason) throw new Error("Give a reason for the delete.");
     const res = await deleteUnit(db, { showroom, unitId, actor: user.id, reason });
     return `Deleted box ${res.boxTag}${res.orderDeleted ? " and its order" : ""}. Nothing was sent to the customer; close any Lightspeed work order by hand.`;
@@ -341,7 +342,7 @@ export async function bulkBikesAction(returnTo: string, formData: FormData) {
   const reason = cancelReason(str(formData, "reason"));
   return run(safeReturn(returnTo, "/app/bikes"), async () => {
     const user = await requireActor(op === "delete" ? "manager" : "staff");
-    const showroom = await getShowroom(db);
+    const showroom = await currentShowroom();
     if (ids.length === 0) throw new Error("Tick at least one bike first.");
     const deleteReason = str(formData, "delete_reason").trim() || "bulk delete from Bikes";
     let done = 0;
@@ -378,7 +379,7 @@ export async function staffRescheduleAction(unitId: string, formData: FormData) 
   let late = false;
   try {
     const user = await requireActor("staff");
-    const showroom = await getShowroom(db);
+    const showroom = await currentShowroom();
     const res = await rescheduleBooking(db, { showroom, unitId, startsAt, actor: user.id, smsConsent: bool(formData, "sms_consent") });
     late = res.lateChange;
   } catch (err) {
@@ -395,7 +396,7 @@ export async function staffBookAction(unitId: string, formData: FormData) {
   let error: string | null = null;
   try {
     const user = await requireActor("staff");
-    const showroom = await getShowroom(db);
+    const showroom = await currentShowroom();
     await bookSlot(db, {
       showroom,
       unitId,
@@ -416,7 +417,7 @@ export async function staffBookAction(unitId: string, formData: FormData) {
 export async function saveCapacityTemplateAction(formData: FormData) {
   return run("/app/settings/capacity", async () => {
     const user = await requireActor("manager");
-    const showroom = await getShowroom(db);
+    const showroom = await currentShowroom();
     const before = await getCapacityConfig(db, showroom.id);
     const changes: Record<string, unknown> = {};
     for (let weekday = 0; weekday <= 6; weekday++) {
@@ -446,7 +447,7 @@ export async function saveCapacityTemplateAction(formData: FormData) {
 export async function upsertOverrideAction(formData: FormData) {
   return run("/app/settings/capacity", async () => {
     const user = await requireActor("manager");
-    const showroom = await getShowroom(db);
+    const showroom = await currentShowroom();
     const onDate = str(formData, "on_date");
     if (!/^\d{4}-\d{2}-\d{2}$/.test(onDate)) throw new Error("Pick a date");
     const closed = bool(formData, "closed");
@@ -469,7 +470,7 @@ export async function upsertOverrideAction(formData: FormData) {
 export async function deleteOverrideAction(id: string) {
   return run("/app/settings/capacity", async () => {
     const user = await requireActor("manager");
-    const showroom = await getShowroom(db);
+    const showroom = await currentShowroom();
     const [row] = await db.delete(capacityOverrides).where(and(eq(capacityOverrides.id, id), eq(capacityOverrides.showroomId, showroom.id))).returning();
     if (row) await logEvent(db, { showroomId: showroom.id, type: "settings_changed", actor: user.id, payload: { area: "capacity_override", changes: { [row.onDate]: { removed: true } } } });
     return "Override removed.";
@@ -479,7 +480,7 @@ export async function deleteOverrideAction(id: string) {
 export async function saveProgramSettingsAction(formData: FormData) {
   return run("/app/settings/program", async () => {
     const user = await requireActor("manager");
-    const showroom = await getShowroom(db);
+    const showroom = await currentShowroom();
     const current = showroom.settings;
     const next: Record<string, unknown> = { ...current };
     for (const key of PROGRAM_KEYS) {
@@ -528,7 +529,7 @@ export type ImportState = {
 export async function importCsvAction(_prev: ImportState, formData: FormData): Promise<ImportState> {
   try {
     const user = await requireActor("manager");
-    const showroom = await getShowroom(db);
+    const showroom = await currentShowroom();
     const file = formData.get("file");
     let text = str(formData, "text");
     if (file instanceof File && file.size > 0) text = await file.text();

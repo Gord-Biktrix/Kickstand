@@ -6,8 +6,8 @@ import { Alert, Card, Field, Flash, PageHeader } from "@/components/ui";
 import { hasRole, requireUser } from "@/lib/auth";
 import { sp, type SearchParams } from "@/lib/flash";
 import { FLAG_KEYS, type ProgramSettings } from "@/lib/settings";
-import { getShowroom } from "@/lib/showroom";
 import { saveProgramSettingsAction } from "../../actions";
+import { currentShowroom } from "@/lib/current-showroom";
 
 export const metadata = { title: "Program settings" };
 
@@ -37,7 +37,7 @@ export default async function ProgramPage({ searchParams }: { searchParams: Prom
   const q = await searchParams;
   const user = await requireUser("manager");
   const admin = hasRole(user.role, "admin");
-  const showroom = await getShowroom(db);
+  const showroom = await currentShowroom();
   const s = showroom.settings;
   const log = await db
     .select()

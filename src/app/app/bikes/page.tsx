@@ -9,9 +9,9 @@ import { customerKey } from "@/lib/customers";
 import { formatMoney } from "@/lib/format";
 import { sp, type SearchParams } from "@/lib/flash";
 import { allBikes, type BikeRow } from "@/lib/queries";
-import { getShowroom } from "@/lib/showroom";
 import { formatDateTime, formatLongDate, formatLongDateFromLocal, formatShortDateFromLocal, toLocalDate } from "@/lib/time";
 import { bulkBikesAction, inviteUnitAction, markReadyAction, startBuildAction } from "../actions";
+import { currentShowroom } from "@/lib/current-showroom";
 
 export const metadata = { title: "Bikes" };
 
@@ -41,7 +41,7 @@ export default async function BikesPage({ searchParams }: { searchParams: Promis
   const q = await searchParams;
   const user = await requireUser("staff");
   const manager = hasRole(user.role, "manager");
-  const showroom = await getShowroom(db);
+  const showroom = await currentShowroom();
   const tz = showroom.timezone;
   const now = new Date();
   const today = toLocalDate(now, tz);

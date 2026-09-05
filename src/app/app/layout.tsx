@@ -1,5 +1,9 @@
 import Link from "next/link";
 import { NavLinks } from "@/components/nav-links";
+import { ShowroomSwitcher } from "@/components/showroom-switcher";
+import { db } from "@/db/client";
+import { canSwitchShowroom, currentShowroom } from "@/lib/current-showroom";
+import { listShowrooms } from "@/lib/showroom";
 import { hasRole, requireUser } from "@/lib/auth";
 import { signOutAction } from "./actions";
 
@@ -15,11 +19,18 @@ const NAV = [
 
 export default async function StaffLayout({ children }: { children: React.ReactNode }) {
   const user = await requireUser("staff");
+  const [showroom, all] = await Promise.all([currentShowroom(user), listShowrooms(db)]);
+  const switchable = canSwitchShowroom(user) && all.length > 1;
   return (
     <div className="flex flex-1 flex-col">
       <header className="border-b border-border bg-card">
         <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3">
           <Link href="/app" className="text-sm font-semibold uppercase tracking-widest text-accent">Biktrix Pickups</Link>
+          {switchable ? (
+            <ShowroomSwitcher current={showroom.slug} options={all.map((s) => ({ slug: s.slug, name: s.name }))} />
+          ) : (
+            <span className="rounded-full border border-border px-2 py-0.5 text-xs text-muted" title="Showroom">{showroom.name}</span>
+          )}
           <nav aria-label="Main" className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
             <NavLinks
               items={NAV.filter((n) => hasRole(user.role, n.min)).map((n) => ({

@@ -6,9 +6,9 @@ import { hasRole, requireUser } from "@/lib/auth";
 import { formatMoney } from "@/lib/format";
 import { sp, type SearchParams } from "@/lib/flash";
 import { watchlist, type WatchRow } from "@/lib/queries";
-import { getShowroom } from "@/lib/showroom";
 import { formatDateTime, formatLongDate, formatLongDateFromLocal } from "@/lib/time";
 import { grantExtensionAction, resendInviteAction, retagUnitAction, waiveStorageAction } from "../actions";
+import { currentShowroom } from "@/lib/current-showroom";
 
 export const metadata = { title: "Alerts" };
 
@@ -90,7 +90,7 @@ export default async function WatchlistPage({ searchParams }: { searchParams: Pr
   const q = await searchParams;
   const user = await requireUser("staff");
   const manager = hasRole(user.role, "manager");
-  const showroom = await getShowroom(db);
+  const showroom = await currentShowroom();
   const tz = showroom.timezone;
   const now = new Date();
   const w = await watchlist(db, showroom, now);

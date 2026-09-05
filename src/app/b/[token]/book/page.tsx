@@ -8,7 +8,7 @@ import type { DaySummary } from "@/lib/capacity";
 import { formatMoney } from "@/lib/format";
 import { sp, type SearchParams } from "@/lib/flash";
 import { getUnitByToken } from "@/lib/queries";
-import { getShowroom } from "@/lib/showroom";
+import { getShowroom, getShowroomById } from "@/lib/showroom";
 import { addHours, addLocalDays, formatDateTime, formatLongDateFromLocal, formatShortDateFromLocal, formatTime, weekdayOf } from "@/lib/time";
 import { bookAction } from "../actions";
 import { InvalidToken } from "../invalid";
@@ -22,9 +22,10 @@ function mondayOf(date: string) {
 export default async function BookPage({ params, searchParams }: { params: Promise<{ token: string }>; searchParams: Promise<SearchParams> }) {
   const { token } = await params;
   const q = await searchParams;
-  const showroom = await getShowroom(db);
   const view = await getUnitByToken(db, token);
-  if (!view) return <InvalidToken showroom={showroom} />;
+  if (!view) return <InvalidToken showroom={await getShowroom(db)} />;
+  // The bike's own showroom — multi-store safe, whatever DEFAULT_SHOWROOM says.
+  const showroom = await getShowroomById(db, view.unit.showroomId);
   const { unit, order, appointment } = view;
   const reschedule = sp(q.reschedule) === "1";
   if (!["invited", "booked", "building", "ready"].includes(unit.status)) redirect(`/b/${token}`);
