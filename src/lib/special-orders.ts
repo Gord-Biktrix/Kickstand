@@ -95,9 +95,24 @@ export async function syncSpecialOrders(
     .where(and(eq(orders.showroomId, showroom.id), inArray(orders.lsSaleLineId, bikeLines.map((l) => l.saleLineID))));
   const byLine = new Map(existing.map((o) => [o.lsSaleLineId!, o]));
 
+  // Customer lookups dominate the run time (one Lightspeed call each); fetch them in parallel, a few at a time.
+  const customerIds = [...new Set(bikeLines.map((l) => l.customerID))];
+  const customers = new Map<string, { name: string; email: string | null; phone: string | null }>();
+  for (let i = 0; i < customerIds.length; i += 6) {
+    await Promise.all(
+      customerIds.slice(i, i + 6).map(async (id) => {
+        try {
+          customers.set(id, (await source.customer(id)) ?? { name: "", email: null, phone: null });
+        } catch (err) {
+          logger.warn({ err: err instanceof Error ? err.message : String(err), customerID: id }, "special-order sync: customer lookup failed");
+        }
+      }),
+    );
+  }
+
   for (const line of bikeLines) {
     try {
-      const cust = (await source.customer(line.customerID)) ?? { name: "", email: null, phone: null };
+      const cust = customers.get(line.customerID) ?? { name: "", email: null, phone: null };
       const orderDate = line.createTime ? toLocalDate(new Date(line.createTime), showroom.timezone) : toLocalDate(now, showroom.timezone);
       const fields = {
         customerName: cust.name || `Lightspeed customer ${line.customerID}`,

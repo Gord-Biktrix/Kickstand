@@ -3,6 +3,9 @@ import { db } from "@/db/client";
 import { runClock } from "@/lib/clock";
 import { logger } from "@/lib/logger";
 
+// Lightspeed syncs run inside this route (server actions / cron); Vercel Hobby caps requests at 10s by default, 60s allowed.
+export const maxDuration = 60;
+
 function authorized(request: NextRequest): boolean {
   const secret = process.env.CRON_SECRET;
   if (!secret) return false;

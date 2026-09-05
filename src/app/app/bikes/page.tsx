@@ -14,6 +14,9 @@ import { daysBetween, formatDateTime, formatLongDate, formatLongDateFromLocal, f
 import { bulkBikesAction, inviteUnitAction, markReadyAction, startBuildAction, syncSpecialOrdersAction } from "../actions";
 import { currentShowroom } from "@/lib/current-showroom";
 
+// Lightspeed syncs run inside this route (server actions / cron); Vercel Hobby caps requests at 10s by default, 60s allowed.
+export const maxDuration = 60;
+
 export const metadata = { title: "Bikes" };
 
 const FILTERS = [

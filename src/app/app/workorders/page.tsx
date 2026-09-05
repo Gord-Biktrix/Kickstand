@@ -8,6 +8,9 @@ import { formatDateTime, formatShortDateFromLocal, toLocalDate } from "@/lib/tim
 import { lightspeedWorkorderUrl, listViews, listWorkorders, listWorkorderStatuses } from "@/lib/workorders";
 import { syncWorkordersAction } from "../actions";
 
+// Lightspeed syncs run inside this route (server actions / cron); Vercel Hobby caps requests at 10s by default, 60s allowed.
+export const maxDuration = 60;
+
 export const metadata = { title: "Work orders" };
 
 /**
