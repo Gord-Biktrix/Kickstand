@@ -79,6 +79,6 @@ describe("parts & accessories", () => {
     const done = await collectParts(db, { showroom, unitId: unit.id, actor: "staff", now: NOW });
     expect(done.status).toBe("picked_up");
     expect((await db.select().from(appointments).where(eq(appointments.unitId, unit.id)))[0].status).toBe("completed");
-    expect(notifier.sent.map((m) => m.metric)).toEqual(["Parts: Collected"]);
+    expect(notifier.sent.map((m) => m.metric)).toEqual(["Pickup: Completed"]);
   });
 });

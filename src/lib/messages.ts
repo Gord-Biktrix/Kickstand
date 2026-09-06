@@ -32,16 +32,14 @@ export type Metric = (typeof METRIC)[keyof typeof METRIC];
  * Events, dedupe and the Lightspeed bridge still use the base metric internally.
  */
 export const PARTS_METRIC: Partial<Record<Metric, string>> = {
+  // Only the arrival differs in meaning ("your bike needs building" vs "your order is in"). Booked,
+  // Rescheduled, Cancelled and Completed share the bike flows — the copy works for both because
+  // `model` / `bikes` carry the item names, and templates can branch on `item_kind` where needed.
   [METRIC.bikeArrived]: "Parts: Order Arrived",
-  [METRIC.booked]: "Parts: Booked",
-  [METRIC.rescheduled]: "Parts: Rescheduled",
-  [METRIC.cancelled]: "Parts: Cancelled",
-  [METRIC.missed]: "Parts: Missed",
-  [METRIC.completed]: "Parts: Collected",
 };
 
 export function klaviyoMetricFor(metric: Metric, kind: string | null | undefined): string {
-  return kind === "parts" ? (PARTS_METRIC[metric] ?? metric.replace(/^Pickup: /, "Parts: ")) : metric;
+  return kind === "parts" ? (PARTS_METRIC[metric] ?? metric) : metric;
 }
 
 /** 'Pickup: Bike Arrived' → 'bike_arrived' (also the Lightspeed status-map key). */

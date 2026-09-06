@@ -144,16 +144,11 @@ Extra: `slot_start_local`, `no_show_count`.
 
 # Parts & accessories flows (separate from bikes)
 
-Parts fire under **their own metric names**, so the bike flows need no change at all — just build new flows
-on the new triggers (they appear in Klaviyo after the first parts event of each kind):
-
-| Bike metric | Parts metric |
-|---|---|
-| Pickup: Bike Arrived | **Parts: Order Arrived** |
-| Pickup: Booked | **Parts: Booked** |
-| Pickup: Rescheduled | **Parts: Rescheduled** |
-| Pickup: Cancelled | **Parts: Cancelled** |
-| Pickup: Completed | **Parts: Collected** (fires from the Collected button; optional thank-you) |
+Only the **arrival** differs: parts fire **Parts: Order Arrived** instead of Pickup: Bike Arrived, so that is
+the one new flow to build (P1 below). Booked, Rescheduled, Cancelled and Completed **share the bike flows**
+unchanged — for parts, `model` is the item name and `bikes` lists the items, so "you're booked to collect
+your Front Cargo Basket on Saturday…" reads correctly. The Booked email template branches on
+`event.item_kind` so it says "is ready for you" rather than "is being built" for parts.
 
 No reminder, nudge, hold-ending or storage messages exist for parts. Items are in `event.bikes` (a list of
 item names, quantity suffixed, e.g. "Fat Bike Inner Tube 20x4 ×2"); `event.bike_count` is the number of items.
@@ -164,15 +159,4 @@ item names, quantity suffixed, e.g. "Fat Bike Inner Tube 20x4 ×2"); `event.bike
 
 **Email**: template "Parts: Order ready to collect (Kickstand)" — subject `Your order is ready to collect`.
 
-## P2. Parts: Booked
-**SMS** (quiet hours OFF)
-> You're booked to collect your order on {{ event.slot_start_local }} at {{ event.showroom }}, {{ event.showroom_address }}. Change or cancel: {{ event.manage_url }}
-
-**Email**: template "Parts: Collection booked (Kickstand)" — subject `Collection booked — {{ event.slot_start_local }}`. Also fine for **Rescheduled** (heading switches on `old_slot_start_local`).
-
-## P3. Parts: Rescheduled
-> Your collection has moved to {{ event.slot_start_local }} (was {{ event.old_slot_start_local }}). Manage: {{ event.manage_url }}
-
-## P4. Parts: Cancelled (split on `cancelled_by`)
-- shop: > Sorry — we've had to cancel your collection on {{ event.slot_start_local }}. Your order is safe with us; pick a new time: {{ event.rebook_url }}
-- customer: > Your collection on {{ event.slot_start_local }} is cancelled. Your order is still here — rebook any time: {{ event.rebook_url }}
+(Booked / Rescheduled / Cancelled for parts: the shared bike flows — no separate flow needed.)
