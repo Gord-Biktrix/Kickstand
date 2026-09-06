@@ -52,7 +52,10 @@ describe("special-order sync", () => {
     // Re-run: nothing changes.
     const r2 = await syncSpecialOrders(db, { showroom, actor: "test", source: src });
     expect(r2).toMatchObject({ created: 0, updated: 0 });
-    expect(await db.select().from(orders).where(eq(orders.showroomId, showroom.id))).toHaveLength(1);
+    // The parts line became a parts order of its own (Parts tab); bikes stay at one.
+    const all = await db.select().from(orders).where(eq(orders.showroomId, showroom.id));
+    expect(all.filter((o) => o.kind === "bike")).toHaveLength(1);
+    expect(all.filter((o) => o.kind === "parts").map((o) => o.model)).toEqual(["Battery Cover"]);
 
     // Customer fixed their phone in Lightspeed: the order follows.
     src.customers["9020"] = { name: "Test Test", email: "t@x.ca", phone: "+16045550199" };

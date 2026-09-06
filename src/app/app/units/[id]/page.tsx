@@ -18,6 +18,7 @@ import { formatDateTime, formatLongDate, formatLongDateFromLocal, formatTime } f
 import { HANDOVER_CHECKLIST, visitMates, waitlistFor } from "@/lib/units";
 import {
   attachUnitAction,
+  collectPartsAction,
   completeHandoverAction,
   deferUnitAction,
   deleteUnitAction,
@@ -75,7 +76,7 @@ export default async function UnitPage({ params, searchParams }: { params: Promi
             <>{[unit.size, unit.colour].filter(Boolean).join(" · ")} · no order attached</>
           )
         }
-        action={<StatusBadge status={unit.status} />}
+        action={<div className="flex items-center gap-2">{unit.kind === "parts" && <Badge>Parts & accessories</Badge>}<StatusBadge status={unit.status} /></div>}
       />
       <Flash ok={sp(q.ok)} error={sp(q.error)} />
 
@@ -139,9 +140,10 @@ export default async function UnitPage({ params, searchParams }: { params: Promi
               )}
             </div>
             <div className="flex flex-wrap items-start gap-2">
-              {unit.status === "booked" && <form action={startBuildAction.bind(null, unit.id, RETURN)}><button type="submit" className="btn btn-primary">Build</button></form>}
-              {unit.status === "building" && <form action={markReadyAction.bind(null, unit.id, RETURN)}><button type="submit" className="btn btn-primary">Ready</button></form>}
-              {["booked", "building", "ready"].includes(unit.status) && !handover && <Link href={`${RETURN}?handover=1`} className={`btn ${unit.status === "ready" ? "btn-primary" : ""}`}>Start handover</Link>}
+              {unit.kind === "parts" && <form action={collectPartsAction.bind(null, unit.id, RETURN)}><button type="submit" className="btn btn-primary">Collected</button></form>}
+              {unit.kind !== "parts" && unit.status === "booked" && <form action={startBuildAction.bind(null, unit.id, RETURN)}><button type="submit" className="btn btn-primary">Build</button></form>}
+              {unit.kind !== "parts" && unit.status === "building" && <form action={markReadyAction.bind(null, unit.id, RETURN)}><button type="submit" className="btn btn-primary">Ready</button></form>}
+              {unit.kind !== "parts" && ["booked", "building", "ready"].includes(unit.status) && !handover && <Link href={`${RETURN}?handover=1`} className={`btn ${unit.status === "ready" ? "btn-primary" : ""}`}>Start handover</Link>}
               <Link href={`/app/book?unit=${unit.id}&reschedule=1`} className="btn">Reschedule</Link>
               <details className="relative">
                 <summary className="btn cursor-pointer list-none">Cancel booking</summary>
@@ -185,6 +187,7 @@ export default async function UnitPage({ params, searchParams }: { params: Promi
                 <form action={inviteUnitAction.bind(null, unit.id, RETURN)}><button type="submit" className="btn btn-primary" disabled={!order?.customerEmail && !order?.customerPhone}>Send invite</button></form>
               )}
               {["invited", "building", "ready"].includes(unit.status) && <Link href={`/app/book?unit=${unit.id}`} className="btn btn-primary">Book for customer</Link>}
+              {unit.kind === "parts" && unit.status !== "received" && <form action={collectPartsAction.bind(null, unit.id, RETURN)}><button type="submit" className="btn">Collected</button></form>}
               {unit.status === "invited" && <form action={resendInviteAction.bind(null, unit.id, RETURN)}><button type="submit" className="btn">Send invite again</button></form>}
               {["received", "invited"].includes(unit.status) && (
                 <form action={unreceiveUnitAction.bind(null, unit.id)}>

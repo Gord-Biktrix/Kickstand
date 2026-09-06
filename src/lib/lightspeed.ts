@@ -520,6 +520,7 @@ export async function syncUnitToLightspeed(dbx: Db, args: SyncArgs): Promise<Syn
 
   // Re-read ids: the caller's snapshot may predate an earlier sync in the same flush.
   const [unit] = await dbx.select().from(units).where(eq(units.id, args.unit.id));
+  if (unit.kind === "parts") return { skipped: true, reason: "parts & accessories have no work order" };
   // Unmapped messages are Klaviyo-only for *status* purposes (README "Lightspeed bridge") — but when the
   // work order already exists, its dates, Hook Out and note must still follow a reschedule or
   // cancellation. So: no work order + unmapped → skip; existing work order → update dates, keep status.

@@ -105,6 +105,8 @@ export const orders = pgTable(
       .references(() => showrooms.id),
     orderRef: text("order_ref").notNull(),
     source: text("source").notNull(),
+    /** "bike" (built, work order, capacity) or "parts" (accessories: no build, no work order, unlimited slots). */
+    kind: text("kind").notNull().default("bike"),
     customerName: text("customer_name").notNull(),
     customerEmail: text("customer_email"),
     customerPhone: text("customer_phone"),
@@ -146,6 +148,7 @@ export const units = pgTable(
     size: text("size"),
     colour: text("colour"),
     status: text("status").notNull().default("received"),
+    kind: text("kind").notNull().default("bike"),
     receivedAt: timestamp("received_at", { withTimezone: true }).notNull(),
     invitedAt: timestamp("invited_at", { withTimezone: true }),
     bookBy: timestamp("book_by", { withTimezone: true }),

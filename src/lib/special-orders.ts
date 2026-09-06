@@ -9,7 +9,7 @@
  */
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import type { Db } from "@/db/client";
-import { orders, units, type Order } from "@/db/schema";
+import { appointments, orders, units, type Order } from "@/db/schema";
 import { logEvent } from "./events";
 import { getConnection, LightspeedClient, type SaleLineInfo } from "./lightspeed";
 import { logger } from "./logger";
@@ -77,7 +77,7 @@ export class LightspeedSpecialOrderSource implements SpecialOrderSource {
   }
 }
 
-export type SyncSummary = { seen: number; bikes: number; created: number; adopted: number; updated: number; skippedParts: number; errors: string[] };
+export type SyncSummary = { seen: number; bikes: number; created: number; adopted: number; updated: number; skippedParts: number; parts?: { created: number; updated: number; fulfilled: number }; errors: string[] };
 
 export async function syncSpecialOrders(
   dbx: Db,
@@ -97,6 +97,12 @@ export async function syncSpecialOrders(
   const bikeLines = lines.filter((l) => isBikeCategory(l.categoryPath));
   summary.skippedParts = lines.length - bikeLines.length;
   summary.bikes = bikeLines.length;
+  // Parts & accessories get their own orders (Parts tab) and are fulfilled when Lightspeed completes them.
+  try {
+    summary.parts = await syncPartsOrders(dbx, { showroom, actor: args.actor, lines, customer: (id) => source.customer(id), now });
+  } catch (err) {
+    summary.errors.push(`parts: ${err instanceof Error ? err.message : String(err)}`);
+  }
   if (bikeLines.length === 0) return finish();
 
   const existing = await dbx
@@ -109,7 +115,7 @@ export async function syncSpecialOrders(
   const unlinked = await dbx
     .select()
     .from(orders)
-    .where(and(eq(orders.showroomId, showroom.id), eq(orders.status, "open"), isNull(orders.lsSaleLineId)));
+    .where(and(eq(orders.showroomId, showroom.id), eq(orders.status, "open"), eq(orders.kind, "bike"), isNull(orders.lsSaleLineId)));
   const norm = (v: string | null | undefined) => (v ?? "").trim().toLowerCase();
 
   // Customer lookups dominate the run time (one Lightspeed call each); fetch them in parallel, a few at a time.
@@ -199,13 +205,78 @@ export async function syncSpecialOrders(
   }
 }
 
-/** Orders on the books with no box received yet — "on order", shown under the Bikes list. */
-export async function ordersOnOrder(dbx: Db, showroom: ShowroomCtx): Promise<Order[]> {
+/** Orders on the books with no box received yet — "on order". Bikes by default; parts for the Parts tab. */
+export async function ordersOnOrder(dbx: Db, showroom: ShowroomCtx, kind: "bike" | "parts" = "bike"): Promise<Order[]> {
   const rows = await dbx
     .select({ order: orders })
     .from(orders)
     .leftJoin(units, eq(units.orderId, orders.id))
-    .where(and(eq(orders.showroomId, showroom.id), eq(orders.status, "open"), isNull(units.id)))
+    .where(and(eq(orders.showroomId, showroom.id), eq(orders.status, "open"), eq(orders.kind, kind), isNull(units.id)))
     .orderBy(orders.orderDate);
   return rows.map((r) => r.order);
+}
+
+/**
+ * Parts & accessories special orders: one Kickstand order per Lightspeed line (kind "parts"). When a
+ * line is completed in Lightspeed it stops appearing in the open list; the matching Kickstand order is
+ * then fulfilled and any booking closed, so it disappears from the Parts tab without staff doing anything.
+ */
+export async function syncPartsOrders(
+  dbx: Db,
+  args: { showroom: ShowroomCtx; actor: string; lines: SpecialOrderLine[]; customer: (id: string) => Promise<{ name: string; email: string | null; phone: string | null }>; now?: Date },
+): Promise<{ created: number; updated: number; fulfilled: number }> {
+  const { showroom } = args;
+  const now = args.now ?? new Date();
+  const partLines = args.lines.filter((l) => !isBikeCategory(l.categoryPath) && l.bike.description);
+  const summary = { created: 0, updated: 0, fulfilled: 0 };
+  const existing = await dbx.select().from(orders).where(and(eq(orders.showroomId, showroom.id), eq(orders.kind, "parts"), eq(orders.status, "open")));
+  const byLine = new Map(existing.filter((o) => o.lsSaleLineId).map((o) => [o.lsSaleLineId!, o]));
+  for (const line of partLines) {
+    const prev = byLine.get(line.saleLineID);
+    const cust = (await args.customer(line.customerID)) ?? { name: "", email: null, phone: null };
+    const fields = {
+      customerName: cust.name || `Lightspeed customer ${line.customerID}`,
+      customerEmail: cust.email,
+      customerPhone: cust.phone,
+      model: line.qty > 1 ? `${line.bike.description} ×${line.qty}` : line.bike.description,
+      lsCustomerId: line.customerID,
+    };
+    if (!prev) {
+      await dbx.insert(orders).values({
+        showroomId: showroom.id,
+        orderRef: `SO${line.saleLineID}`,
+        source: "lightspeed",
+        kind: "parts",
+        orderDate: line.createTime ? toLocalDate(new Date(line.createTime), showroom.timezone) : toLocalDate(now, showroom.timezone),
+        paymentStatus: "deposit",
+        balanceCents: 0,
+        termsVersion: 2,
+        smsConsent: false,
+        notes: "Parts & accessories special order — confirm balance in Lightspeed at pickup.",
+        lsSaleLineId: line.saleLineID,
+        ...fields,
+      });
+      summary.created++;
+    } else {
+      const changed = (Object.keys(fields) as (keyof typeof fields)[]).filter((k) => (prev[k] ?? null) !== (fields[k] ?? null));
+      if (changed.length) {
+        await dbx.update(orders).set(fields).where(eq(orders.id, prev.id));
+        summary.updated++;
+      }
+    }
+  }
+  // Gone from Lightspeed's open list → completed there → done here.
+  const openIds = new Set(partLines.map((l) => l.saleLineID));
+  for (const o of existing) {
+    if (!o.lsSaleLineId || openIds.has(o.lsSaleLineId)) continue;
+    const us = await dbx.select().from(units).where(eq(units.orderId, o.id));
+    for (const u of us) {
+      await dbx.update(appointments).set({ status: "completed" }).where(and(eq(appointments.unitId, u.id), eq(appointments.status, "booked")));
+      if (u.status !== "picked_up") await dbx.update(units).set({ status: "picked_up", pickedUpAt: now }).where(eq(units.id, u.id));
+    }
+    await dbx.update(orders).set({ status: "fulfilled" }).where(eq(orders.id, o.id));
+    await logEvent(dbx, { showroomId: showroom.id, orderId: o.id, type: "fulfilled_in_lightspeed", actor: args.actor, payload: { sale_line_id: o.lsSaleLineId } });
+    summary.fulfilled++;
+  }
+  return summary;
 }

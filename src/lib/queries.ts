@@ -168,7 +168,7 @@ export async function allBikes(dbx: Db, showroom: ShowroomCtx, now = new Date())
       .select({ unit: units, order: orders })
       .from(units)
       .leftJoin(orders, eq(orders.id, units.orderId))
-      .where(and(eq(units.showroomId, showroom.id), inArray(units.status, [...IN_BUILDING]))),
+      .where(and(eq(units.showroomId, showroom.id), inArray(units.status, [...IN_BUILDING]), eq(units.kind, "bike"))),
     dbx.select().from(appointments).where(and(eq(appointments.showroomId, showroom.id), eq(appointments.status, "booked"))),
     getCapacityConfig(dbx, showroom.id),
   ]);

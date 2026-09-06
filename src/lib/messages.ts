@@ -90,6 +90,8 @@ export function commonProperties(
     storage_rate_display: `${formatMoney(showroom.settings.storage_rate_cents)}/day`,
     storage_cap_display: formatMoney(showroom.settings.storage_cap_cents),
     ...orderKind(unit, order, tz),
+    /** "bike" or "parts" — parts pickups have no build, no work order, no storage. */
+    item_kind: unit.kind ?? "bike",
   };
 }
 

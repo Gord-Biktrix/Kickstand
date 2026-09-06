@@ -13,7 +13,7 @@ import { normalizePhone } from "@/lib/phone";
 import { FLAG_KEYS, PROGRAM_KEYS, settingsSchema, validateSettings, type ProgramSettings } from "@/lib/settings";
 import { getCapacityConfig, patchShowroomSettings } from "@/lib/showroom";
 import { normalizeTime } from "@/lib/time";
-import { attachUnit, bookableSiblings, completeHandover, createOrder, deleteUnit, detachUnit, grantExtension, inviteAllReceived, inviteOrders, inviteUnit, inviteUnits, markReady, receiveUnit, resendInvite, retagUnit, startBuild, unreceiveUnit, waiveStorage } from "@/lib/units";
+import { attachUnit, bookableSiblings, collectParts, completeHandover, createOrder, deleteUnit, detachUnit, grantExtension, inviteAllReceived, inviteOrders, inviteUnit, inviteUnits, markReady, receiveUnit, resendInvite, retagUnit, startBuild, unreceiveUnit, waiveStorage } from "@/lib/units";
 import { currentShowroom } from "@/lib/current-showroom";
 import { syncSpecialOrders } from "@/lib/special-orders";
 import { deleteView, saveView, syncWorkorders } from "@/lib/workorders";
@@ -349,13 +349,14 @@ export async function syncSpecialOrdersAction(returnTo: string) {
     const showroom = await currentShowroom(user);
     const r = await syncSpecialOrders(db, { showroom, actor: user.id });
     const tail = r.errors.length ? ` · ${r.errors.length} skipped (see logs)` : "";
-    return `Lightspeed sync: ${r.bikes} bike special order${r.bikes === 1 ? "" : "s"} open — ${r.created} new${r.adopted ? `, ${r.adopted} matched to existing orders` : ""}, ${r.updated} updated, ${r.skippedParts} parts/accessories ignored${tail}.`;
+    const parts = r.parts ? ` · parts & accessories: ${r.parts.created} new, ${r.parts.fulfilled} fulfilled in Lightspeed` : "";
+    return `Lightspeed sync: ${r.bikes} bike special order${r.bikes === 1 ? "" : "s"} open — ${r.created} new${r.adopted ? `, ${r.adopted} matched to existing orders` : ""}, ${r.updated} updated${parts}${tail}.`;
   });
 }
 
 /** "On order" list → tick bikes → Send invites: receive under the sale reference and text the booking link. */
 export async function inviteOrdersAction(returnTo: string, formData: FormData) {
-  const ids = formData.getAll("order_ids").map(String).filter(Boolean);
+  const ids = formData.getAll("order_ids").flatMap((v) => String(v).split(",")).map((v) => v.trim()).filter(Boolean);
   return run(safeReturn(returnTo, "/app/bikes"), async () => {
     const user = await requireActor("staff");
     const showroom = await currentShowroom(user);
@@ -394,6 +395,16 @@ export async function deleteViewAction(id: string) {
     const showroom = await currentShowroom(user);
     await deleteView(db, showroom, id);
     return "View deleted.";
+  });
+}
+
+/** Parts & accessories handed over — no checklist. */
+export async function collectPartsAction(unitId: string, returnTo: string) {
+  return run(safeReturn(returnTo, "/app/parts"), async () => {
+    const user = await requireActor("staff");
+    const showroom = await currentShowroom(user);
+    await collectParts(db, { showroom, unitId, actor: user.id });
+    return "Marked as collected.";
   });
 }
 

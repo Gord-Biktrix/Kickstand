@@ -115,6 +115,7 @@ export async function runClockForShowroom(
         and(
           eq(units.showroomId, showroom.id),
           notInArray(units.status, ["picked_up", "unassigned", "received"]),
+          eq(units.kind, "bike"),
           isNotNull(units.invitedAt),
         ),
       );
@@ -181,6 +182,7 @@ export async function runClockForShowroom(
           eq(appointments.showroomId, showroom.id),
           eq(appointments.status, "booked"),
           eq(appointments.onDate, tomorrow),
+          eq(units.kind, "bike"),
         ),
       );
     const remindedGroups = new Set<string>();

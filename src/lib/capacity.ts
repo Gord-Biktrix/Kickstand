@@ -115,6 +115,8 @@ export type SlotContext = {
   storageEstimate: (date: LocalDate) => number;
   /** Can the bike still be built in time for this slot? (build-schedule.ts; false → too_early) */
   buildFeasible?: (date: LocalDate, startsAt: Date) => boolean;
+  /** Parts & accessories: any future slot in opening hours; no capacity, concurrency, lead or build checks. */
+  unlimited?: boolean;
 };
 
 /** §6.2 slot generation for one day. Returns [] for closed days or days past the horizon. */
@@ -140,7 +142,9 @@ export function slotsForDay(
     const endsAt = new Date(startsAt.getTime() + ctx.settings.slot_minutes * 60_000);
     const atTime = ctx.bookedStarts.filter((s) => s.getTime() === startsAt.getTime()).length;
     let reason: Slot["reason"] = null;
-    if (startsAt < earliest) reason = "too_early";
+    if (ctx.unlimited) {
+      if (startsAt.getTime() < ctx.now.getTime() + 60 * 60_000) reason = "too_early";
+    } else if (startsAt < earliest) reason = "too_early";
     else if (ctx.buildFeasible && !ctx.buildFeasible(date, startsAt)) reason = "too_early";
     else if (remainingDay <= 0) reason = "day_full";
     else if (atTime >= day.maxConcurrent) reason = "time_full";

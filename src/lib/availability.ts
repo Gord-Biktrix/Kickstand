@@ -75,6 +75,7 @@ export async function getAvailability(
       bookedStarts: startsByDate.get(date) ?? [],
       storageEstimate: (d) => storageEstimateCents(unit, termsVersion, settings, d, tz),
       buildFeasible: (d, startsAt) => buildFeasibleAt(showroom, { onDate: d, startsAt }, rules, overrides, now),
+      unlimited: unit.kind === "parts",
     };
     return summarizeDay(date, day, ctx);
   });

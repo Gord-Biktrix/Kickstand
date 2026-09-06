@@ -7,7 +7,7 @@ import { formatMoney } from "@/lib/format";
 import { sp, type SearchParams } from "@/lib/flash";
 import { todayAppointments } from "@/lib/queries";
 import { addLocalDays, formatLongDateFromLocal, formatTime, toLocalDate } from "@/lib/time";
-import { recordNoShowAction } from "./actions";
+import { collectPartsAction, recordNoShowAction } from "./actions";
 import { currentShowroom } from "@/lib/current-showroom";
 
 export const metadata = { title: "Today" };
@@ -82,7 +82,11 @@ export default async function TodayPage({ searchParams }: { searchParams: Promis
                               {unit.noShowCount > 0 && <Badge tone="neutral">{unit.noShowCount} prior no-show</Badge>}
                             </div>
                           </div>
-                          <Link href={`/app/units/${unit.id}?handover=1`} className="btn btn-primary btn-sm">{unit.status === "picked_up" ? "Handed over" : "Start handover"}</Link>
+                          {unit.kind === "parts" ? (
+                            <span className="flex items-center gap-2"><Badge>Parts</Badge><form action={collectPartsAction.bind(null, unit.id, `/app?date=${date}`)}><button type="submit" className="btn btn-primary btn-sm">Collected</button></form></span>
+                          ) : (
+                            <Link href={`/app/units/${unit.id}?handover=1`} className="btn btn-primary btn-sm">{unit.status === "picked_up" ? "Handed over" : "Start handover"}</Link>
+                          )}
                         </li>
                       ))}
                     </ul>

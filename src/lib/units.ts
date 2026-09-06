@@ -152,6 +152,7 @@ export async function receiveUnit(
         model: order.model,
         size: order.size,
         colour: order.colour,
+        kind: order.kind,
         status: "received",
         receivedAt: now,
       })
@@ -950,5 +951,26 @@ export async function unreceiveUnit(dbx: Db, args: { showroom: ShowroomCtx; unit
       payload: { box_tag: unit.boxTag, model: unit.model, status_before: unit.status, ls_workorder_id: unit.lsWorkorderId ?? null },
     });
     return { orderRef: order.orderRef };
+  });
+}
+
+/**
+ * Parts & accessories handover: no checklist, no storage — the customer picked the order up. Any
+ * booked appointment is completed, the unit is marked picked up, the order fulfilled, and the
+ * Completed message goes out (Klaviyo only; parts never have a work order).
+ */
+export async function collectParts(dbx: Db, args: { showroom: ShowroomCtx; unitId: string; actor: string; now?: Date }): Promise<Unit> {
+  const now = args.now ?? new Date();
+  return withOutbox(dbx, async (tx, outbox) => {
+    const { unit, order } = await loadUnit(tx, args.unitId);
+    if (unit.kind !== "parts") throw new UnitError("Only parts & accessories orders use Collected — bikes go through the handover checklist");
+    if (unit.status === "picked_up") throw new UnitError("Already collected");
+    const [active] = await tx.select().from(appointments).where(and(eq(appointments.unitId, unit.id), eq(appointments.status, "booked")));
+    if (active) await tx.update(appointments).set({ status: "completed" }).where(eq(appointments.id, active.id));
+    const [updated] = await tx.update(units).set({ status: "picked_up", pickedUpAt: now }).where(eq(units.id, unit.id)).returning();
+    if (order) await tx.update(orders).set({ status: "fulfilled" }).where(eq(orders.id, order.id));
+    await logEvent(tx, { showroomId: args.showroom.id, unitId: unit.id, orderId: order?.id, appointmentId: active?.id, type: "parts_collected", actor: args.actor, payload: {} });
+    if (order) outbox.push({ showroom: args.showroom, unit: updated, order, metric: METRIC.completed, dedupeKey: unit.id, actor: args.actor, extra: { item_kind: "parts" } });
+    return updated;
   });
 }

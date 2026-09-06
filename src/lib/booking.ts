@@ -157,48 +157,54 @@ export async function bookSlotTx(
     (s) => localToUtc(date, s, tz).getTime() === startsAt.getTime(),
   );
   if (!validStart) throw new BookingError("INVALID_SLOT");
-  if (!args.allowShortNotice && startsAt < addHours(now, settings.min_lead_hours)) throw new BookingError("TOO_EARLY");
+  const parts = unit.kind === "parts";
   if (startsAt < now) throw new BookingError("TOO_EARLY");
+  if (!parts && !args.allowShortNotice && startsAt < addHours(now, settings.min_lead_hours)) throw new BookingError("TOO_EARLY");
   // The build must still be possible: the deadline for this slot has to be ahead of us (staff may override).
-  if (!args.allowShortNotice) {
+  if (!parts && !args.allowShortNotice) {
     const cfg = await getCapacityConfig(tx, showroom.id);
     if (!buildFeasibleAt(showroom, { onDate: date, startsAt }, cfg.rules, cfg.overrides, now)) throw new BookingError("TOO_EARLY");
   }
   const latestDate = addLocalDays(toLocalDate(unit.invitedAt, tz), settings.booking_horizon_days);
   if (date > latestDate) throw new BookingError("HORIZON");
 
-  // 1–2: the counter row lock serialises every booking for this day.
-  await tx
-    .insert(dayCounters)
-    .values({ showroomId: showroom.id, onDate: date, bookedCount: 0 })
-    .onConflictDoNothing();
-  const bumped = await tx
-    .update(dayCounters)
-    .set({ bookedCount: sql`${dayCounters.bookedCount} + 1` })
-    .where(
-      and(
-        eq(dayCounters.showroomId, showroom.id),
-        eq(dayCounters.onDate, date),
-        sql`${dayCounters.bookedCount} < ${day.capacity}`,
-      ),
-    )
-    .returning({ bookedCount: dayCounters.bookedCount });
-  if (bumped.length === 0) throw new BookingError("DAY_FULL");
+  // Parts & accessories don't take a build slot: no counter, no concurrency limit.
+  if (!parts) {
+    // 1–2: the counter row lock serialises every booking for this day.
+    await tx
+      .insert(dayCounters)
+      .values({ showroomId: showroom.id, onDate: date, bookedCount: 0 })
+      .onConflictDoNothing();
+    const bumped = await tx
+      .update(dayCounters)
+      .set({ bookedCount: sql`${dayCounters.bookedCount} + 1` })
+      .where(
+        and(
+          eq(dayCounters.showroomId, showroom.id),
+          eq(dayCounters.onDate, date),
+          sql`${dayCounters.bookedCount} < ${day.capacity}`,
+        ),
+      )
+      .returning({ bookedCount: dayCounters.bookedCount });
+    if (bumped.length === 0) throw new BookingError("DAY_FULL");
 
-  // 3: same-time concurrency (safe without a lock — step 2 serialised this day).
-  const [{ atTime }] = await tx
-    .select({ atTime: count() })
-    .from(appointments)
-    .where(
-      and(
-        eq(appointments.showroomId, showroom.id),
-        eq(appointments.startsAt, startsAt),
-        eq(appointments.status, "booked"),
-        // Bikes in the same visit share the time on purpose.
-        args.groupId ? sql`${appointments.groupId} is distinct from ${args.groupId}` : undefined,
-      ),
-    );
-  if (atTime >= day.maxConcurrent) throw new BookingError("TIME_FULL");
+    // 3: same-time concurrency (safe without a lock — step 2 serialised this day).
+    const [{ atTime }] = await tx
+      .select({ atTime: count() })
+      .from(appointments)
+      .innerJoin(units, eq(units.id, appointments.unitId))
+      .where(
+        and(
+          eq(appointments.showroomId, showroom.id),
+          eq(appointments.startsAt, startsAt),
+          eq(appointments.status, "booked"),
+          eq(units.kind, "bike"),
+          // Bikes in the same visit share the time on purpose.
+          args.groupId ? sql`${appointments.groupId} is distinct from ${args.groupId}` : undefined,
+        ),
+      );
+    if (atTime >= day.maxConcurrent) throw new BookingError("TIME_FULL");
+  }
 
   // 4
   const endsAt = new Date(startsAt.getTime() + settings.slot_minutes * 60_000);
@@ -348,7 +354,7 @@ export async function cancelBookingTx(
     )
     .where(eq(appointments.id, active.id))
     .returning();
-  await decrementCounter(tx, showroom.id, active.onDate);
+  if (unit.kind !== "parts") await decrementCounter(tx, showroom.id, active.onDate);
 
   let noShowCount = unit.noShowCount;
   if (lateChange) {
@@ -511,7 +517,7 @@ export async function recordNoShow(
       const a = unitId === unit.id ? active : await activeAppointment(tx, unitId);
       if (!a) continue;
       const [updated] = await tx.update(appointments).set({ status: "no_show" }).where(eq(appointments.id, a.id)).returning();
-      await decrementCounter(tx, showroom.id, a.onDate);
+      if (u.kind !== "parts") await decrementCounter(tx, showroom.id, a.onDate);
       const n = await bumpNoShow(tx, u, showroom.timezone, now);
       const unitPatch: Partial<Unit> = {};
       if (u.status === "booked") unitPatch.status = "invited";
