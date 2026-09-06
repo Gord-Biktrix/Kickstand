@@ -16,8 +16,8 @@ const OK_TEXT: Record<string, string> = {
   booked: "You're booked. We've sent a confirmation with the details.",
   rescheduled: "Your pickup has been moved. We've sent an updated confirmation.",
   rescheduled_late: "Your pickup has been moved. Because the change was inside 24 hours it counts as a missed pickup. We've sent an updated confirmation.",
-  cancelled: "Your pickup is cancelled. Your bike stays reserved — book a new time below.",
-  cancelled_late: "Your pickup is cancelled. Because it was inside 24 hours it counts as a missed pickup. Your bike stays reserved — book a new time below.",
+  cancelled: "Your pickup is cancelled. Your order stays reserved — book a new time below.",
+  cancelled_late: "Your pickup is cancelled. Because it was inside 24 hours it counts as a missed pickup. Your order stays reserved — book a new time below.",
   deferred: "Done — your order is now reserved from our next shipment.",
 };
 
@@ -38,7 +38,7 @@ export default async function LandingPage({ params, searchParams }: { params: Pr
 
   const bikeCard = (
     <Card>
-      <p className="text-xs font-medium uppercase tracking-wide text-muted">Your bike</p>
+      <p className="text-xs font-medium uppercase tracking-wide text-muted">{unit.kind === "parts" ? "Your order" : "Your bike"}</p>
       <p className="mt-1 text-lg font-semibold">{unit.model}</p>
       <p className="text-sm text-muted">{[unit.size, unit.colour].filter(Boolean).join(" · ")}</p>
       <div className="mt-3">
@@ -102,7 +102,7 @@ export default async function LandingPage({ params, searchParams }: { params: Pr
         <Card title="What to bring">
           <ul className="list-disc space-y-1 pl-5 text-sm text-muted">
             <li>A copy of your order confirmation (on your phone is fine) and photo ID.</li>
-            <li>About 45 minutes for fitting and a display walkthrough.</li>
+            {unit.kind === "parts" ? <li>Just a few minutes at the counter.</li> : <li>About 45 minutes for fitting and a display walkthrough.</li>}
             {order.balanceCents > 0 && <li>Your balance of {formatMoney(order.balanceCents)} is due at handover.</li>}
           </ul>
         </Card>

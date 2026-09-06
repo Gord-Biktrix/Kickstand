@@ -36,6 +36,7 @@ export default async function BookPage({ params, searchParams }: { params: Promi
 
   const tz = showroom.timezone;
   const s = showroom.settings;
+  const parts = unit.kind === "parts";
   // Other bikes of theirs waiting in the building: offer to collect them in the same visit.
   const siblings = reschedule ? [] : await bookableSiblings(db, showroom, unit, order);
   const visitSize = reschedule && appointment ? (await groupUnitIds(db, appointment)).length : 1 + siblings.length;
@@ -66,7 +67,7 @@ export default async function BookPage({ params, searchParams }: { params: Promi
         <Link href={selected ? base : `/b/${token}`} className="text-sm text-accent underline">← Back</Link>
         <h1 className="mt-2 text-2xl font-semibold">{reschedule ? "Pick a new time" : "Pick a time"}</h1>
         <p className="mt-1 text-sm text-muted">
-          {unit.model}{siblings.length > 0 && <> and {siblings.length} more bike{siblings.length === 1 ? "" : "s"}</>} · {showroom.name}. Pickups take about 45 minutes.
+          {unit.model}{siblings.length > 0 && <> and {siblings.length} more bike{siblings.length === 1 ? "" : "s"}</>} · {showroom.name}. {parts ? "Come by any time during opening hours — collecting takes just a few minutes." : "Pickups take about 45 minutes."}
         </p>
       </div>
       {errorCode && BOOKING_ERROR_TEXT[errorCode] && <Alert tone="danger">{BOOKING_ERROR_TEXT[errorCode]}</Alert>}
@@ -121,7 +122,7 @@ export default async function BookPage({ params, searchParams }: { params: Promi
         </Card>
       ) : selected ? (
         <Card title={formatLongDateFromLocal(selected.date)}>
-          <p className="mb-3 text-sm text-muted">{selected.remaining} slot{selected.remaining === 1 ? "" : "s"} open this day.</p>
+          {!parts && <p className="mb-3 text-sm text-muted">{selected.remaining} slot{selected.remaining === 1 ? "" : "s"} open this day.</p>}
           {selected.storageEstimateCents > 0 && (
             <div className="mb-3"><Alert tone="warn">Storage of about {formatMoney(selected.storageEstimateCents)} applies for a pickup on this day.</Alert></div>
           )}
@@ -151,7 +152,7 @@ export default async function BookPage({ params, searchParams }: { params: Promi
               <ul className="divide-y divide-border" aria-label="Open days">
                 {list.map((d) => {
                   const full = !d.bookable;
-                  const label = d.reason === "full" ? "Full" : d.reason === "closed" ? "Closed" : `${d.remaining} slot${d.remaining === 1 ? "" : "s"} open`;
+                  const label = d.reason === "full" ? "Full" : d.reason === "closed" ? "Closed" : parts ? "" : `${d.remaining} slot${d.remaining === 1 ? "" : "s"} open`;
                   const inner = (
                     <>
                       <span className="font-medium">{formatShortDateFromLocal(d.date)}</span>

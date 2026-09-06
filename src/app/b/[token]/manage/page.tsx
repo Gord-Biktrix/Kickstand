@@ -46,7 +46,7 @@ export default async function ManagePage({ params, searchParams }: { params: Pro
           )}
           {confirm === "cancel" ? (
             <form action={cancelAction.bind(null, token)} className="mt-4 space-y-3">
-              <p className="text-sm">Cancel this pickup? Your bike stays reserved and you can book a new time before {unit.pickupBy ? formatLongDate(unit.pickupBy, tz) : "your hold ends"}.</p>
+              <p className="text-sm">Cancel this pickup? Your order stays reserved and you can book a new time before {unit.pickupBy ? formatLongDate(unit.pickupBy, tz) : "your hold ends"}.</p>
               <div className="grid grid-cols-2 gap-2">
                 <Link href={`/b/${token}/manage`} className="btn">Keep it</Link>
                 <button type="submit" className="btn btn-danger">Yes, cancel</button>
