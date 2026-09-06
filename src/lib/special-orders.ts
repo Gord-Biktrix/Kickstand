@@ -231,9 +231,17 @@ export async function syncPartsOrders(
   const summary = { created: 0, updated: 0, fulfilled: 0 };
   const existing = await dbx.select().from(orders).where(and(eq(orders.showroomId, showroom.id), eq(orders.kind, "parts"), eq(orders.status, "open")));
   const byLine = new Map(existing.filter((o) => o.lsSaleLineId).map((o) => [o.lsSaleLineId!, o]));
+  // Customer lookups in parallel, a few at a time (same as bikes) — sequential calls made a 90-line sync take half a minute.
+  const customerIds = [...new Set(partLines.map((l) => l.customerID))];
+  const customers = new Map<string, { name: string; email: string | null; phone: string | null }>();
+  for (let i = 0; i < customerIds.length; i += 6) {
+    await Promise.all(customerIds.slice(i, i + 6).map(async (id) => {
+      try { customers.set(id, (await args.customer(id)) ?? { name: "", email: null, phone: null }); } catch { /* left unknown; the order still gets created */ }
+    }));
+  }
   for (const line of partLines) {
     const prev = byLine.get(line.saleLineID);
-    const cust = (await args.customer(line.customerID)) ?? { name: "", email: null, phone: null };
+    const cust = customers.get(line.customerID) ?? { name: "", email: null, phone: null };
     const fields = {
       customerName: cust.name || `Lightspeed customer ${line.customerID}`,
       customerEmail: cust.email,
