@@ -67,7 +67,7 @@ export default async function BookPage({ params, searchParams }: { params: Promi
         <Link href={selected ? base : `/b/${token}`} className="text-sm text-accent underline">← Back</Link>
         <h1 className="mt-2 text-2xl font-semibold">{reschedule ? "Pick a new time" : "Pick a time"}</h1>
         <p className="mt-1 text-sm text-muted">
-          {unit.model}{siblings.length > 0 && <> and {siblings.length} more bike{siblings.length === 1 ? "" : "s"}</>} · {showroom.name}. {parts ? "Come by any time during opening hours — collecting takes just a few minutes." : "Pickups take about 45 minutes."}
+          {unit.model}{siblings.length > 0 && <> and {siblings.length} more bike{siblings.length === 1 ? "" : "s"}</>} · {showroom.name}.{!parts && " Pickups take about 45 minutes."}
         </p>
       </div>
       {errorCode && BOOKING_ERROR_TEXT[errorCode] && <Alert tone="danger">{BOOKING_ERROR_TEXT[errorCode]}</Alert>}
