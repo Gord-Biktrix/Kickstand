@@ -75,6 +75,7 @@ export async function buildBoard(dbx: Db, showroom: ShowroomCtx, now = new Date(
         eq(appointments.showroomId, showroom.id),
         eq(appointments.status, "booked"),
         inArray(units.status, ["booked", "building", "ready"]),
+        eq(units.kind, "bike"),
       ),
     )
     .orderBy(asc(appointments.startsAt));
@@ -459,8 +460,9 @@ export async function weekSchedule(dbx: Db, showroom: ShowroomCtx, from: LocalDa
       windowStart: day.windowStart,
       windowEnd: day.windowEnd,
       pickups: decorated.filter((r) => r.appointment.onDate === date),
+      // Parts & accessories are collected, not built: they appear as pickups only.
       builds: decorated
-        .filter((r) => r.buildBy === date)
+        .filter((r) => r.buildBy === date && r.unit.kind !== "parts")
         .sort((a, b) => (a.buildAt?.getTime() ?? 0) - (b.buildAt?.getTime() ?? 0) || a.appointment.startsAt.getTime() - b.appointment.startsAt.getTime()),
     };
   });

@@ -107,8 +107,9 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
   // Render helpers (plain functions, not components — see react-hooks/static-components).
   const blocksOf = (d: ScheduleDay) => (mode === "builds" ? buildBlocksOf(d, tz) : visitsOf(d));
   const visitBlock = (v: Visit, compact = false) => {
-    const top = yOf(v.startsAt);
-    const height = Math.max(28, yOf(v.endsAt) - top);
+    const rawTop = yOf(v.startsAt);
+    const top = Math.max(0, Math.min(rawTop, gridHeight - 28));
+    const height = Math.max(28, Math.min(yOf(v.endsAt), gridHeight) - top);
     const first = v.rows[0];
     const isBuild = mode === "builds";
     return (
