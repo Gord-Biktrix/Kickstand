@@ -144,32 +144,35 @@ Extra: `slot_start_local`, `no_show_count`.
 
 # Parts & accessories flows (separate from bikes)
 
-Every event carries `item_kind` = `bike` or `parts`. Build **separate flows** for parts and keep both sets
-apart with a **trigger filter** on the metric trigger:
+Parts fire under **their own metric names**, so the bike flows need no change at all — just build new flows
+on the new triggers (they appear in Klaviyo after the first parts event of each kind):
 
-- on every bike flow: `item_kind` **equals** `bike`
-- on every parts flow: `item_kind` **equals** `parts`
+| Bike metric | Parts metric |
+|---|---|
+| Pickup: Bike Arrived | **Parts: Order Arrived** |
+| Pickup: Booked | **Parts: Booked** |
+| Pickup: Rescheduled | **Parts: Rescheduled** |
+| Pickup: Cancelled | **Parts: Cancelled** |
+| Pickup: Completed | **Parts: Collected** (fires from the Collected button; optional thank-you) |
 
-Without the filter on the bike flows, bike copy would also go to parts customers. Parts need only four
-flows — no reminder, nudges, hold-ending, storage or missed messages are sent for parts. Items are in
-`event.bikes` (a list of item names, quantity suffixed, e.g. "Fat Bike Inner Tube 20x4 ×2");
-`event.bike_count` is the number of items.
+No reminder, nudge, hold-ending or storage messages exist for parts. Items are in `event.bikes` (a list of
+item names, quantity suffixed, e.g. "Fat Bike Inner Tube 20x4 ×2"); `event.bike_count` is the number of items.
 
-## P1. Pickup: Bike Arrived — parts version ("your order is in")
+## P1. Parts: Order Arrived ("your order is in")
 **SMS** (quiet hours ON)
 > Good news {{ person.first_name|default:"there" }}: your order from {{ event.showroom }} is in — {{ event.bikes|join:", " }}. Pick any time to collect it: {{ event.booking_url }}
 
 **Email**: template "Parts: Order ready to collect (Kickstand)" — subject `Your order is ready to collect`.
 
-## P2. Pickup: Booked — parts version
+## P2. Parts: Booked
 **SMS** (quiet hours OFF)
 > You're booked to collect your order on {{ event.slot_start_local }} at {{ event.showroom }}, {{ event.showroom_address }}. Change or cancel: {{ event.manage_url }}
 
 **Email**: template "Parts: Collection booked (Kickstand)" — subject `Collection booked — {{ event.slot_start_local }}`. Also fine for **Rescheduled** (heading switches on `old_slot_start_local`).
 
-## P3. Pickup: Rescheduled — parts version
+## P3. Parts: Rescheduled
 > Your collection has moved to {{ event.slot_start_local }} (was {{ event.old_slot_start_local }}). Manage: {{ event.manage_url }}
 
-## P4. Pickup: Cancelled — parts version (split on `cancelled_by`)
+## P4. Parts: Cancelled (split on `cancelled_by`)
 - shop: > Sorry — we've had to cancel your collection on {{ event.slot_start_local }}. Your order is safe with us; pick a new time: {{ event.rebook_url }}
 - customer: > Your collection on {{ event.slot_start_local }} is cancelled. Your order is still here — rebook any time: {{ event.rebook_url }}

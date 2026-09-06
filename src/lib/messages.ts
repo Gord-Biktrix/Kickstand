@@ -26,6 +26,24 @@ export const METRIC = {
 
 export type Metric = (typeof METRIC)[keyof typeof METRIC];
 
+/**
+ * Parts & accessories fire under their own metric names so Klaviyo flows for bikes stay untouched
+ * and parts get separate triggers ("Parts: Order Arrived" instead of "Pickup: Bike Arrived").
+ * Events, dedupe and the Lightspeed bridge still use the base metric internally.
+ */
+export const PARTS_METRIC: Partial<Record<Metric, string>> = {
+  [METRIC.bikeArrived]: "Parts: Order Arrived",
+  [METRIC.booked]: "Parts: Booked",
+  [METRIC.rescheduled]: "Parts: Rescheduled",
+  [METRIC.cancelled]: "Parts: Cancelled",
+  [METRIC.missed]: "Parts: Missed",
+  [METRIC.completed]: "Parts: Collected",
+};
+
+export function klaviyoMetricFor(metric: Metric, kind: string | null | undefined): string {
+  return kind === "parts" ? (PARTS_METRIC[metric] ?? metric.replace(/^Pickup: /, "Parts: ")) : metric;
+}
+
 /** 'Pickup: Bike Arrived' → 'bike_arrived' (also the Lightspeed status-map key). */
 export function metricKey(metric: string): string {
   return metric
@@ -138,7 +156,7 @@ export async function sendUnitMessage(dbx: Db, args: MessageArgs): Promise<Messa
       orderId: order?.id ?? unit.orderId ?? null,
       type,
       actor,
-      payload: { dedupe_key: dedupeKey, metric, properties },
+      payload: { dedupe_key: dedupeKey, metric: klaviyoMetricFor(metric, unit.kind), properties },
     })
     .onConflictDoNothing()
     .returning({ id: events.id });
@@ -159,7 +177,7 @@ export async function sendUnitMessage(dbx: Db, args: MessageArgs): Promise<Messa
     error = "no contact details";
   } else {
     try {
-      await getNotifier().send(metric, profile, properties, `${unit.id}:${type}:${dedupeKey}`);
+      await getNotifier().send(klaviyoMetricFor(metric, unit.kind), profile, properties, `${unit.id}:${type}:${dedupeKey}`);
     } catch (err) {
       status = "failed";
       error = err instanceof Error ? err.message : String(err);

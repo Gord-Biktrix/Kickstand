@@ -50,7 +50,7 @@ describe("parts & accessories", () => {
     notifier.sent = [];
     const inv = await inviteOrders(db, { showroom, orderIds: parts.map((o) => o.id), actor: "t", now: NOW });
     expect(inv.invited).toBe(2);
-    expect(notifier.sent.map((m) => m.metric)).toEqual(["Pickup: Bike Arrived"]);
+    expect(notifier.sent.map((m) => m.metric)).toEqual(["Parts: Order Arrived"]);
     expect(notifier.sent[0].properties.item_kind).toBe("parts");
     expect(notifier.sent[0].properties.bike_count).toBe(2);
 
@@ -79,6 +79,6 @@ describe("parts & accessories", () => {
     const done = await collectParts(db, { showroom, unitId: unit.id, actor: "staff", now: NOW });
     expect(done.status).toBe("picked_up");
     expect((await db.select().from(appointments).where(eq(appointments.unitId, unit.id)))[0].status).toBe("completed");
-    expect(notifier.sent.map((m) => m.metric)).toEqual(["Pickup: Completed"]);
+    expect(notifier.sent.map((m) => m.metric)).toEqual(["Parts: Collected"]);
   });
 });
