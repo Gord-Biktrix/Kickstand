@@ -5,6 +5,7 @@ const TABS = [
   { href: "/app/settings/capacity", label: "Capacity" },
   { href: "/app/settings/program", label: "Program" },
   { href: "/app/settings/views", label: "Views" },
+  { href: "/app/settings/staff", label: "Staff" },
   { href: "/app/settings/import", label: "Import" },
 ];
 

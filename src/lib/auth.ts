@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { db } from "@/db/client";
 import { magicLinks, staffSessions, staffUsers, type Role, type StaffUser } from "@/db/schema";
 import { logger } from "./logger";
-import { sendMagicLinkEmail } from "./mailer";
+import { sendInviteEmail, sendMagicLinkEmail } from "./mailer";
 import { baseUrl } from "./messages";
 import { hasRole } from "./roles";
 import { generateToken, hashToken } from "./tokens";
@@ -12,8 +12,10 @@ import { generateToken, hashToken } from "./tokens";
 export const SESSION_COOKIE = "pickup_session";
 const SESSION_DAYS = 30;
 const MAGIC_LINK_MINUTES = 15;
+const INVITE_LINK_DAYS = 7;
 
 export { hasRole, ROLE_RANK } from "./roles";
+export type { Role };
 
 export class AuthorizationError extends Error {
   constructor(message = "Not allowed") {
@@ -22,7 +24,12 @@ export class AuthorizationError extends Error {
   }
 }
 
-function emailAllowed(email: string): boolean {
+/**
+ * Who may receive a sign-in link. The domain rule always applies. AUTH_ALLOWED_EMAILS is a bootstrap
+ * list for the first accounts; anyone with an active staff row (added via Settings › Staff or
+ * staff:add) is allowed regardless of that list.
+ */
+export function emailAllowed(email: string, hasStaffRow = false): boolean {
   const domain = (process.env.AUTH_ALLOWED_DOMAIN ?? "").toLowerCase();
   const list = (process.env.AUTH_ALLOWED_EMAILS ?? "")
     .split(",")
@@ -30,7 +37,7 @@ function emailAllowed(email: string): boolean {
     .filter(Boolean);
   const lower = email.toLowerCase();
   if (domain && !lower.endsWith(`@${domain}`)) return false;
-  if (list.length > 0 && !list.includes(lower)) return false;
+  if (!hasStaffRow && list.length > 0 && !list.includes(lower)) return false;
   return true;
 }
 
@@ -44,7 +51,7 @@ export async function requestMagicLink(
     .from(staffUsers)
     .where(and(eq(staffUsers.email, email), eq(staffUsers.active, true)))
     .limit(1);
-  if (!emailAllowed(email) || !user) {
+  if (!user || !emailAllowed(email, true)) {
     // Same response as success so the login form can't be used to enumerate staff.
     logger.info({ emailDomain: email.split("@")[1] }, "magic link refused");
     return { ok: true };
@@ -147,4 +154,45 @@ export async function signOut(): Promise<void> {
     await db.delete(staffSessions).where(eq(staffSessions.tokenHash, hashToken(token)));
   }
   jar.delete(SESSION_COOKIE);
+}
+
+export type StaffInvite = { email: string; name: string; role: Role; showroomId: string | null };
+
+/**
+ * Add (or re-activate / update) a staff account and email an invitation with a sign-in link that
+ * stays valid for a week. Idempotent: inviting an existing address updates name/role/store and sends a
+ * fresh link. Only admins may create admins (enforced by the caller).
+ */
+export async function inviteStaff(
+  invite: StaffInvite,
+  by: { name: string; showroomName: string },
+): Promise<{ user: StaffUser; link: string }> {
+  const email = invite.email.trim().toLowerCase();
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new Error("Enter a valid email address.");
+  if (!emailAllowed(email, true)) throw new Error(`Only ${process.env.AUTH_ALLOWED_DOMAIN ?? "company"} addresses can be invited.`);
+  const name = invite.name.trim() || email.split("@")[0];
+  const [user] = await db
+    .insert(staffUsers)
+    .values({ email, name, role: invite.role, showroomId: invite.showroomId, active: true })
+    .onConflictDoUpdate({ target: staffUsers.email, set: { name, role: invite.role, showroomId: invite.showroomId, active: true } })
+    .returning();
+  const token = generateToken();
+  await db.insert(magicLinks).values({ email, tokenHash: hashToken(token), expiresAt: new Date(Date.now() + INVITE_LINK_DAYS * 86_400_000) });
+  const link = `${baseUrl()}/auth/verify?token=${token}`;
+  await sendInviteEmail(email, { name, inviter: by.name, showroom: by.showroomName, link });
+  return { user, link };
+}
+
+export async function listStaff(): Promise<StaffUser[]> {
+  return db.select().from(staffUsers).orderBy(staffUsers.active, staffUsers.name);
+}
+
+export async function setStaffActive(id: string, active: boolean): Promise<void> {
+  await db.update(staffUsers).set({ active }).where(eq(staffUsers.id, id));
+  // Signing someone out everywhere is the point of deactivating.
+  if (!active) await db.delete(staffSessions).where(eq(staffSessions.staffUserId, id));
+}
+
+export async function updateStaff(id: string, patch: { name?: string; role?: Role; showroomId?: string | null }): Promise<void> {
+  await db.update(staffUsers).set(patch).where(eq(staffUsers.id, id));
 }

@@ -4,7 +4,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { db } from "@/db/client";
 import { capacityOverrides, capacityRules, orders, units } from "@/db/schema";
-import { requireActor, signOut } from "@/lib/auth";
+import { hasRole, inviteStaff, requireActor, setStaffActive, signOut, updateStaff, type Role } from "@/lib/auth";
 import { BOOKING_ERROR_TEXT, BookingError, bookGroup, cancelBooking, recordNoShow, rescheduleBooking } from "@/lib/booking";
 import { validateImport } from "@/lib/csv";
 import { logEvent } from "@/lib/events";
@@ -364,6 +364,43 @@ export async function inviteOrdersAction(returnTo: string, formData: FormData) {
     const r = await inviteOrders(db, { showroom, orderIds: ids, actor: user.id });
     const tail = r.skipped.length ? ` · skipped ${r.skipped.length}: ${r.skipped.slice(0, 3).join("; ")}${r.skipped.length > 3 ? "; …" : ""}` : "";
     return `Invites sent: ${r.invited}${tail}`;
+  });
+}
+
+// ---- Staff accounts ------------------------------------------------------------
+
+export async function inviteStaffAction(formData: FormData) {
+  return run("/app/settings/staff", async () => {
+    const user = await requireActor("manager");
+    const showroom = await currentShowroom(user);
+    const role = (str(formData, "role") || "staff") as Role;
+    if (!["staff", "manager", "admin"].includes(role)) throw new Error("Pick a role.");
+    if (role === "admin" && !hasRole(user.role, "admin")) throw new Error("Only an admin can invite another admin.");
+    const showroomId = str(formData, "showroom_id") || null;
+    if (!hasRole(user.role, "admin") && showroomId !== showroom.id) throw new Error("Managers can only invite people to their own store.");
+    const r = await inviteStaff({ email: str(formData, "email"), name: str(formData, "name"), role, showroomId }, { name: user.name, showroomName: showroom.name });
+    const dev = process.env.NODE_ENV !== "production" && process.env.AUTH_DEV_SHOW_LINK === "true" ? ` Dev link: ${r.link}` : "";
+    return `Invitation sent to ${r.user.email}.${process.env.RESEND_API_KEY ? "" : " (No email key is set yet — the link was written to the server log instead.)"}${dev}`;
+  });
+}
+
+export async function setStaffActiveAction(id: string, active: boolean) {
+  return run("/app/settings/staff", async () => {
+    const user = await requireActor("admin");
+    if (user.id === id && !active) throw new Error("You can't deactivate your own account.");
+    await setStaffActive(id, active);
+    return active ? "Account re-activated." : "Account deactivated and signed out everywhere.";
+  });
+}
+
+export async function updateStaffAction(id: string, formData: FormData) {
+  return run("/app/settings/staff", async () => {
+    const user = await requireActor("admin");
+    const role = str(formData, "role") as Role;
+    if (!["staff", "manager", "admin"].includes(role)) throw new Error("Pick a role.");
+    if (user.id === id && role !== "admin") throw new Error("You can't remove your own admin role.");
+    await updateStaff(id, { role, showroomId: str(formData, "showroom_id") || null, name: str(formData, "name") || undefined });
+    return "Account updated.";
   });
 }
 
