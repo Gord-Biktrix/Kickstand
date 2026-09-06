@@ -5,13 +5,14 @@ import { Badge, Card, PageHeader } from "@/components/ui";
 import { currentShowroom } from "@/lib/current-showroom";
 import { sp, type SearchParams } from "@/lib/flash";
 import { weekSchedule, type ScheduleDay, type ScheduleRow } from "@/lib/queries";
-import { addLocalDays, formatLongDateFromLocal, formatShortDateFromLocal, formatTime, minutesToTime, timeToMinutes, toLocalDate, weekdayOf } from "@/lib/time";
+import { addLocalDays, formatLongDateFromLocal, formatShortDateFromLocal, formatTime, localToUtc, minutesToTime, timeToMinutes, toLocalDate, weekdayOf } from "@/lib/time";
 import { formatInTimeZone } from "date-fns-tz";
 import { parseISO, format } from "date-fns";
 
 export const metadata = { title: "Appointments" };
 
 type View = "day" | "week" | "month";
+type Mode = "pickups" | "builds";
 type Visit = { key: string; rows: ScheduleRow[]; startsAt: Date; endsAt: Date; customer: string };
 
 function mondayOf(date: string) {
@@ -38,6 +39,21 @@ function visitsOf(day: ScheduleDay): Visit[] {
   return out.sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime());
 }
 
+/** Builds due on a day, as blocks at their build-by time. Date-only deadlines (pickup mode) sit at closing time. */
+function buildBlocksOf(day: ScheduleDay, tz: string): Visit[] {
+  return day.builds.map((r) => {
+    const at = r.buildAt ?? localToUtc(day.date, day.windowEnd, tz);
+    return { key: `b-${r.appointment.id}`, rows: [r], startsAt: new Date(at.getTime() - 45 * 60_000), endsAt: at, customer: r.order?.customerName ?? "Unassigned" };
+  }).sort((a, b) => a.endsAt.getTime() - b.endsAt.getTime());
+}
+
+const buildTone = (rows: ScheduleRow[], now: Date) => {
+  const r = rows[0];
+  if (r.unit.status === "ready") return "bg-ok-soft border-ok/40";
+  if (r.unit.status === "building") return "bg-warn-soft border-warn/40";
+  return r.buildAt && r.buildAt < now ? "bg-danger-soft border-danger/40" : "bg-card border-border";
+};
+
 const tone = (rows: ScheduleRow[]) => {
   const s = rows.map((r) => r.unit.status);
   if (s.every((x) => x === "ready")) return "bg-ok-soft border-ok/40";
@@ -53,6 +69,8 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
   const today = toLocalDate(now, tz);
   const raw = sp(q.view);
   const view: View = raw === "day" || raw === "month" ? raw : "week";
+  // What the blocks represent: customer pickups (slot time) or mechanic builds (build-by time).
+  const mode: Mode = sp(q.mode) === "builds" ? "builds" : "pickups";
   const dateParam = sp(q.date) ?? sp(q.week);
   const date = /^\d{4}-\d{2}-\d{2}$/.test(dateParam ?? "") ? dateParam! : today;
 
@@ -70,8 +88,10 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
     title = format(parseISO(first), "MMMM yyyy"); prev = addMonths(first, -1); next = addMonths(first, 1);
   }
   const days = await weekSchedule(db, showroom, from, to);
-  const href = (d: string, v: View = view) => `/app/schedule?view=${v}&date=${d}`;
-  const totalPickups = days.filter((d) => view !== "month" || monthOf(d.date) === monthOf(date)).reduce((n, d) => n + visitsOf(d).length, 0);
+  const href = (d: string, v: View = view, m: Mode = mode) => `/app/schedule?view=${v}&mode=${m}&date=${d}`;
+  const inScope = days.filter((d) => view !== "month" || monthOf(d.date) === monthOf(date));
+  const totalPickups = inScope.reduce((n, d) => n + visitsOf(d).length, 0);
+  const totalBuilds = inScope.reduce((n, d) => n + d.builds.length, 0);
 
   // Time grid bounds: earliest opening to latest close across the visible open days.
   const open = days.filter((d) => !d.closed);
@@ -85,21 +105,33 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
   const yOf = (instant: Date) => ((timeToMinutes(formatInTimeZone(instant, tz, "HH:mm")) - gridStart) / span) * gridHeight;
 
   // Render helpers (plain functions, not components — see react-hooks/static-components).
+  const blocksOf = (d: ScheduleDay) => (mode === "builds" ? buildBlocksOf(d, tz) : visitsOf(d));
   const visitBlock = (v: Visit, compact = false) => {
     const top = yOf(v.startsAt);
     const height = Math.max(28, yOf(v.endsAt) - top);
     const first = v.rows[0];
+    const isBuild = mode === "builds";
     return (
       <Link
         href={`/app/units/${first.unit.id}`}
-        className={`absolute left-1 right-1 overflow-hidden rounded-md border px-2 py-1 text-xs leading-tight shadow-sm hover:ring-2 hover:ring-accent ${tone(v.rows)}`}
+        className={`absolute left-1 right-1 overflow-hidden rounded-md border px-2 py-1 text-xs leading-tight shadow-sm hover:ring-2 hover:ring-accent ${isBuild ? buildTone(v.rows, now) : tone(v.rows)}`}
         style={{ top, height }}
-        title={`${formatTime(v.startsAt, tz)} · ${v.customer} · ${v.rows.map((r) => r.unit.model).join(", ")}`}
+        title={isBuild ? `Build by ${formatTime(v.endsAt, tz)} · ${first.unit.model} · box ${first.unit.boxTag} · pickup ${formatShortDateFromLocal(first.appointment.onDate)} ${formatTime(first.appointment.startsAt, tz)}` : `${formatTime(v.startsAt, tz)} · ${v.customer} · ${v.rows.map((r) => r.unit.model).join(", ")}`}
       >
-        <span className="font-semibold">{formatTime(v.startsAt, tz)}</span>{" "}
-        <span className="font-medium">{v.customer}</span>
-        {v.rows.length > 1 && <span className="ml-1 rounded bg-white/70 px-1 text-[10px] font-semibold">{v.rows.length} bikes</span>}
-        {!compact && height >= 44 && <div className="truncate text-muted">{v.rows.map((r) => r.unit.model).join(", ")}</div>}
+        {isBuild ? (
+          <>
+            <span className="font-semibold">by {formatTime(v.endsAt, tz)}</span>{" "}
+            <span className="font-medium">{first.unit.model}</span>
+            {!compact && height >= 44 && <div className="truncate text-muted">box {first.unit.boxTag} · {v.customer} · pickup {formatShortDateFromLocal(first.appointment.onDate)} {formatTime(first.appointment.startsAt, tz)}</div>}
+          </>
+        ) : (
+          <>
+            <span className="font-semibold">{formatTime(v.startsAt, tz)}</span>{" "}
+            <span className="font-medium">{v.customer}</span>
+            {v.rows.length > 1 && <span className="ml-1 rounded bg-white/70 px-1 text-[10px] font-semibold">{v.rows.length} bikes</span>}
+            {!compact && height >= 44 && <div className="truncate text-muted">{v.rows.map((r) => r.unit.model).join(", ")}</div>}
+          </>
+        )}
       </Link>
     );
   };
@@ -138,7 +170,7 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
               </>
             )}
             {d.date === today && now.getTime() >= 0 && (() => { const y = yOf(now); return y >= 0 && y <= gridHeight ? <div className="absolute left-0 right-0 z-10 border-t-2 border-danger" style={{ top: y }} /> : null; })()}
-            {visitsOf(d).map((v) => <div key={v.key}>{visitBlock(v, cols.length > 1)}</div>)}
+            {blocksOf(d).map((v) => <div key={v.key}>{visitBlock(v, cols.length > 1)}</div>)}
           </div>
         ))}
       </div>
@@ -149,9 +181,13 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
     <div>
       <PageHeader
         title="Appointments"
-        subtitle={`${title} · ${totalPickups} pickup${totalPickups === 1 ? "" : "s"} · ${showroom.name}`}
+        subtitle={`${title} · ${mode === "builds" ? `${totalBuilds} build${totalBuilds === 1 ? "" : "s"} due` : `${totalPickups} pickup${totalPickups === 1 ? "" : "s"}`} · ${showroom.name}`}
         action={
           <div className="flex flex-wrap items-center gap-2 text-sm">
+            <div className="flex rounded-lg border border-border bg-card p-0.5" role="tablist" aria-label="Who is this for">
+              <Link role="tab" aria-selected={mode === "pickups"} href={href(date, view, "pickups")} className={`rounded-md px-3 py-1 ${mode === "pickups" ? "bg-accent text-white" : "hover:text-accent"}`}>Customer pickups</Link>
+              <Link role="tab" aria-selected={mode === "builds"} href={href(date, view, "builds")} className={`rounded-md px-3 py-1 ${mode === "builds" ? "bg-accent text-white" : "hover:text-accent"}`}>Mechanic builds</Link>
+            </div>
             <div className="flex rounded-lg border border-border bg-card p-0.5" role="tablist" aria-label="View">
               {(["day", "week", "month"] as View[]).map((v) => (
                 <Link key={v} role="tab" aria-selected={view === v} href={href(view === "week" && v !== "week" ? date : date, v)} className={`rounded-md px-3 py-1 capitalize ${view === v ? "bg-accent text-white" : "hover:text-accent"}`}>{v}</Link>
@@ -179,15 +215,26 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
                     <span className="text-[10px] text-muted">{d.closed ? "closed" : `${visits.length}/${d.capacity}`}</span>
                   </div>
                   <ul className="space-y-0.5">
-                    {visits.slice(0, 3).map((v) => (
+                    {mode === "builds" ? (
+                      <>
+                        {buildBlocksOf(d, tz).slice(0, 3).map((v) => (
+                          <li key={v.key}>
+                            <Link href={`/app/units/${v.rows[0].unit.id}`} className={`block truncate rounded border px-1 text-[11px] leading-5 ${buildTone(v.rows, now)}`} title={`${v.rows[0].unit.model} · box ${v.rows[0].unit.boxTag}`}>
+                              <span className="font-semibold">by {formatTime(v.endsAt, tz).replace(" ", "")}</span> {v.rows[0].unit.model}
+                            </Link>
+                          </li>
+                        ))}
+                        {d.builds.length > 3 && <li><Link href={href(d.date, "day")} className="text-[11px] text-muted hover:text-accent">+{d.builds.length - 3} more</Link></li>}
+                      </>
+                    ) : visits.slice(0, 3).map((v) => (
                       <li key={v.key}>
                         <Link href={`/app/units/${v.rows[0].unit.id}`} className={`block truncate rounded border px-1 text-[11px] leading-5 ${tone(v.rows)}`} title={v.rows.map((r) => r.unit.model).join(", ")}>
                           <span className="font-semibold">{formatTime(v.startsAt, tz).replace(" ", "")}</span> {v.customer}{v.rows.length > 1 && ` (${v.rows.length})`}
                         </Link>
                       </li>
                     ))}
-                    {visits.length > 3 && <li><Link href={href(d.date, "day")} className="text-[11px] text-muted hover:text-accent">+{visits.length - 3} more</Link></li>}
-                    {d.builds.length > 0 && <li className="text-[10px] text-warn">{d.builds.length} build{d.builds.length === 1 ? "" : "s"} due</li>}
+                    {mode === "pickups" && visits.length > 3 && <li><Link href={href(d.date, "day")} className="text-[11px] text-muted hover:text-accent">+{visits.length - 3} more</Link></li>}
+                    {mode === "pickups" && d.builds.length > 0 && <li className="text-[10px] text-warn">{d.builds.length} build{d.builds.length === 1 ? "" : "s"} due</li>}
                   </ul>
                 </div>
               );
@@ -232,7 +279,7 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
           </div>
         </div>
       )}
-      <p className="mt-3 text-xs text-muted">Blocks are visits; a customer collecting several bikes is one block. Shaded time is outside opening hours. Click a day to open it.</p>
+      <p className="mt-3 text-xs text-muted">{mode === "builds" ? "Blocks end at each bike's build-by time (8 working hours before its pickup). Red = overdue, orange = building, green = ready." : "Blocks are visits; a customer collecting several bikes is one block."} Shaded time is outside opening hours. Click a day to open it.</p>
     </div>
   );
 }
