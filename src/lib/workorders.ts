@@ -161,7 +161,8 @@ export function unassignedStatuses(statuses: LsWorkorderStatus[], views: Workord
 }
 
 export function lightspeedWorkorderUrl(id: string): string {
-  return `https://us.merchantos.com/?name=workbench.views.workorder&form_name=view&id=${encodeURIComponent(id)}`;
+  // Lightspeed's current work-order screen (the "beta_workorder" view); the old view name returns "View not found".
+  return `https://us.merchantos.com/?name=workbench.views.beta_workorder&form_name=view&id=${encodeURIComponent(id)}&tab=details`;
 }
 
 
