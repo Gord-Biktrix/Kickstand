@@ -102,7 +102,7 @@ export default async function LandingPage({ params, searchParams }: { params: Pr
         <Card title="What to bring">
           <ul className="list-disc space-y-1 pl-5 text-sm text-muted">
             <li>A copy of your order confirmation (on your phone is fine) and photo ID.</li>
-            <li>About 45 minutes for fitting, display walkthrough and app pairing.</li>
+            <li>About 45 minutes for fitting and a display walkthrough.</li>
             {order.balanceCents > 0 && <li>Your balance of {formatMoney(order.balanceCents)} is due at handover.</li>}
           </ul>
         </Card>
