@@ -2,6 +2,7 @@ import Link from "next/link";
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db/client";
 import { appointments, orders, units } from "@/db/schema";
+import { AutoSubmitSelect } from "@/components/auto-submit-select";
 import { BulkSelect } from "@/components/bulk-select";
 import { StatusBadge } from "@/components/status-badge";
 import { Badge, Card, Flash, PageHeader } from "@/components/ui";
@@ -29,6 +30,9 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
   const now = new Date();
   const today = toLocalDate(now, tz);
   const text = (sp(q.q) ?? "").trim().toLowerCase();
+  // Item dropdown (exact item name, qty suffix stripped) + free text, like the model filter on Bikes.
+  const itemFilter = sp(q.item) ?? "";
+  const itemName = (model: string) => model.replace(/\s×\d+$/, "");
 
   const [onOrderAll, inBuilding, booked] = await Promise.all([
     ordersOnOrder(db, showroom, "parts"),
@@ -38,10 +42,14 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
   const apptByUnit = new Map(booked.map((a) => [a.unitId, a]));
   const match = (o: { customerName: string; model: string; orderRef: string; customerPhone: string | null }) =>
     !text || [o.customerName, o.model, o.orderRef, o.customerPhone].filter(Boolean).join(" ").toLowerCase().includes(text);
-  const onOrder = onOrderAll.filter(match);
-  const groups = groupOrders(onOrder); // one row per customer, all their items
-  const building = inBuilding.filter((r) => match(r.order));
-  const RETURN = `/app/parts${text ? `?q=${encodeURIComponent(text)}` : ""}`;
+  const items = [...new Set(onOrderAll.map((o) => itemName(o.model)))].sort();
+  const onOrder = onOrderAll.filter(match).filter((o) => !itemFilter || itemName(o.model) === itemFilter);
+  const groups = groupOrders(onOrder); // one row per customer, all their (matching) items
+  const building = inBuilding.filter((r) => match(r.order) && (!itemFilter || itemName(r.unit.model) === itemFilter));
+  const params = new URLSearchParams();
+  if (text) params.set("q", text);
+  if (itemFilter) params.set("item", itemFilter);
+  const RETURN = `/app/parts${params.toString() ? `?${params}` : ""}`;
 
   return (
     <div>
@@ -55,10 +63,14 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
         }
       />
       <Flash ok={sp(q.ok)} error={sp(q.error)} />
-      <form action="/app/parts" className="mb-4 flex gap-2">
+      <form action="/app/parts" className="mb-4 flex flex-wrap items-center gap-2">
+        <AutoSubmitSelect name="item" defaultValue={itemFilter} className="input h-8 w-auto max-w-[24rem] py-0 text-sm" ariaLabel="Item">
+          <option value="">All items</option>
+          {items.map((m) => <option key={m} value={m}>{m} ({onOrderAll.filter((o) => itemName(o.model) === m).length})</option>)}
+        </AutoSubmitSelect>
         <input name="q" defaultValue={text} placeholder="Customer, item or sale #" className="input h-8 w-64 text-sm" />
         <button type="submit" className="btn btn-sm">Filter</button>
-        {text && <Link href="/app/parts" className="btn btn-sm">Clear</Link>}
+        {(text || itemFilter) && <Link href="/app/parts" className="btn btn-sm">Clear</Link>}
       </form>
 
       <Card title={`Waiting for pickup (${building.length})`} className="mb-6">
