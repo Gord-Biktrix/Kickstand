@@ -17,7 +17,7 @@ import { normalizeTime } from "@/lib/time";
 import { hashToken } from "@/lib/tokens";
 import { attachUnit, bookableSiblings, collectParts, completeHandover, createOrder, deleteUnit, detachUnit, grantExtension, inviteAllReceived, inviteOrders, inviteUnit, inviteUnits, markReady, receiveUnit, resendInvite, retagUnit, startBuild, unreceiveUnit, waiveStorage } from "@/lib/units";
 import { currentShowroom } from "@/lib/current-showroom";
-import { createShowroom, setLightspeedLink, updateShowroomDetails } from "@/lib/showroom-admin";
+import { createShowroom, importShowroomsFromLightspeed, setLightspeedLink, updateShowroomDetails } from "@/lib/showroom-admin";
 import { LightspeedClient } from "@/lib/lightspeed";
 import { googleEnabled } from "@/lib/google-auth";
 import { mailerKind } from "@/lib/mailer";
@@ -473,6 +473,16 @@ export async function setLightspeedLinkAction(id: string, formData: FormData) {
       completed_status_id: n("completed_status_id"),
     });
     return "Lightspeed link saved.";
+  });
+}
+
+export async function importStoresFromLightspeedAction(formData: FormData) {
+  return run("/app/settings/stores", async () => {
+    await requireActor("admin");
+    const shops = await new LightspeedClient(db).listShopsDetailed();
+    const r = await importShowroomsFromLightspeed(db, shops, str(formData, "copy_from") || null);
+    if (!r.created.length) return `Nothing to import — every Lightspeed shop already has a store (${r.skipped.length} checked).`;
+    return `Created ${r.created.join(", ")}. Each starts with the Lightspeed link off: pick its statuses below and switch it on when the store is ready.`;
   });
 }
 

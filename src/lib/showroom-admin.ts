@@ -107,3 +107,49 @@ export async function setLightspeedLink(dbx: Db, showroomId: string, link: Light
     },
   });
 }
+
+/** Lightspeed stores its shops in US zone names; Kickstand shows Canadian ones (same clocks). */
+const TZ_ALIASES: Record<string, string> = {
+  "America/Los_Angeles": "America/Vancouver",
+  "America/Denver": "America/Edmonton",
+  "America/Chicago": "America/Winnipeg",
+  "America/New_York": "America/Toronto",
+  "US/Pacific": "America/Vancouver",
+  "US/Mountain": "America/Edmonton",
+  "US/Central": "America/Winnipeg",
+  "US/Eastern": "America/Toronto",
+};
+
+export type LightspeedShopInfo = { shopID: string; name: string; timeZone: string | null; addressLine: string; phone: string | null };
+
+/** "Biktrix Kelowna Showroom" → name "Biktrix Kelowna", slug "kelowna", tz America/Vancouver. Pure, for tests. */
+export function shopToStore(shop: LightspeedShopInfo): NewShowroom & { shopId: number } {
+  const name = shop.name.replace(/\s*showroom\s*$/i, "").trim() || shop.name;
+  const tz = shop.timeZone ? (TZ_ALIASES[shop.timeZone] ?? shop.timeZone) : "America/Vancouver";
+  return { slug: slugify(name), name, timezone: validTimezone(tz) ? tz : "America/Vancouver", addressLine: shop.addressLine, phone: shop.phone, shopId: Number(shop.shopID) };
+}
+
+/**
+ * Create a Kickstand store for every Lightspeed shop that isn't linked yet. Each new store gets the shop's
+ * name, time zone, address and phone, hours/settings copied from `copyFrom`, and its Lightspeed link
+ * pre-filled with the shop but switched OFF — statuses are per store and still need choosing.
+ */
+export async function importShowroomsFromLightspeed(dbx: Db, shops: LightspeedShopInfo[], copyFrom: string | null): Promise<{ created: string[]; skipped: string[] }> {
+  const existing = await listShowrooms(dbx);
+  const created: string[] = [];
+  const skipped: string[] = [];
+  for (const shop of shops) {
+    const proto = shopToStore(shop);
+    const linked = existing.find((s) => s.settings.lightspeed.shop_id === proto.shopId);
+    const sameSlug = existing.find((s) => s.slug === proto.slug);
+    if (linked || sameSlug) {
+      skipped.push(`${proto.name} (${linked ? `already ${linked.name}` : "id taken"})`);
+      continue;
+    }
+    const store = await createShowroom(dbx, { ...proto, copyCapacityFrom: copyFrom });
+    await setLightspeedLink(dbx, store.id, { enabled: false, shop_id: proto.shopId, employee_id: null, open_status_id: 1, booked_status_id: null, completed_status_id: null });
+    existing.push((await listShowrooms(dbx)).find((s) => s.id === store.id)!);
+    created.push(proto.name);
+  }
+  return { created, skipped };
+}

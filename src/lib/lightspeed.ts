@@ -242,6 +242,18 @@ export class LightspeedClient {
     return asList<{ shopID: string; name: string }>(res, "Shop").map((s) => ({ shopID: String(s.shopID), name: String(s.name) }));
   }
 
+  /** Shops with contact details, for creating Kickstand stores from the account. */
+  async listShopsDetailed(): Promise<{ shopID: string; name: string; timeZone: string | null; addressLine: string; phone: string | null }[]> {
+    const res = await this.request("GET", 'Shop.json?limit=100&load_relations=["Contact"]');
+    return asList<Record<string, unknown>>(res, "Shop").map((sh) => {
+      const contact = (sh.Contact ?? {}) as Record<string, unknown>;
+      const addr = ((contact.Addresses as Record<string, unknown> | undefined)?.ContactAddress ?? {}) as Record<string, string>;
+      const phone = ((contact.Phones as Record<string, unknown> | undefined)?.ContactPhone ?? {}) as Record<string, string>;
+      const line = [addr.address1, addr.address2, addr.city, [addr.state, addr.zip].filter(Boolean).join(" ")].filter((x) => x && String(x).trim()).join(", ");
+      return { shopID: String(sh.shopID), name: String(sh.name), timeZone: sh.timeZone ? String(sh.timeZone) : null, addressLine: line, phone: phone.number ? String(phone.number) : null };
+    });
+  }
+
   /** Active employees — the work order's assignee per store. */
   async listEmployees(): Promise<{ employeeID: string; name: string }[]> {
     const res = await this.request("GET", "Employee.json?limit=100&archived=false");

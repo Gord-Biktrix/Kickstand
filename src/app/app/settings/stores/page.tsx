@@ -5,7 +5,7 @@ import { sp, type SearchParams } from "@/lib/flash";
 import { getConnection, LightspeedClient } from "@/lib/lightspeed";
 import { listShowrooms } from "@/lib/showroom";
 import { listWorkorderStatuses } from "@/lib/workorders";
-import { createShowroomAction, refreshLightspeedStatusesAction, setLightspeedLinkAction, updateShowroomAction } from "../../actions";
+import { createShowroomAction, importStoresFromLightspeedAction, refreshLightspeedStatusesAction, setLightspeedLinkAction, updateShowroomAction } from "../../actions";
 
 export const metadata = { title: "Stores" };
 
@@ -45,6 +45,14 @@ export default async function StoresPage({ searchParams }: { searchParams: Promi
 
       <div className="grid gap-6 lg:grid-cols-[340px_minmax(0,1fr)]">
         <Card title="Add a store">
+          {connected && shops.some((sh) => !usedShops.has(Number(sh.shopID))) && (
+            <form action={importStoresFromLightspeedAction} className="mb-5 rounded-lg border border-dashed border-border p-3">
+              <p className="mb-2 text-sm">Lightspeed has {shops.filter((sh) => !usedShops.has(Number(sh.shopID))).length} shop{shops.filter((sh) => !usedShops.has(Number(sh.shopID))).length === 1 ? "" : "s"} without a Kickstand store: {shops.filter((sh) => !usedShops.has(Number(sh.shopID))).map((sh) => sh.name.replace(/\s*showroom\s*$/i, "")).join(", ")}.</p>
+              <input type="hidden" name="copy_from" value={stores[0]?.slug ?? ""} />
+              <button type="submit" className="btn btn-sm">Import them from Lightspeed</button>
+              <p className="mt-2 text-xs text-muted">Name, time zone, address and phone come from Lightspeed; hours copy from {stores[0]?.name ?? "the first store"}. Each starts with its Lightspeed link off.</p>
+            </form>
+          )}
           <form action={createShowroomAction} className="space-y-3">
             <Field label="Name" htmlFor="st_name"><input id="st_name" name="name" required className="input" placeholder="Biktrix Saskatoon" /></Field>
             <Field label="Short id" htmlFor="st_slug" hint="Used in links and the store switcher; letters and dashes. Left blank, it comes from the name."><input id="st_slug" name="slug" className="input" placeholder="saskatoon" pattern="[a-z0-9-]*" /></Field>

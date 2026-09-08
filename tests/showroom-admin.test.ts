@@ -3,7 +3,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { Db } from "@/db/client";
 import { capacityRules } from "@/db/schema";
 import { listShowrooms, type ShowroomCtx } from "@/lib/showroom";
-import { createShowroom, setLightspeedLink, slugify } from "@/lib/showroom-admin";
+import { createShowroom, importShowroomsFromLightspeed, setLightspeedLink, shopToStore, slugify } from "@/lib/showroom-admin";
 import { resetDb, testDb, withSettings } from "./helpers";
 
 let db: Db;
@@ -37,5 +37,23 @@ describe("stores", () => {
     // Vancouver untouched.
     const van = (await listShowrooms(db)).find((s) => s.id === vancouver.id)!;
     expect(van.settings.lightspeed.statuses).toEqual({ booked: 29, completed: 5 });
+  });
+
+  it("imports the unlinked Lightspeed shops as stores with the link pre-filled but off", async () => {
+    expect(shopToStore({ shopID: "2", name: "Biktrix Kelowna Showroom", timeZone: "America/Los_Angeles", addressLine: "1963 Harvey Avenue, Kelowna, British Columbia V1Y 6G5", phone: "(236) 970-6101" }))
+      .toMatchObject({ slug: "kelowna", name: "Biktrix Kelowna", timezone: "America/Vancouver", shopId: 2 });
+    await withSettings(db, vancouver, { lightspeed: { ...vancouver.settings.lightspeed, enabled: true, shop_id: 3 } });
+    const shops = [
+      { shopID: "3", name: "Biktrix Vancouver Showroom", timeZone: "America/Los_Angeles", addressLine: "", phone: null },
+      { shopID: "4", name: "Biktrix Edmonton Showroom", timeZone: "America/Regina", addressLine: "1 Jasper Ave, Edmonton, Alberta", phone: "780-555-0100" },
+    ];
+    const r = await importShowroomsFromLightspeed(db, shops, vancouver.slug);
+    expect(r.created).toEqual(["Biktrix Edmonton"]);
+    expect(r.skipped[0]).toMatch(/Vancouver/);
+    const edm = (await listShowrooms(db)).find((s) => s.slug === "edmonton")!;
+    expect(edm.timezone).toBe("America/Regina");
+    expect(edm.settings.lightspeed).toMatchObject({ enabled: false, shop_id: 4 });
+    // Running it again creates nothing.
+    expect((await importShowroomsFromLightspeed(db, shops, vancouver.slug)).created).toEqual([]);
   });
 });
