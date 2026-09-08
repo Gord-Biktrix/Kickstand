@@ -10,7 +10,7 @@ import { getCurrentUser } from "./auth";
 import { listShowrooms, type ShowroomCtx } from "./showroom";
 import { pickShowroom, SHOWROOM_COOKIE, type UserLike } from "./showroom-select";
 
-export { canSwitchShowroom, pickShowroom, SHOWROOM_COOKIE, showroomForLightspeedShop } from "./showroom-select";
+export { canEditShowroom, canSwitchShowroom, pickShowroom, readOnlyReason, SHOWROOM_COOKIE, showroomForLightspeedShop } from "./showroom-select";
 
 export async function currentShowroom(user?: UserLike): Promise<ShowroomCtx> {
   const [all, jar, u] = await Promise.all([listShowrooms(db), cookies(), user === undefined ? getCurrentUser() : Promise.resolve(user)]);

@@ -496,7 +496,7 @@ export async function refreshLightspeedStatusesAction() {
 
 export async function setPasswordAction(formData: FormData) {
   return run("/app/account", async () => {
-    const user = await requireActor("staff");
+    const user = await requireActor("staff", { anyStore: true });
     const pw = str(formData, "password");
     if (pw !== str(formData, "password2")) throw new Error("The two passwords don't match.");
     await setPassword(user, pw);
@@ -509,7 +509,7 @@ export async function setPasswordAction(formData: FormData) {
 
 export async function clearOwnPasswordAction() {
   return run("/app/account", async () => {
-    const user = await requireActor("staff");
+    const user = await requireActor("staff", { anyStore: true });
     await clearPassword(user.id);
     return "Password removed. Sign in with Google or an emailed link.";
   });

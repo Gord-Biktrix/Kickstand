@@ -8,6 +8,8 @@ import { sendInviteEmail, sendMagicLinkEmail, sendWelcomeEmail } from "./mailer"
 import { baseUrl } from "./messages";
 import { hasRole } from "./roles";
 import { hashPassword, passwordProblem, verifyPassword } from "./passwords";
+import { listShowrooms } from "./showroom";
+import { pickShowroom, readOnlyReason, SHOWROOM_COOKIE } from "./showroom-select";
 import { generateToken, hashToken } from "./tokens";
 
 export const SESSION_COOKIE = "pickup_session";
@@ -163,10 +165,21 @@ export async function requireUser(min: Role = "staff"): Promise<StaffUser> {
 }
 
 /** For server actions: every mutation re-checks the role on the server. */
-export async function requireActor(min: Role = "staff"): Promise<StaffUser> {
+/**
+ * Gate for every mutation. `anyStore` is for actions that aren't about a store at all (own password,
+ * sign-out); everything else must be done from the actor's own store — another store is view-only.
+ */
+export async function requireActor(min: Role = "staff", opts: { anyStore?: boolean } = {}): Promise<StaffUser> {
   const user = await getCurrentUser();
   if (!user) throw new AuthorizationError("Sign in required");
   if (!hasRole(user.role, min)) throw new AuthorizationError(`Requires ${min} role`);
+  if (!opts.anyStore && !hasRole(user.role, "admin") && user.showroomId) {
+    const jar = await cookies();
+    const all = await listShowrooms(db);
+    const current = pickShowroom(all, user, jar.get(SHOWROOM_COOKIE)?.value, process.env.DEFAULT_SHOWROOM ?? "vancouver");
+    const reason = readOnlyReason(user, current, all.find((s) => s.id === user.showroomId) ?? null);
+    if (reason) throw new AuthorizationError(reason);
+  }
   return user;
 }
 

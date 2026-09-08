@@ -11,14 +11,30 @@ export const SHOWROOM_COOKIE = "ks_showroom";
 
 export type UserLike = Pick<StaffUser, "role" | "showroomId"> | null;
 
-/** Store access is by role: admins see every store and may switch; managers and staff are pinned to their home store. */
+/** Anyone signed in may *look at* any store (Gord: "view access only"). Editing is a separate question — see canEditShowroom. */
 export function canSwitchShowroom(user: UserLike): boolean {
-  return !!user && hasRole(user.role, "admin");
+  return !!user;
 }
 
 /**
- * 1. Managers and staff: their home showroom (staff_users.showroom_id); the default when none is set.
- * 2. Admins: the cookie's slug when it names a real showroom, else their home, else the default.
+ * Admins edit everywhere. Managers and staff edit only their home store; another store is view-only.
+ * An account with no home store is treated as at home everywhere (legacy single-store accounts).
+ */
+export function canEditShowroom(user: UserLike, showroom: Pick<ShowroomCtx, "id">): boolean {
+  if (!user) return false;
+  if (hasRole(user.role, "admin")) return true;
+  return !user.showroomId || user.showroomId === showroom.id;
+}
+
+/** Why the current store is read-only for this user, or null when they may edit it. */
+export function readOnlyReason(user: UserLike, showroom: Pick<ShowroomCtx, "id" | "name">, home: Pick<ShowroomCtx, "name" | "slug"> | null): string | null {
+  if (canEditShowroom(user, showroom)) return null;
+  return `You're viewing ${showroom.name} (view only). Switch back to ${home?.name ?? "your store"} to make changes.`;
+}
+
+/**
+ * The store to show: the cookie's slug when it names a real store, else the user's home
+ * (staff_users.showroom_id), else the default.
  */
 export function pickShowroom(all: ShowroomCtx[], user: UserLike, cookieSlug: string | null | undefined, defaultSlug: string): ShowroomCtx {
   if (all.length === 0) throw new Error("No showrooms — run the seed");

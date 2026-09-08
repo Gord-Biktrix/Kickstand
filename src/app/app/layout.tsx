@@ -6,7 +6,7 @@ import { PendingIndicator } from "@/components/pending-indicator";
 import { KickstandLogo } from "@/components/logo";
 import { ShowroomSwitcher } from "@/components/showroom-switcher";
 import { db } from "@/db/client";
-import { canSwitchShowroom, currentShowroom } from "@/lib/current-showroom";
+import { canSwitchShowroom, currentShowroom, readOnlyReason } from "@/lib/current-showroom";
 import { listShowrooms } from "@/lib/showroom";
 import { hasRole, PASSWORD_NUDGE_COOKIE, requireUser, roleLabel } from "@/lib/auth";
 import { signOutAction } from "./actions";
@@ -28,8 +28,10 @@ export const metadata = { title: { default: "Kickstand", template: "%s · Kickst
 export default async function StaffLayout({ children }: { children: React.ReactNode }) {
   const user = await requireUser("staff");
   const [showroom, all] = await Promise.all([currentShowroom(user), listShowrooms(db)]);
-  // Admins always get the menu — with one store it offers "Add a store…" so the pill is never a dead end.
-  const switchable = canSwitchShowroom(user);
+  // Everyone can look at any store; admins also get "Add/Manage stores…" so the pill is never a dead end.
+  const switchable = canSwitchShowroom(user) && (all.length > 1 || hasRole(user.role, "admin"));
+  const viewOnly = readOnlyReason(user, showroom, all.find((s) => s.id === user.showroomId) ?? null);
+  const homeSlug = all.find((s) => s.id === user.showroomId)?.slug;
   // First-run nudge: people land here via Google/link and don't know a password is optional and where it lives.
   const nudgePassword = !user.passwordHash && !(await cookies()).get(PASSWORD_NUDGE_COOKIE);
   return (
@@ -39,7 +41,7 @@ export default async function StaffLayout({ children }: { children: React.ReactN
         <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3">
           <Link href="/app" aria-label="Kickstand home" className="rounded-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"><KickstandLogo size={22} /></Link>
           {switchable ? (
-            <ShowroomSwitcher current={showroom.slug} options={all.map((s) => ({ slug: s.slug, name: s.name }))} manageHref="/app/settings/stores" />
+            <ShowroomSwitcher current={showroom.slug} options={all.map((s) => ({ slug: s.slug, name: s.name }))} manageHref={hasRole(user.role, "admin") ? "/app/settings/stores" : undefined} />
           ) : (
             <span className="rounded-full border border-border px-2 py-0.5 text-xs text-muted" title="Showroom">{showroom.name}</span>
           )}
@@ -63,6 +65,14 @@ export default async function StaffLayout({ children }: { children: React.ReactN
           </div>
         </div>
       </header>
+      {viewOnly && (
+        <div className="border-b border-border bg-warn-soft">
+          <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2 text-sm text-warn">
+            <span>{viewOnly}</span>
+            {homeSlug && <a href={`/app/switch?showroom=${homeSlug}&next=/app`} className="font-medium underline">Back to my store</a>}
+          </div>
+        </div>
+      )}
       {nudgePassword && (
         <div className="border-b border-border bg-accent-soft">
           <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2 text-sm">
