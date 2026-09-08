@@ -59,7 +59,7 @@ export default async function BikesPage({ searchParams }: { searchParams: Promis
   const modelFilter = sp(q.model) ?? "";
   const onOrderText = (sp(q.oq) ?? "").trim().toLowerCase();
   const models = [...new Set(onOrderAll.map((o) => o.model))].sort();
-  const onOrder = onOrderAll.filter((o) => (!modelFilter || o.model === modelFilter) && (!onOrderText || [o.model, o.size, o.colour, o.customerName, o.orderRef, o.customerPhone].filter(Boolean).join(" ").toLowerCase().includes(onOrderText)));
+  const onOrder = onOrderAll.filter((o) => (!modelFilter || o.model === modelFilter) && (!onOrderText || [o.model, o.size, o.colour, o.customerName, o.orderRef, o.customerPhone, o.lsNote].filter(Boolean).join(" ").toLowerCase().includes(onOrderText)));
   const ON_ORDER_RETURN = `/app/bikes?filter=${filter}${modelFilter ? `&model=${encodeURIComponent(modelFilter)}` : ""}${onOrderText ? `&oq=${encodeURIComponent(onOrderText)}` : ""}#on-order`;
   const rows = all.filter((r) => matches(r, filter)).filter((r) => !date || r.appointment?.onDate === date).filter((r) => {
     if (!text) return true;
@@ -172,6 +172,7 @@ export default async function BikesPage({ searchParams }: { searchParams: Promis
                         <>
                           <Link href={`/app/customers/${encodeURIComponent(customerKey(order))}`} className="hover:text-accent">{order.customerName}</Link>
                           <p className="text-xs text-muted">{order.customerPhone ?? order.customerEmail ?? order.orderRef}</p>
+                          {order.lsNote && <p className="mt-0.5 max-w-xs text-xs italic text-warn" title={order.lsNote}>“{order.lsNote}”</p>}
                         </>
                       ) : <span className="text-muted">—</span>}
                     </td>
@@ -250,6 +251,7 @@ export default async function BikesPage({ searchParams }: { searchParams: Promis
                       <td>
                         <Link className="font-medium hover:text-accent" href={`/app/orders/${o.id}`}>{o.model}</Link>
                         <p className="text-xs text-muted">{[o.size, o.colour].filter(Boolean).join(" · ") || "—"}</p>
+                        {o.lsNote && <p className="mt-0.5 max-w-xs text-xs italic text-warn" title={o.lsNote}>“{o.lsNote}”</p>}
                       </td>
                       <td>
                         <Link className="hover:text-accent" href={`/app/customers/${encodeURIComponent(customerKey(o))}`}>{o.customerName}</Link>

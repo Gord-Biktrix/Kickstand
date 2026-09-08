@@ -152,7 +152,7 @@ export default async function BookPage({ params, searchParams }: { params: Promi
               <ul className="divide-y divide-border" aria-label="Open days">
                 {list.map((d) => {
                   const full = !d.bookable;
-                  const label = d.reason === "full" ? "Full" : d.reason === "closed" ? "Closed" : parts ? "" : `${d.remaining} slot${d.remaining === 1 ? "" : "s"} open`;
+                  const label = d.reason === "full" ? (d.remaining > 0 && visitSize > 1 ? `Room for ${d.remaining}, not ${visitSize}` : "Full") : d.reason === "closed" ? "Closed" : parts ? "" : `${d.remaining} slot${d.remaining === 1 ? "" : "s"} open`;
                   const inner = (
                     <>
                       <span className="font-medium">{formatShortDateFromLocal(d.date)}</span>

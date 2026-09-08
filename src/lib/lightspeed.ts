@@ -340,7 +340,8 @@ export class LightspeedClient {
    * Item loaded; `since` (ISO) trims old ones — the shop has hundreds of stale open special orders.
    */
   async listOpenSpecialOrderLines(shopID: number, since?: string): Promise<Record<string, unknown>[]> {
-    const q = new URLSearchParams({ isSpecialOrder: "true", saleID: "0", shopID: String(shopID), limit: "100", load_relations: '["Item"]' });
+    // Note = the free-text note on the line (Lightspeed shows it under the item on the register).
+    const q = new URLSearchParams({ isSpecialOrder: "true", saleID: "0", shopID: String(shopID), limit: "100", load_relations: '["Item","Note"]' });
     if (since) q.set("createTime", `>,${since}`);
     return this.listAll(`SaleLine.json?${q.toString()}`, "SaleLine");
   }

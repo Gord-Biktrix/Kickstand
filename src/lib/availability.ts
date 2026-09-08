@@ -70,8 +70,9 @@ export async function getAvailability(
       now,
       invitedAt: unit.invitedAt!,
       pickupBy: unit.pickupBy!,
-      // Reserve the extra bikes of a multi-bike visit up front so "remaining" and "full" are right for this booking.
-      bookedCount: (countByDate.get(date) ?? 0) + Math.max(0, (args.count ?? 1) - 1),
+      bookedCount: countByDate.get(date) ?? 0,
+      // A multi-bike visit needs room for every bike; "remaining" stays the day's true count.
+      needed: args.count ?? 1,
       bookedStarts: startsByDate.get(date) ?? [],
       storageEstimate: (d) => storageEstimateCents(unit, termsVersion, settings, d, tz),
       buildFeasible: (d, startsAt) => buildFeasibleAt(showroom, { onDate: d, startsAt }, rules, overrides, now),

@@ -129,6 +129,8 @@ export const orders = pgTable(
     lsCustomerId: text("ls_customer_id"),
     /** Lightspeed special-order SaleLine this order was synced from (uncompleted lines have saleID 0). */
     lsSaleLineId: text("ls_sale_line_id").unique(),
+    /** The note staff typed on that Lightspeed sale line ("wants the black rack", "call before build"). Synced, read-only here. */
+    lsNote: text("ls_note"),
     ...timestamps,
   },
   (t) => [

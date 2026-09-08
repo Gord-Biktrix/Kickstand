@@ -100,8 +100,14 @@ describe("one visit, several bikes", () => {
     const two = (await getAvailability(db, { showroom, unit, order: null, now: NOW, count: 2 })).find((d) => d.date === "2026-09-08")!;
     expect(one.remaining).toBe(1);
     expect(one.bookable).toBe(true);
-    expect(two.remaining).toBe(0);
+    // The day still has one real place — that's what it shows — but two bikes don't fit, so it's marked full.
+    expect(two.remaining).toBe(1);
     expect(two.bookable).toBe(false);
+    expect(two.reason).toBe("full");
+    // Other days are untouched by the visit size (this was the "booking one bike lowered every day" report).
+    const wed = (await getAvailability(db, { showroom, unit, order: null, now: NOW, count: 2 })).find((d) => d.date === "2026-09-09")!;
+    const wedOne = (await getAvailability(db, { showroom, unit, order: null, now: NOW })).find((d) => d.date === "2026-09-09")!;
+    expect(wed.remaining).toBe(wedOne.remaining);
   });
 
   it("inviting two bikes for one person sends one message; a later bike joins the booked visit", async () => {

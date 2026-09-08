@@ -60,6 +60,7 @@ export default async function OrderPage({ params, searchParams }: { params: Prom
               </select>
             </Field>
             <Field label="Notes" htmlFor="notes"><textarea id="notes" name="notes" rows={3} defaultValue={order.notes ?? ""} className="input" /></Field>
+            {order.lsNote && <Field label="Lightspeed note" hint="From the sale line in Lightspeed; edit it there and press Sync."><p className="rounded-lg bg-warn-soft px-3 py-2 text-sm italic text-warn">“{order.lsNote}”</p></Field>}
             <button type="submit" className="btn btn-primary">Save</button>
           </form>
         </Card>

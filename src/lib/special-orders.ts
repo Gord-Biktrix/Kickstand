@@ -25,7 +25,15 @@ export type SpecialOrderLine = {
   createTime: string;
   qty: number;
   bike: SaleLineInfo;
+  /** Free-text note on the Lightspeed sale line, if any. */
+  note?: string | null;
 };
+
+function lineNote(l: Record<string, unknown>): string | null {
+  const n = (l.Note as Record<string, unknown> | undefined)?.note;
+  const text = typeof n === "string" ? n.trim() : "";
+  return text || null;
+}
 
 /** What the sync needs from Lightspeed — an interface so tests can feed lines without the API. */
 export interface SpecialOrderSource {
@@ -55,7 +63,7 @@ export class LightspeedSpecialOrderSource implements SpecialOrderSource {
     const kept = bikes.filter((l) => String(((l.Item as Record<string, unknown> | undefined)?.description ?? l.description ?? "")).trim());
     const partLines: SpecialOrderLine[] = parts.map((l) => ({
       saleLineID: String(l.saleLineID), customerID: String(l.customerID), itemID: String(l.itemID), categoryPath: category(l),
-      createTime: String(l.createTime ?? ""), qty: Number(l.unitQuantity ?? 1),
+      createTime: String(l.createTime ?? ""), qty: Number(l.unitQuantity ?? 1), note: lineNote(l),
       bike: { description: String((l.Item as Record<string, unknown> | undefined)?.description ?? ""), qty: Number(l.unitQuantity ?? 1), model: "", size: null, colour: null },
     }));
     return partLines.concat(kept.map((l, i) => ({
@@ -65,6 +73,7 @@ export class LightspeedSpecialOrderSource implements SpecialOrderSource {
       categoryPath: categories.get(String((l.Item as Record<string, unknown> | undefined)?.categoryID ?? "")) ?? "",
       createTime: String(l.createTime ?? ""),
       qty: Number(l.unitQuantity ?? 1),
+      note: lineNote(l),
       bike: described[i],
     })));
   }
@@ -145,6 +154,7 @@ export async function syncSpecialOrders(
         size: line.bike.size,
         colour: line.bike.colour,
         lsCustomerId: line.customerID,
+        lsNote: line.note ?? null,
       };
       let prev = byLine.get(line.saleLineID);
       if (!prev) {
@@ -248,6 +258,7 @@ export async function syncPartsOrders(
       customerPhone: cust.phone,
       model: line.qty > 1 ? `${line.bike.description} ×${line.qty}` : line.bike.description,
       lsCustomerId: line.customerID,
+      lsNote: line.note ?? null,
     };
     if (!prev) {
       await dbx.insert(orders).values({

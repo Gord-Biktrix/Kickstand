@@ -40,8 +40,8 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
     db.select().from(appointments).where(and(eq(appointments.showroomId, showroom.id), eq(appointments.status, "booked"))),
   ]);
   const apptByUnit = new Map(booked.map((a) => [a.unitId, a]));
-  const match = (o: { customerName: string; model: string; orderRef: string; customerPhone: string | null }) =>
-    !text || [o.customerName, o.model, o.orderRef, o.customerPhone].filter(Boolean).join(" ").toLowerCase().includes(text);
+  const match = (o: { customerName: string; model: string; orderRef: string; customerPhone: string | null; lsNote?: string | null }) =>
+    !text || [o.customerName, o.model, o.orderRef, o.customerPhone, o.lsNote].filter(Boolean).join(" ").toLowerCase().includes(text);
   const items = [...new Set(onOrderAll.map((o) => itemName(o.model)))].sort();
   const onOrder = onOrderAll.filter(match).filter((o) => !itemFilter || itemName(o.model) === itemFilter);
   const groups = groupOrders(onOrder); // one row per customer, all their (matching) items
@@ -128,7 +128,7 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
                         <td><input type="checkbox" name="order_ids" value={ids.join(",")} form="onorder" className="h-4 w-4" aria-label={`Select ${primary.customerName}`} /></td>
                         <td><Link href={`/app/customers/${encodeURIComponent(customerKey(primary))}`} className="font-medium hover:text-accent">{primary.customerName}</Link><p className="text-xs text-muted">{primary.customerPhone ?? primary.customerEmail ?? <span className="text-danger">no contact</span>}</p></td>
                         <td>
-                          <ul className="text-sm">{group.map((o) => <li key={o.id}>{o.model} <span className="text-xs text-muted">· {o.orderRef}</span></li>)}</ul>
+                          <ul className="text-sm">{group.map((o) => <li key={o.id}>{o.model} <span className="text-xs text-muted">· {o.orderRef}</span>{o.lsNote && <span className="ml-1 text-xs italic text-warn" title={o.lsNote}>“{o.lsNote}”</span>}</li>)}</ul>
                           {group.length > 1 && <Badge>{group.length} items</Badge>}
                         </td>
                         <td className="text-xs text-muted">{formatShortDateFromLocal(oldest)} · {daysBetween(oldest, today)}d</td>

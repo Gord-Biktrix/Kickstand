@@ -57,6 +57,13 @@
       "when": 1788891579209,
       "tag": "0007_jazzy_dracula",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1788898281717,
+      "tag": "0008_true_mentallo",
+      "breakpoints": true
     }
   ]
 }

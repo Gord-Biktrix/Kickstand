@@ -109,6 +109,8 @@ export type SlotContext = {
   pickupBy: Date;
   /** booked_count from day_counters for this date */
   bookedCount: number;
+  /** Bikes in this visit (default 1): a day is only open if it has room for all of them. Never inflates `remaining`. */
+  needed?: number;
   /** starts_at of every booked appointment on this date */
   bookedStarts: Date[];
   /** projected storage for a pickup on `date`; 0 when storage does not apply */
@@ -134,6 +136,7 @@ export function slotsForDay(
 
   const earliest = addHours(ctx.now, ctx.settings.min_lead_hours);
   const remainingDay = day.capacity - ctx.bookedCount;
+  const needed = Math.max(1, ctx.needed ?? 1);
   const storageApplies = date > toLocalDate(ctx.pickupBy, ctx.tz);
   const storageEstimateCents = storageApplies ? ctx.storageEstimate(date) : 0;
 
@@ -146,7 +149,7 @@ export function slotsForDay(
       if (startsAt.getTime() < ctx.now.getTime() + 60 * 60_000) reason = "too_early";
     } else if (startsAt < earliest) reason = "too_early";
     else if (ctx.buildFeasible && !ctx.buildFeasible(date, startsAt)) reason = "too_early";
-    else if (remainingDay <= 0) reason = "day_full";
+    else if (remainingDay < needed) reason = "day_full";
     else if (atTime >= day.maxConcurrent) reason = "time_full";
     return {
       startsAt,
@@ -180,13 +183,15 @@ export function summarizeDay(date: LocalDate, day: EffectiveDay, ctx: SlotContex
     ctx.settings.booking_horizon_days,
   );
   const beyondHorizon = date > latestDate;
+  // The day's real free places — what staff and customers see as "N slots open". A multi-bike visit
+  // that doesn't fit shows as full without pretending other days lost places.
   const remaining = Math.max(0, day.capacity - ctx.bookedCount);
   const bookable = slots.some((s) => s.available);
   let reason: DaySummary["reason"] = null;
   if (!bookable) {
     if (day.closed) reason = "closed";
     else if (beyondHorizon) reason = "horizon";
-    else if (remaining === 0) reason = "full";
+    else if (remaining < Math.max(1, ctx.needed ?? 1)) reason = "full";
     else if (slots.every((s) => s.reason === "too_early")) reason = "too_soon";
     else reason = "full";
   }
