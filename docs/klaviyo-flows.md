@@ -154,7 +154,7 @@ No reminder, nudge, hold-ending or storage messages exist for parts. Items are i
 item names, quantity suffixed, e.g. "Fat Bike Inner Tube 20x4 ×2"); `event.bike_count` is the number of items.
 
 ## P1. Parts: Order Arrived ("your order is in")
-**SMS** (quiet hours ON)
+**SMS** (quiet hours OFF — these are transactional confirmations; Klaviyo otherwise holds evening texts until morning)
 > Good news {{ person.first_name|default:"there" }}: your order from {{ event.showroom }} is in — {{ event.bikes|join:", " }}. Pick any time to collect it: {{ event.booking_url }}
 
 **Email**: template "Parts: Order ready to collect (Kickstand)" — subject `Your order is ready to collect`.
