@@ -5,6 +5,7 @@ import { assignableRoles, canManage, hasRole, listStaff, requireUser, ROLE_LABEL
 import { currentShowroom } from "@/lib/current-showroom";
 import { sp, type SearchParams } from "@/lib/flash";
 import { googleEnabled } from "@/lib/google-auth";
+import { mailerKind } from "@/lib/mailer";
 import { listShowrooms } from "@/lib/showroom";
 import { clearStaffPasswordAction, deleteStaffAction, inviteStaffAction, setStaffActiveAction, updateStaffAction } from "../../actions";
 
@@ -21,7 +22,7 @@ export default async function StaffSettingsPage({ searchParams }: { searchParams
   const storeName = (id: string | null) => (id ? showrooms.find((s) => s.id === id)?.name ?? "—" : "All stores");
   const visible = admin ? staff : staff.filter((s) => s.showroomId === showroom.id);
   const google = googleEnabled();
-  const emailKey = !!process.env.RESEND_API_KEY;
+  const emailKey = mailerKind() !== "console";
 
   return (
     <div>
@@ -32,7 +33,7 @@ export default async function StaffSettingsPage({ searchParams }: { searchParams
           : "People sign in with a link we email them — no passwords. Invite by work email. Deactivate keeps the account but signs them out everywhere; Delete removes it."}
       />
       <Flash ok={sp(q.ok)} error={sp(q.error)} />
-      {!google && !emailKey && <div className="mb-4"><Badge tone="warn">No email key set: invitations and sign-in links are written to the server log instead of being emailed.</Badge></div>}
+      {!google && !emailKey && <div className="mb-4"><Badge tone="warn">No email service set up: invitations and sign-in links are written to the server log instead of being emailed.</Badge></div>}
       <div className="grid gap-6 lg:grid-cols-[340px_minmax(0,1fr)]">
         <Card title={google ? "Add someone" : "Invite someone"}>
           <form action={inviteStaffAction} className="space-y-3">
