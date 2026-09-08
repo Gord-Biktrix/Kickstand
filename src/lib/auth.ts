@@ -7,6 +7,7 @@ import { logger } from "./logger";
 import { sendInviteEmail, sendMagicLinkEmail } from "./mailer";
 import { baseUrl } from "./messages";
 import { hasRole } from "./roles";
+import { hashPassword, passwordProblem, verifyPassword } from "./passwords";
 import { generateToken, hashToken } from "./tokens";
 
 export const SESSION_COOKIE = "pickup_session";
@@ -227,4 +228,56 @@ export async function deleteStaff(id: string): Promise<void> {
   await db.delete(staffSessions).where(eq(staffSessions.staffUserId, id));
   await db.delete(magicLinks).where(eq(magicLinks.email, user.email));
   await db.delete(staffUsers).where(eq(staffUsers.id, id));
+}
+
+const PASSWORD_MAX_FAILURES = 5;
+const PASSWORD_LOCK_MINUTES = 15;
+
+/**
+ * Email + password sign-in. Same "invalid" answer for unknown email, no password set, wrong password or
+ * deactivated account, so the form can't enumerate staff. Five misses lock the password for 15 minutes
+ * (Google and the emailed link keep working — the lock only covers the password path).
+ */
+export async function signInWithPassword(
+  rawEmail: string,
+  password: string,
+): Promise<{ ok: true; session: string } | { ok: false; error: "invalid" | "locked" }> {
+  const email = rawEmail.trim().toLowerCase();
+  const [user] = await db.select().from(staffUsers).where(and(eq(staffUsers.email, email), eq(staffUsers.active, true))).limit(1);
+  if (!user || !user.passwordHash || !emailAllowed(email, true)) {
+    logger.info({ emailDomain: email.split("@")[1] }, "password sign-in refused");
+    return { ok: false, error: "invalid" };
+  }
+  const now = new Date();
+  if (user.passwordLockedUntil && user.passwordLockedUntil > now) return { ok: false, error: "locked" };
+  if (!verifyPassword(password, user.passwordHash)) {
+    const failed = user.passwordFailed + 1;
+    await db
+      .update(staffUsers)
+      .set({
+        passwordFailed: failed,
+        passwordLockedUntil: failed >= PASSWORD_MAX_FAILURES ? new Date(now.getTime() + PASSWORD_LOCK_MINUTES * 60_000) : null,
+      })
+      .where(eq(staffUsers.id, user.id));
+    return { ok: false, error: failed >= PASSWORD_MAX_FAILURES ? "locked" : "invalid" };
+  }
+  if (user.passwordFailed || user.passwordLockedUntil) {
+    await db.update(staffUsers).set({ passwordFailed: 0, passwordLockedUntil: null }).where(eq(staffUsers.id, user.id));
+  }
+  return { ok: true, session: await createSession(db, user.id, now) };
+}
+
+/** A signed-in person sets (or replaces) their own password. The live session is the proof of identity. */
+export async function setPassword(user: StaffUser, password: string): Promise<void> {
+  const problem = passwordProblem(password, user.email);
+  if (problem) throw new Error(problem);
+  await db
+    .update(staffUsers)
+    .set({ passwordHash: hashPassword(password), passwordFailed: 0, passwordLockedUntil: null })
+    .where(eq(staffUsers.id, user.id));
+}
+
+/** Remove a password (own account, or an admin resetting someone's). They sign in with Google or a link and set a new one. */
+export async function clearPassword(id: string): Promise<void> {
+  await db.update(staffUsers).set({ passwordHash: null, passwordFailed: 0, passwordLockedUntil: null }).where(eq(staffUsers.id, id));
 }

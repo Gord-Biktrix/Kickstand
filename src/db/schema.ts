@@ -30,6 +30,10 @@ export const staffUsers = pgTable(
     role: text("role").notNull(),
     showroomId: uuid("showroom_id").references(() => showrooms.id),
     active: boolean("active").notNull().default(true),
+    /** Optional password sign-in (scrypt hash, see lib/passwords.ts). Null = Google / emailed link only. */
+    passwordHash: text("password_hash"),
+    passwordFailed: integer("password_failed").notNull().default(0),
+    passwordLockedUntil: timestamp("password_locked_until", { withTimezone: true }),
     ...timestamps,
   },
   (t) => [check("staff_users_role_check", sql`${t.role} in ('staff','manager','admin','owner')`)],

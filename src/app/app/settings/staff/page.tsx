@@ -6,7 +6,7 @@ import { currentShowroom } from "@/lib/current-showroom";
 import { sp, type SearchParams } from "@/lib/flash";
 import { googleEnabled } from "@/lib/google-auth";
 import { listShowrooms } from "@/lib/showroom";
-import { deleteStaffAction, inviteStaffAction, setStaffActiveAction, updateStaffAction } from "../../actions";
+import { clearStaffPasswordAction, deleteStaffAction, inviteStaffAction, setStaffActiveAction, updateStaffAction } from "../../actions";
 
 export const metadata = { title: "Staff" };
 
@@ -28,7 +28,7 @@ export default async function StaffSettingsPage({ searchParams }: { searchParams
       <PageHeader
         title="Staff"
         subtitle={google
-          ? "Add someone by work email and they sign in with their Biktrix Google account — no passwords, nothing to send. Deactivate keeps the account but signs them out everywhere; Delete removes it."
+          ? "Add someone by work email; they sign in with their Biktrix Google account, then can set a password under Your account. Deactivate keeps the account but signs them out everywhere; Delete removes it."
           : "People sign in with a link we email them — no passwords. Invite by work email. Deactivate keeps the account but signs them out everywhere; Delete removes it."}
       />
       <Flash ok={sp(q.ok)} error={sp(q.error)} />
@@ -38,7 +38,7 @@ export default async function StaffSettingsPage({ searchParams }: { searchParams
           <form action={inviteStaffAction} className="space-y-3">
             <Field label="Work email" htmlFor="inv_email"><input id="inv_email" name="email" type="email" required className="input" placeholder={`name@${process.env.AUTH_ALLOWED_DOMAIN ?? "biktrix.com"}`} /></Field>
             <Field label="Name" htmlFor="inv_name"><input id="inv_name" name="name" className="input" placeholder="As it should appear on the timeline" /></Field>
-            <Field label="Role" htmlFor="inv_role" hint="Staff: book, receive, hand over. Manager: plus capacity, settings, extensions, delete. Admin: every store and manages staff. Super admin: one person above the admins.">
+            <Field label="Role" htmlFor="inv_role">
               <select id="inv_role" name="role" className="input" defaultValue="staff">
                 {options.map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
               </select>
@@ -55,7 +55,7 @@ export default async function StaffSettingsPage({ searchParams }: { searchParams
         <Card title={`People (${visible.length})`}>
           <div className="overflow-x-auto">
             <table className="table">
-              <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Store</th><th>Status</th><th></th></tr></thead>
+              <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Store</th><th>Status</th><th>Password</th><th></th></tr></thead>
               <tbody>
                 {visible.map((s) => (
                   <tr key={s.id} className={s.active ? undefined : "opacity-60"}>
@@ -78,9 +78,18 @@ export default async function StaffSettingsPage({ searchParams }: { searchParams
                     </td>
                     <td className="text-sm">{admin && s.id !== user.id && canManage(user.role, s.role) ? "" : storeName(s.showroomId)}</td>
                     <td>{s.active ? <Badge tone="ok">active</Badge> : <Badge>deactivated</Badge>}</td>
+                    <td className="text-sm">
+                      {s.passwordHash ? (
+                        <span className="inline-flex items-center gap-2">set{s.passwordLockedUntil && s.passwordLockedUntil > new Date() && <Badge tone="warn">locked</Badge>}
+                          {admin && s.id !== user.id && canManage(user.role, s.role) && (
+                            <form action={clearStaffPasswordAction.bind(null, s.id)}><ConfirmButton className="btn btn-sm" message={`Remove ${s.name}'s password? They sign in with Google or a link and set a new one.`}>Reset</ConfirmButton></form>
+                          )}
+                        </span>
+                      ) : <span className="text-muted">none</span>}
+                    </td>
                     <td className="text-right">
                       <div className="flex justify-end gap-1">
-                        {s.active && !google && (
+                        {s.active && (
                           <form action={inviteStaffAction}>
                             <input type="hidden" name="email" value={s.email} /><input type="hidden" name="name" value={s.name} /><input type="hidden" name="role" value={s.role} /><input type="hidden" name="showroom_id" value={s.showroomId ?? ""} />
                             <button type="submit" className="btn btn-sm" title="Email a fresh sign-in link">Resend link</button>

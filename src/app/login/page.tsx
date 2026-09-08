@@ -4,7 +4,7 @@ import { googleEnabled } from "@/lib/google-auth";
 import { sp, type SearchParams } from "@/lib/flash";
 import { KickstandLogo } from "@/components/logo";
 import { Alert, Card, Field } from "@/components/ui";
-import { requestLoginAction } from "./actions";
+import { passwordLoginAction, requestLoginAction } from "./actions";
 
 export const metadata = { title: { absolute: "Sign in · Kickstand" } };
 
@@ -14,6 +14,8 @@ const ERRORS: Record<string, string> = {
   google_off: "Google sign-in isn't set up on this server yet.",
   domain: "Use your Biktrix Google account, not a personal one.",
   not_staff: "That Google account isn't on the staff list yet. Ask a manager to add you under Settings › Staff, then try again.",
+  password: "That email and password don't match. If you haven't set a password yet, sign in with Google (or a link) and set one under your account.",
+  locked: "Too many attempts. The password is locked for 15 minutes — sign in with Google meanwhile, or wait and try again.",
 };
 
 export default async function LoginPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
@@ -23,8 +25,10 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
   const error = sp(q.error);
   const devLink = sp(q.dev);
   const google = googleEnabled();
-  // The emailed link stays available when Google isn't configured, and as a developer fallback locally.
-  const showEmail = !google || process.env.NODE_ENV !== "production";
+  const linkMode = sp(q.mode) === "link" || sent;
+  const prefill = sp(q.email) ?? "";
+  // Password is always offered. The emailed link is behind a small link when Google is on (and always shown locally).
+  const showEmail = linkMode || !google || process.env.NODE_ENV !== "production";
   return (
     <main className="mx-auto flex w-full max-w-sm flex-1 flex-col justify-center px-4 py-10">
       <div className="mb-8 flex flex-col items-center gap-3">
@@ -42,7 +46,20 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
             <p className="text-center text-xs text-muted">Use your Biktrix Google account. New here? A manager adds you under Settings › Staff first.</p>
           </div>
         )}
-        {google && showEmail && <div className="my-5 border-t border-line pt-4 text-center text-xs uppercase tracking-wide text-muted">or (development)</div>}
+        {!linkMode && (
+          <form action={passwordLoginAction} className={`space-y-4 ${google ? "mt-6 border-t border-border pt-5" : ""}`}>
+            {google && <p className="text-center text-xs uppercase tracking-wide text-muted">or with a password</p>}
+            <Field label="Work email" htmlFor="pw_email">
+              <input id="pw_email" name="email" type="email" required autoComplete="username" className="input" placeholder="you@biktrix.com" defaultValue={prefill} />
+            </Field>
+            <Field label="Password" htmlFor="pw_password">
+              <input id="pw_password" name="password" type="password" required autoComplete="current-password" className="input" />
+            </Field>
+            <button className={`btn btn-block ${google ? "" : "btn-primary"}`} type="submit">Sign in</button>
+            {!showEmail && <p className="text-center text-xs text-muted">Forgot it? <a className="underline" href="/login?mode=link">Email me a sign-in link</a> or use Google, then set a new one under your account.</p>}
+          </form>
+        )}
+        {showEmail && <div className="my-5 border-t border-border pt-4 text-center text-xs uppercase tracking-wide text-muted">{linkMode ? "Sign-in link" : "or by emailed link"}</div>}
         {showEmail && (sent ? (
           <div className="space-y-3 text-sm">
             <Alert tone="ok">If that address is on the staff list, a sign-in link is on its way. It expires in 15 minutes.</Alert>
@@ -54,7 +71,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
           </div>
         ) : (
           <form action={requestLoginAction} className="space-y-4">
-            <Field label="Work email" htmlFor="email" hint="Staff accounts only.">
+            <Field label="Work email" htmlFor="email" hint="We email a one-time link. Staff accounts only.">
               <input id="email" name="email" type="email" required autoComplete="email" className="input" placeholder="you@biktrix.com" />
             </Field>
             <button className={`btn btn-block ${google ? "" : "btn-primary"}`} type="submit">Email me a sign-in link</button>

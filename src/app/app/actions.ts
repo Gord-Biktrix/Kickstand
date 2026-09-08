@@ -1,10 +1,11 @@
 "use server";
 
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, ne } from "drizzle-orm";
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { db } from "@/db/client";
-import { capacityOverrides, capacityRules, orders, staffUsers, units } from "@/db/schema";
-import { assignableRoles, canManage, deleteStaff, hasRole, inviteStaff, isRole, requireActor, roleLabel, setStaffActive, signOut, updateStaff } from "@/lib/auth";
+import { capacityOverrides, capacityRules, orders, staffSessions, staffUsers, units } from "@/db/schema";
+import { assignableRoles, canManage, clearPassword, deleteStaff, hasRole, inviteStaff, isRole, requireActor, roleLabel, SESSION_COOKIE, setPassword, setStaffActive, signOut, updateStaff } from "@/lib/auth";
 import { BOOKING_ERROR_TEXT, BookingError, bookGroup, cancelBooking, recordNoShow, rescheduleBooking } from "@/lib/booking";
 import { validateImport } from "@/lib/csv";
 import { logEvent } from "@/lib/events";
@@ -13,6 +14,7 @@ import { normalizePhone } from "@/lib/phone";
 import { FLAG_KEYS, PROGRAM_KEYS, settingsSchema, validateSettings, type ProgramSettings } from "@/lib/settings";
 import { getCapacityConfig, patchShowroomSettings } from "@/lib/showroom";
 import { normalizeTime } from "@/lib/time";
+import { hashToken } from "@/lib/tokens";
 import { attachUnit, bookableSiblings, collectParts, completeHandover, createOrder, deleteUnit, detachUnit, grantExtension, inviteAllReceived, inviteOrders, inviteUnit, inviteUnits, markReady, receiveUnit, resendInvite, retagUnit, startBuild, unreceiveUnit, waiveStorage } from "@/lib/units";
 import { currentShowroom } from "@/lib/current-showroom";
 import { googleEnabled } from "@/lib/google-auth";
@@ -426,6 +428,39 @@ export async function updateStaffAction(id: string, formData: FormData) {
     if (!assignableRoles(user.role).includes(role)) throw new Error(`You can't make someone a ${roleLabel(role).toLowerCase()}.`);
     await updateStaff(id, { role, showroomId: str(formData, "showroom_id") || null, name: str(formData, "name") || undefined });
     return "Account updated.";
+  });
+}
+
+// ---- Own account ----------------------------------------------------------------
+
+export async function setPasswordAction(formData: FormData) {
+  return run("/app/account", async () => {
+    const user = await requireActor("staff");
+    const pw = str(formData, "password");
+    if (pw !== str(formData, "password2")) throw new Error("The two passwords don't match.");
+    await setPassword(user, pw);
+    // Other devices are signed out; this one keeps its session.
+    const token = (await cookies()).get(SESSION_COOKIE)?.value;
+    if (token) await db.delete(staffSessions).where(and(eq(staffSessions.staffUserId, user.id), ne(staffSessions.tokenHash, hashToken(token))));
+    return "Password saved. You can sign in with it from now on.";
+  });
+}
+
+export async function clearOwnPasswordAction() {
+  return run("/app/account", async () => {
+    const user = await requireActor("staff");
+    await clearPassword(user.id);
+    return "Password removed. Sign in with Google or an emailed link.";
+  });
+}
+
+/** Admin reset: drops someone's password so they sign in with Google/link and set a fresh one. */
+export async function clearStaffPasswordAction(id: string) {
+  return run("/app/settings/staff", async () => {
+    const user = await requireActor("admin");
+    const target = await managedTarget(user.role, id);
+    await clearPassword(id);
+    return `${target.name}'s password was removed. They can sign in with Google or a link and set a new one.`;
   });
 }
 

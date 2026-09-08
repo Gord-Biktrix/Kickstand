@@ -54,7 +54,7 @@ export default async function StaffLayout({ children }: { children: React.ReactN
           </form>
           <div className="flex items-center gap-3 text-xs text-muted">
             {hasRole(user.role, "admin") && <Link href="/app/reports" className="hover:text-accent">Reports</Link>}
-            <span className="hidden sm:inline">{user.name} · {roleLabel(user.role)}</span>
+            <Link href="/app/account" className="hidden hover:text-accent sm:inline" title="Your account">{user.name} · {roleLabel(user.role)}</Link>
             <form action={signOutAction}><button type="submit" className="btn btn-sm">Sign out</button></form>
           </div>
         </div>
