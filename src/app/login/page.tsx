@@ -23,6 +23,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
   if (await getCurrentUser()) redirect("/app");
   const sent = sp(q.sent) === "1";
   const error = sp(q.error);
+  const detail = sp(q.detail);
   const devLink = sp(q.dev);
   const google = googleEnabled();
   const linkMode = sp(q.mode) === "link" || sent;
@@ -37,6 +38,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
       </div>
       <Card title="Staff sign in">
         {error && ERRORS[error] && <div className="mb-3"><Alert tone="danger">{ERRORS[error]}</Alert></div>}
+        {error === "mail" && <div className="mb-3"><Alert tone="danger">{detail || "The sign-in email couldn't be sent. Try Google, or ask an admin to check the email setup."}</Alert></div>}
         {google && (
           <div className="space-y-3">
             <a href="/auth/google" className="btn btn-primary btn-block">

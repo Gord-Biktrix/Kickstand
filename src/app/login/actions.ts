@@ -6,7 +6,13 @@ import { requestMagicLink, SESSION_COOKIE, sessionCookieOptions, signInWithPassw
 import { str } from "@/lib/flash";
 
 export async function requestLoginAction(formData: FormData) {
-  const result = await requestMagicLink(str(formData, "email"));
+  let result: Awaited<ReturnType<typeof requestMagicLink>>;
+  try {
+    result = await requestMagicLink(str(formData, "email"));
+  } catch (err) {
+    // Mailer problems (unverified domain, bad key) must not 500 the login page.
+    redirect(`/login?mode=link&error=mail&detail=${encodeURIComponent(err instanceof Error ? err.message : String(err))}`);
+  }
   if (!result.ok) redirect(`/login?error=${encodeURIComponent(result.error)}&mode=link`);
   const dev = result.devLink ? `&dev=${encodeURIComponent(result.devLink)}` : "";
   redirect(`/login?sent=1${dev}`);

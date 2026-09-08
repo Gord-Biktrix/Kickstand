@@ -17,7 +17,7 @@ export async function sendMagicLinkEmail(to: string, link: string): Promise<void
       text: `Click to sign in (link expires in 15 minutes):\n\n${link}\n\nIf you didn't request this, ignore this email.`,
     }),
   });
-  if (!res.ok) throw new Error(`Mailer failed: ${res.status}`);
+  if (!res.ok) throw await mailerError(res);
 }
 
 /** Staff invitation: a welcome plus a sign-in link that stays valid for a week. Resend when configured, console otherwise. */
@@ -48,7 +48,7 @@ Questions? Reply to this email.`;
       text,
     }),
   });
-  if (!res.ok) throw new Error(`Mailer failed: ${res.status}`);
+  if (!res.ok) throw await mailerError(res);
 }
 
 /** Welcome when Google sign-in is on: no link to click, just where to go and how to sign in. */
@@ -64,5 +64,18 @@ export async function sendWelcomeEmail(to: string, args: { name: string; inviter
     headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
     body: JSON.stringify({ from: process.env.AUTH_EMAIL_FROM ?? "pickups@biktrix.com", to, subject: `You've been added to Kickstand — ${args.showroom}`, text }),
   });
-  if (!res.ok) throw new Error(`Mailer failed: ${res.status}`);
+  if (!res.ok) throw await mailerError(res);
+}
+
+/** Resend answers 4xx with `{ message }` ("The biktrix.com domain is not verified…"); surface that, it's what staff need to see. */
+async function mailerError(res: Response): Promise<Error> {
+  let detail = "";
+  try {
+    const body = (await res.json()) as { message?: string; name?: string };
+    detail = body.message ?? body.name ?? "";
+  } catch {
+    /* no JSON body */
+  }
+  logger.error({ status: res.status, detail }, "mailer failed");
+  return new Error(`Email couldn't be sent (${res.status}${detail ? `: ${detail}` : ""}). Check RESEND_API_KEY / AUTH_EMAIL_FROM and that the sender domain is verified in Resend.`);
 }
