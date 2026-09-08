@@ -28,7 +28,8 @@ export const metadata = { title: { default: "Kickstand", template: "%s · Kickst
 export default async function StaffLayout({ children }: { children: React.ReactNode }) {
   const user = await requireUser("staff");
   const [showroom, all] = await Promise.all([currentShowroom(user), listShowrooms(db)]);
-  const switchable = canSwitchShowroom(user) && all.length > 1;
+  // Admins always get the menu — with one store it offers "Add a store…" so the pill is never a dead end.
+  const switchable = canSwitchShowroom(user);
   // First-run nudge: people land here via Google/link and don't know a password is optional and where it lives.
   const nudgePassword = !user.passwordHash && !(await cookies()).get(PASSWORD_NUDGE_COOKIE);
   return (
@@ -38,7 +39,7 @@ export default async function StaffLayout({ children }: { children: React.ReactN
         <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3">
           <Link href="/app" aria-label="Kickstand home" className="rounded-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"><KickstandLogo size={22} /></Link>
           {switchable ? (
-            <ShowroomSwitcher current={showroom.slug} options={all.map((s) => ({ slug: s.slug, name: s.name }))} />
+            <ShowroomSwitcher current={showroom.slug} options={all.map((s) => ({ slug: s.slug, name: s.name }))} manageHref="/app/settings/stores" />
           ) : (
             <span className="rounded-full border border-border px-2 py-0.5 text-xs text-muted" title="Showroom">{showroom.name}</span>
           )}
