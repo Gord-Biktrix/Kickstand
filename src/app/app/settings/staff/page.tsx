@@ -33,7 +33,7 @@ export default async function StaffSettingsPage({ searchParams }: { searchParams
       />
       <Flash ok={sp(q.ok)} error={sp(q.error)} />
       {!google && !emailKey && <div className="mb-4"><Badge tone="warn">No email key set: invitations and sign-in links are written to the server log instead of being emailed.</Badge></div>}
-      <div className="grid gap-6 lg:grid-cols-[360px_1fr]">
+      <div className="grid gap-6 lg:grid-cols-[340px_minmax(0,1fr)]">
         <Card title={google ? "Add someone" : "Invite someone"}>
           <form action={inviteStaffAction} className="space-y-3">
             <Field label="Work email" htmlFor="inv_email"><input id="inv_email" name="email" type="email" required className="input" placeholder={`name@${process.env.AUTH_ALLOWED_DOMAIN ?? "biktrix.com"}`} /></Field>
@@ -52,61 +52,67 @@ export default async function StaffSettingsPage({ searchParams }: { searchParams
             <button type="submit" className="btn btn-primary">{google ? "Add to staff" : "Send invitation"}</button>
           </form>
         </Card>
-        <Card title={`People (${visible.length})`}>
-          <div className="overflow-x-auto">
+        <Card title={`People (${visible.length})`} className="min-w-0">
+          <div className="-mx-2 overflow-x-auto px-2">
             <table className="table">
-              <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Store</th><th>Status</th><th>Password</th><th></th></tr></thead>
+              <thead><tr><th>Person</th><th>Role · store</th><th>Status</th><th></th></tr></thead>
               <tbody>
-                {visible.map((s) => (
-                  <tr key={s.id} className={s.active ? undefined : "opacity-60"}>
-                    <td className="font-medium">{s.name}{s.id === user.id && <span className="ml-1 text-xs text-muted">(you)</span>}</td>
-                    <td className="text-sm">{s.email}</td>
-                    <td>
-                      {admin && s.id !== user.id && canManage(user.role, s.role) ? (
-                        <form action={updateStaffAction.bind(null, s.id)} className="flex items-center gap-1">
-                          <input type="hidden" name="name" value={s.name} />
-                          <select name="role" defaultValue={s.role} className="input h-8 w-auto py-0 text-sm">
-                            {options.map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
-                          </select>
-                          <select name="showroom_id" defaultValue={s.showroomId ?? ""} className="input h-8 w-auto py-0 text-sm">
-                            {showrooms.map((sh) => <option key={sh.id} value={sh.id}>{sh.name}</option>)}
-                            <option value="">All stores</option>
-                          </select>
-                          <button type="submit" className="btn btn-sm">Save</button>
-                        </form>
-                      ) : <span>{roleLabel(s.role)}</span>}
-                    </td>
-                    <td className="text-sm">{admin && s.id !== user.id && canManage(user.role, s.role) ? "" : storeName(s.showroomId)}</td>
-                    <td>{s.active ? <Badge tone="ok">active</Badge> : <Badge>deactivated</Badge>}</td>
-                    <td className="text-sm">
-                      {s.passwordHash ? (
-                        <span className="inline-flex items-center gap-2">set{s.passwordLockedUntil && s.passwordLockedUntil > new Date() && <Badge tone="warn">locked</Badge>}
-                          {admin && s.id !== user.id && canManage(user.role, s.role) && (
-                            <form action={clearStaffPasswordAction.bind(null, s.id)}><ConfirmButton className="btn btn-sm" message={`Remove ${s.name}'s password? They sign in with Google or a link and set a new one.`}>Reset</ConfirmButton></form>
-                          )}
-                        </span>
-                      ) : <span className="text-muted">none</span>}
-                    </td>
-                    <td className="text-right">
-                      <div className="flex justify-end gap-1">
-                        {s.active && (
-                          <form action={inviteStaffAction}>
-                            <input type="hidden" name="email" value={s.email} /><input type="hidden" name="name" value={s.name} /><input type="hidden" name="role" value={s.role} /><input type="hidden" name="showroom_id" value={s.showroomId ?? ""} />
-                            <button type="submit" className="btn btn-sm" title="Email a fresh sign-in link">Resend link</button>
+                {visible.map((s) => {
+                  const editable = admin && s.id !== user.id && canManage(user.role, s.role);
+                  const locked = !!s.passwordLockedUntil && s.passwordLockedUntil > new Date();
+                  return (
+                    <tr key={s.id} className={s.active ? undefined : "opacity-60"}>
+                      <td>
+                        <div className="font-medium">{s.name}{s.id === user.id && <span className="ml-1 text-xs text-muted">(you)</span>}</div>
+                        <div className="text-xs text-muted">{s.email}</div>
+                      </td>
+                      <td>
+                        {editable ? (
+                          <form action={updateStaffAction.bind(null, s.id)} className="flex flex-wrap items-center gap-1">
+                            <input type="hidden" name="name" value={s.name} />
+                            <select name="role" defaultValue={s.role} className="input h-8 w-auto py-0 text-sm">
+                              {options.map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
+                            </select>
+                            <select name="showroom_id" defaultValue={s.showroomId ?? ""} className="input h-8 w-auto py-0 text-sm">
+                              {showrooms.map((sh) => <option key={sh.id} value={sh.id}>{sh.name}</option>)}
+                              <option value="">All stores</option>
+                            </select>
+                            <button type="submit" className="btn btn-sm">Save</button>
                           </form>
+                        ) : (
+                          <div className="text-sm">{roleLabel(s.role)} <span className="text-muted">· {storeName(s.showroomId)}</span></div>
                         )}
-                        {admin && s.id !== user.id && canManage(user.role, s.role) && (
-                          s.active
-                            ? <form action={setStaffActiveAction.bind(null, s.id, false)}><ConfirmButton className="btn btn-danger btn-sm" message={`Deactivate ${s.name}? They are signed out everywhere and can't sign in until re-activated.`}>Deactivate</ConfirmButton></form>
-                            : <form action={setStaffActiveAction.bind(null, s.id, true)}><button type="submit" className="btn btn-sm">Re-activate</button></form>
-                        )}
-                        {admin && s.id !== user.id && canManage(user.role, s.role) && (
-                          <form action={deleteStaffAction.bind(null, s.id)}><ConfirmButton className="btn btn-danger btn-sm" message={`Delete ${s.name} (${s.email}) permanently? Deactivate instead if they might come back.`}>Delete</ConfirmButton></form>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+                      <td>
+                        <div className="flex flex-col items-start gap-1">
+                          {s.active ? <Badge tone="ok">active</Badge> : <Badge>deactivated</Badge>}
+                          <span className="text-xs text-muted">{s.passwordHash ? (locked ? "password locked" : "password set") : "no password"}</span>
+                        </div>
+                      </td>
+                      <td className="text-right">
+                        <div className="flex flex-wrap justify-end gap-1">
+                          {s.active && (
+                            <form action={inviteStaffAction}>
+                              <input type="hidden" name="email" value={s.email} /><input type="hidden" name="name" value={s.name} /><input type="hidden" name="role" value={s.role} /><input type="hidden" name="showroom_id" value={s.showroomId ?? ""} />
+                              <button type="submit" className="btn btn-sm" title="Email a fresh sign-in link">Send link</button>
+                            </form>
+                          )}
+                          {editable && s.passwordHash && (
+                            <form action={clearStaffPasswordAction.bind(null, s.id)}><ConfirmButton className="btn btn-sm" message={`Remove ${s.name}'s password? They sign in with Google or a link and set a new one.`}>Reset password</ConfirmButton></form>
+                          )}
+                          {editable && (
+                            s.active
+                              ? <form action={setStaffActiveAction.bind(null, s.id, false)}><ConfirmButton className="btn btn-danger btn-sm" message={`Deactivate ${s.name}? They are signed out everywhere and can't sign in until re-activated.`}>Deactivate</ConfirmButton></form>
+                              : <form action={setStaffActiveAction.bind(null, s.id, true)}><button type="submit" className="btn btn-sm">Re-activate</button></form>
+                          )}
+                          {editable && (
+                            <form action={deleteStaffAction.bind(null, s.id)}><ConfirmButton className="btn btn-danger btn-sm" message={`Delete ${s.name} (${s.email}) permanently? Deactivate instead if they might come back.`}>Delete</ConfirmButton></form>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
