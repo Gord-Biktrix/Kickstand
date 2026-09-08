@@ -56,7 +56,9 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
               <input id="pw_password" name="password" type="password" required autoComplete="current-password" className="input" />
             </Field>
             <button className={`btn btn-block ${google ? "" : "btn-primary"}`} type="submit">Sign in</button>
-            {!showEmail && <p className="text-center text-xs text-muted">Forgot it? <a className="underline" href="/login?mode=link">Email me a sign-in link</a> or use Google, then set a new one under your account.</p>}
+            <p className="text-center text-xs text-muted">
+              No password yet, or forgot it? Sign in with Google{showEmail ? " or a link" : <> or <a className="underline" href="/login?mode=link">an emailed link</a></>}, then set one under your name.
+            </p>
           </form>
         )}
         {showEmail && <div className="my-5 border-t border-border pt-4 text-center text-xs uppercase tracking-wide text-muted">{linkMode ? "Sign-in link" : "or by emailed link"}</div>}

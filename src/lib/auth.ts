@@ -11,6 +11,8 @@ import { hashPassword, passwordProblem, verifyPassword } from "./passwords";
 import { generateToken, hashToken } from "./tokens";
 
 export const SESSION_COOKIE = "pickup_session";
+/** Set when someone clicks "Not now" on the set-a-password banner; hides it for 90 days. */
+export const PASSWORD_NUDGE_COOKIE = "ks_pw_nudge";
 const SESSION_DAYS = 30;
 const MAGIC_LINK_MINUTES = 15;
 const INVITE_LINK_DAYS = 7;

@@ -1,5 +1,6 @@
 import { Suspense } from "react";
 import Link from "next/link";
+import { cookies } from "next/headers";
 import { NavLinks } from "@/components/nav-links";
 import { PendingIndicator } from "@/components/pending-indicator";
 import { KickstandLogo } from "@/components/logo";
@@ -7,7 +8,7 @@ import { ShowroomSwitcher } from "@/components/showroom-switcher";
 import { db } from "@/db/client";
 import { canSwitchShowroom, currentShowroom } from "@/lib/current-showroom";
 import { listShowrooms } from "@/lib/showroom";
-import { hasRole, requireUser, roleLabel } from "@/lib/auth";
+import { hasRole, PASSWORD_NUDGE_COOKIE, requireUser, roleLabel } from "@/lib/auth";
 import { signOutAction } from "./actions";
 
 // Named after the questions staff ask, not the process steps: what's today, when is everything booked,
@@ -28,6 +29,8 @@ export default async function StaffLayout({ children }: { children: React.ReactN
   const user = await requireUser("staff");
   const [showroom, all] = await Promise.all([currentShowroom(user), listShowrooms(db)]);
   const switchable = canSwitchShowroom(user) && all.length > 1;
+  // First-run nudge: people land here via Google/link and don't know a password is optional and where it lives.
+  const nudgePassword = !user.passwordHash && !(await cookies()).get(PASSWORD_NUDGE_COOKIE);
   return (
     <div className="flex flex-1 flex-col">
       <Suspense fallback={null}><PendingIndicator /></Suspense>
@@ -59,6 +62,15 @@ export default async function StaffLayout({ children }: { children: React.ReactN
           </div>
         </div>
       </header>
+      {nudgePassword && (
+        <div className="border-b border-border bg-accent-soft">
+          <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2 text-sm">
+            <span>Signed in with Google. Want a password too, for shared shop computers?</span>
+            <Link href="/app/account" className="font-medium text-accent underline">Set a password</Link>
+            <form action="/app/account/dismiss" method="post" className="ml-auto"><button type="submit" className="text-xs text-muted hover:text-foreground">Not now</button></form>
+          </div>
+        </div>
+      )}
       <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6">{children}</main>
     </div>
   );
