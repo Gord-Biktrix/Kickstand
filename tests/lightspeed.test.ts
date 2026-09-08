@@ -2,7 +2,7 @@ import { desc, eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { Db } from "@/db/client";
 import { events, lightspeedConnections, orders, units } from "@/db/schema";
-import { bookSlot, cancelBooking, rescheduleBooking } from "@/lib/booking";
+import { bookGroup, bookSlot, cancelBooking, rescheduleBooking } from "@/lib/booking";
 import { saveConnection, setLightspeedFetch, statusNameFor, STATUS_KEYS } from "@/lib/lightspeed";
 import { MemoryNotifier, setNotifier } from "@/lib/notifier";
 import type { ShowroomCtx } from "@/lib/showroom";
@@ -224,6 +224,27 @@ describe("Lightspeed bridge", () => {
     const wo = ls.calls.find((c) => c.url.endsWith("Workorder.json"))!.body!;
     expect(wo).toMatchObject({ workorderStatusID: 1, etaOut: localToUtc("2026-09-05", "11:45", TZ).toISOString() });
     expect(ls.calls.find((c) => c.method === "PUT")!.body).toEqual({ workorderStatusID: 23 });
+  });
+
+  it("every bike of a visit gets its own work order, and a staff cancel clears the pickup on all of them", async () => {
+    const ls = fakeLightspeed();
+    setLightspeedFetch(ls.fetchImpl);
+    showroom = await withSettings(db, showroom, {
+      lightspeed: { enabled: true, shop_id: 3, employee_id: 27, open_status_id: 1, due_mode: "pickup", assembly_due_time_local: "10:00", assembly_lead_work_hours: 8, statuses: { booked: 23 } },
+    });
+    const order = await makeOrder(db, showroom, { customerPhone: "+16045550100" });
+    const a = await makeUnit(db, showroom, order.id);
+    const b = await makeUnit(db, showroom, order.id);
+    for (const u of [a, b]) await inviteUnit(db, { showroom, unitId: u.id, actor: "s", now: NOW, silent: true });
+    await bookGroup(db, { showroom, unitIds: [a.id, b.id], startsAt: localToUtc("2026-09-05", "11:45", TZ), createdBy: "staff", now: NOW });
+    // Two work orders created (the second bike used to be skipped because it sent no text).
+    expect(ls.calls.filter((c) => c.method === "POST" && c.url.endsWith("Workorder.json"))).toHaveLength(2);
+    ls.calls.length = 0;
+    // Staff cancel sends no text, but both work orders drop their pickup.
+    await cancelBooking(db, { showroom, unitId: a.id, reason: "staff", actor: "staff", now: NOW });
+    const puts = ls.calls.filter((c) => c.method === "PUT" && /Workorder\/\d+\.json/.test(c.url));
+    expect(puts).toHaveLength(2);
+    for (const p of puts) expect(String(p.body!.hookOut)).toMatch(/^Not booked/);
   });
 
   it("a reschedule or cancel updates an existing work order's dates even when the message has no mapped status", async () => {

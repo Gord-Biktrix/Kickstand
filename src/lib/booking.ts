@@ -253,7 +253,13 @@ export async function bookSlotTx(
 
   const updatedUnit: Unit = { ...unit, ...unitPatch };
   const storageEstimate = storageEstimateCents(unit, order?.termsVersion ?? 1, settings, date, tz);
-  if (!args.replacingAppointmentId && !args.silent) {
+  if (args.replacingAppointmentId || args.silent) {
+    // No text for this bike (sibling in a visit, joined visit, or a reschedule that messages separately) —
+    // but its own work order still has to be created / moved.
+    // A rebook inside a reschedule is mirrored as "rescheduled" (unmapped → dates only) so a work order the
+    // mechanic already moved along keeps its status; a fresh silent booking is "booked" and creates the work order.
+    outbox.push({ showroom, unit: updatedUnit, order, metric: args.replacingAppointmentId ? METRIC.rescheduled : METRIC.booked, dedupeKey: appointment.id, actor: createdBy, lightspeedOnly: true });
+  } else {
     outbox.push({
       showroom,
       unit: updatedUnit,
@@ -321,6 +327,8 @@ export type CancelArgs = {
   silent?: boolean;
   /** Internal: set while cancelling the other bikes of a visit, so they don't cascade again. */
   _inGroup?: boolean;
+  /** internal: the cancel is the first half of a reschedule — the rebook mirrors the work order. */
+  _rescheduling?: boolean;
 };
 
 export async function cancelBookingTx(
@@ -386,7 +394,12 @@ export async function cancelBookingTx(
   });
 
   const updatedUnit: Unit = { ...unit, ...unitPatch, noShowCount };
-  if (!args.silent && (reason === "customer" || reason === "shop")) {
+  const announce = !args.silent && (reason === "customer" || reason === "shop");
+  if (!announce && !args._rescheduling) {
+    // Staff/deferred cancels and cascaded siblings send nothing, but the work order must drop its pickup date.
+    outbox.push({ showroom, unit: updatedUnit, order, metric: METRIC.cancelled, dedupeKey: active.id, actor, lightspeedOnly: true });
+  }
+  if (announce) {
     outbox.push({
       showroom,
       unit: updatedUnit,
@@ -447,6 +460,7 @@ export async function rescheduleBooking(dbx: Db, args: RescheduleArgs) {
       actor: args.actor,
       now: args.now,
       silent: true,
+      _rescheduling: true,
     });
     let booked!: Awaited<ReturnType<typeof bookSlotTx>>;
     for (const [i, unitId] of visit.entries()) {
@@ -532,6 +546,11 @@ export async function recordNoShow(
         payload: { no_show_count: n, starts_at: a.startsAt.toISOString(), group_id: a.groupId },
       });
       if (unitId === unit.id) { appointment = updated; noShowCount = n; }
+    }
+    for (const unitId of visit.filter((id) => id !== unit.id)) {
+      const [sib] = await tx.select().from(units).where(eq(units.id, unitId));
+      const [sibOrder] = sib?.orderId ? await tx.select().from(orders).where(eq(orders.id, sib.orderId)) : [];
+      if (sib) outbox.push({ showroom, unit: sib, order: sibOrder ?? null, metric: METRIC.missed, dedupeKey: active.id, actor, lightspeedOnly: true });
     }
     const [fresh] = await tx.select().from(units).where(eq(units.id, unit.id));
     outbox.push({

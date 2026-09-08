@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { events, type Order, type Unit } from "@/db/schema";
 import { formatMoney, formatMoneyOrEmpty } from "./format";
+import { logEvent } from "./events";
 import { lightspeedEnabled, syncUnitToLightspeed } from "./lightspeed";
 import { logger } from "./logger";
 import { getNotifier, type Profile } from "./notifier";
@@ -133,9 +134,26 @@ export type MessageArgs = {
   dedupeKey: string;
   extra?: Record<string, unknown>;
   actor?: string;
+  /**
+   * No customer message (a sibling bike in a visit, a staff/deferred cancel, a silent rebook): only
+   * mirror the change to the Lightspeed work order. Every bike has its own work order, so every bike's
+   * booking, move or cancel must reach Lightspeed even when one text covers the whole visit.
+   */
+  lightspeedOnly?: boolean;
 };
 
 export type MessageOutcome = "sent" | "failed" | "skipped";
+
+async function mirrorToLightspeed(dbx: Db, args: MessageArgs): Promise<Record<string, unknown> | undefined> {
+  if (!lightspeedEnabled(args.showroom)) return undefined;
+  try {
+    return { ...(await syncUnitToLightspeed(dbx, { showroom: args.showroom, unit: args.unit, order: args.order, metric: args.metric })) };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    logger.warn({ metric: args.metric, unitId: args.unit.id, error: message }, "lightspeed sync failed");
+    return { error: message };
+  }
+}
 
 /**
  * Idempotent send: the msg_* event row is the dedupe lock (unique on unit, type, dedupe_key).
@@ -144,6 +162,15 @@ export type MessageOutcome = "sent" | "failed" | "skipped";
 export async function sendUnitMessage(dbx: Db, args: MessageArgs): Promise<MessageOutcome> {
   const { showroom, unit, order, metric, dedupeKey, extra = {}, actor = "system" } = args;
   const type = metricEventType(metric);
+  if (args.lightspeedOnly) {
+    // A log line, not a dedupe lock: the same appointment can be mirrored several times (booked, then
+    // cancelled), so the key must not collide with the events_dedupe constraint.
+    const lightspeed = await mirrorToLightspeed(dbx, args);
+    if (lightspeed) {
+      await logEvent(dbx, { showroomId: showroom.id, unitId: unit.id, orderId: order?.id ?? unit.orderId ?? undefined, type: "lightspeed_synced", actor, payload: { metric, appointment_id: dedupeKey, dedupe_key: `${type}:${dedupeKey}:${Date.now()}`, lightspeed } });
+    }
+    return "skipped";
+  }
   const properties = { ...commonProperties(showroom, unit, order), ...extra };
 
   const inserted = await dbx
@@ -184,16 +211,7 @@ export async function sendUnitMessage(dbx: Db, args: MessageArgs): Promise<Messa
   }
   // Lightspeed bridge: mirror the message as a work-order status so Ikeono texts from the
   // showroom number. Independent of the Klaviyo outcome; never fails the caller.
-  let lightspeed: Record<string, unknown> | undefined;
-  if (lightspeedEnabled(showroom)) {
-    try {
-      lightspeed = { ...(await syncUnitToLightspeed(dbx, { showroom, unit, order, metric })) };
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      lightspeed = { error: message };
-      logger.warn({ eventId, metric, unitId: unit.id, error: message }, "lightspeed sync failed");
-    }
-  }
+  const lightspeed = await mirrorToLightspeed(dbx, args);
 
   await dbx
     .update(events)
