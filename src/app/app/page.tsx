@@ -10,7 +10,7 @@ import { addLocalDays, formatLongDateFromLocal, formatTime, toLocalDate } from "
 import { collectPartsAction, recordNoShowAction } from "./actions";
 import { currentShowroom } from "@/lib/current-showroom";
 
-export const metadata = { title: "Today" };
+export const metadata = { title: { absolute: "Today · Kickstand" } };
 
 export default async function TodayPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const q = await searchParams;

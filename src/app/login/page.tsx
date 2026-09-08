@@ -2,10 +2,11 @@ import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth";
 import { googleEnabled } from "@/lib/google-auth";
 import { sp, type SearchParams } from "@/lib/flash";
+import { KickstandLogo } from "@/components/logo";
 import { Alert, Card, Field } from "@/components/ui";
 import { requestLoginAction } from "./actions";
 
-export const metadata = { title: "Sign in" };
+export const metadata = { title: { absolute: "Sign in · Kickstand" } };
 
 const ERRORS: Record<string, string> = {
   invalid: "That link is invalid or has expired. Request a new one.",
@@ -26,7 +27,10 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
   const showEmail = !google || process.env.NODE_ENV !== "production";
   return (
     <main className="mx-auto flex w-full max-w-sm flex-1 flex-col justify-center px-4 py-10">
-      <p className="mb-6 text-center text-sm font-semibold uppercase tracking-widest text-accent">Biktrix Pickups</p>
+      <div className="mb-8 flex flex-col items-center gap-3">
+        <KickstandLogo size={40} />
+        <p className="text-xs font-medium uppercase tracking-widest text-muted">Biktrix staff</p>
+      </div>
       <Card title="Staff sign in">
         {error && ERRORS[error] && <div className="mb-3"><Alert tone="danger">{ERRORS[error]}</Alert></div>}
         {google && (

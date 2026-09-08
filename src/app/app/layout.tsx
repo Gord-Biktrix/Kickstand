@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import Link from "next/link";
 import { NavLinks } from "@/components/nav-links";
 import { PendingIndicator } from "@/components/pending-indicator";
+import { KickstandLogo } from "@/components/logo";
 import { ShowroomSwitcher } from "@/components/showroom-switcher";
 import { db } from "@/db/client";
 import { canSwitchShowroom, currentShowroom } from "@/lib/current-showroom";
@@ -21,6 +22,8 @@ const NAV = [
   { href: "/app/settings", label: "Settings", min: "manager" },
 ] as const;
 
+export const metadata = { title: { default: "Kickstand", template: "%s · Kickstand" } };
+
 export default async function StaffLayout({ children }: { children: React.ReactNode }) {
   const user = await requireUser("staff");
   const [showroom, all] = await Promise.all([currentShowroom(user), listShowrooms(db)]);
@@ -30,7 +33,7 @@ export default async function StaffLayout({ children }: { children: React.ReactN
       <Suspense fallback={null}><PendingIndicator /></Suspense>
       <header className="border-b border-border bg-card">
         <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3">
-          <Link href="/app" className="text-sm font-semibold uppercase tracking-widest text-accent">Biktrix Pickups</Link>
+          <Link href="/app" aria-label="Kickstand home" className="rounded-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"><KickstandLogo size={22} /></Link>
           {switchable ? (
             <ShowroomSwitcher current={showroom.slug} options={all.map((s) => ({ slug: s.slug, name: s.name }))} />
           ) : (
