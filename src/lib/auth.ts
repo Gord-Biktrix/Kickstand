@@ -196,3 +196,12 @@ export async function setStaffActive(id: string, active: boolean): Promise<void>
 export async function updateStaff(id: string, patch: { name?: string; role?: Role; showroomId?: string | null }): Promise<void> {
   await db.update(staffUsers).set(patch).where(eq(staffUsers.id, id));
 }
+
+/** Remove an account outright: sessions, pending links, then the row. Timeline entries keep the name they recorded. */
+export async function deleteStaff(id: string): Promise<void> {
+  const [user] = await db.select().from(staffUsers).where(eq(staffUsers.id, id));
+  if (!user) return;
+  await db.delete(staffSessions).where(eq(staffSessions.staffUserId, id));
+  await db.delete(magicLinks).where(eq(magicLinks.email, user.email));
+  await db.delete(staffUsers).where(eq(staffUsers.id, id));
+}

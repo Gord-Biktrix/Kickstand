@@ -5,7 +5,7 @@ import { hasRole, listStaff, requireUser } from "@/lib/auth";
 import { currentShowroom } from "@/lib/current-showroom";
 import { sp, type SearchParams } from "@/lib/flash";
 import { listShowrooms } from "@/lib/showroom";
-import { inviteStaffAction, setStaffActiveAction, updateStaffAction } from "../../actions";
+import { deleteStaffAction, inviteStaffAction, setStaffActiveAction, updateStaffAction } from "../../actions";
 
 export const metadata = { title: "Staff" };
 
@@ -22,7 +22,7 @@ export default async function StaffSettingsPage({ searchParams }: { searchParams
 
   return (
     <div>
-      <PageHeader title="Staff" subtitle="People sign in with a link we email them — no passwords. Invite by work email; deactivating signs someone out everywhere." />
+      <PageHeader title="Staff" subtitle="People sign in with a link we email them — no passwords. Invite by work email. Deactivate keeps the account but signs them out everywhere; Delete removes it." />
       <Flash ok={sp(q.ok)} error={sp(q.error)} />
       {!emailKey && <div className="mb-4"><Badge tone="warn">No email key set: invitations and sign-in links are written to the server log instead of being emailed.</Badge></div>}
       <div className="grid gap-6 lg:grid-cols-[360px_1fr]">
@@ -84,6 +84,9 @@ export default async function StaffSettingsPage({ searchParams }: { searchParams
                           s.active
                             ? <form action={setStaffActiveAction.bind(null, s.id, false)}><ConfirmButton className="btn btn-danger btn-sm" message={`Deactivate ${s.name}? They are signed out everywhere and can't sign in until re-activated.`}>Deactivate</ConfirmButton></form>
                             : <form action={setStaffActiveAction.bind(null, s.id, true)}><button type="submit" className="btn btn-sm">Re-activate</button></form>
+                        )}
+                        {admin && s.id !== user.id && (
+                          <form action={deleteStaffAction.bind(null, s.id)}><ConfirmButton className="btn btn-danger btn-sm" message={`Delete ${s.name} (${s.email}) permanently? Deactivate instead if they might come back.`}>Delete</ConfirmButton></form>
                         )}
                       </div>
                     </td>

@@ -4,7 +4,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { db } from "@/db/client";
 import { capacityOverrides, capacityRules, orders, units } from "@/db/schema";
-import { hasRole, inviteStaff, requireActor, setStaffActive, signOut, updateStaff, type Role } from "@/lib/auth";
+import { deleteStaff, hasRole, inviteStaff, requireActor, setStaffActive, signOut, updateStaff, type Role } from "@/lib/auth";
 import { BOOKING_ERROR_TEXT, BookingError, bookGroup, cancelBooking, recordNoShow, rescheduleBooking } from "@/lib/booking";
 import { validateImport } from "@/lib/csv";
 import { logEvent } from "@/lib/events";
@@ -390,6 +390,15 @@ export async function setStaffActiveAction(id: string, active: boolean) {
     if (user.id === id && !active) throw new Error("You can't deactivate your own account.");
     await setStaffActive(id, active);
     return active ? "Account re-activated." : "Account deactivated and signed out everywhere.";
+  });
+}
+
+export async function deleteStaffAction(id: string) {
+  return run("/app/settings/staff", async () => {
+    const user = await requireActor("admin");
+    if (user.id === id) throw new Error("You can't delete your own account.");
+    await deleteStaff(id);
+    return "Account deleted.";
   });
 }
 

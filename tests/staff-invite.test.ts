@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { Db } from "@/db/client";
 import { magicLinks, staffUsers } from "@/db/schema";
-import { consumeMagicLink, emailAllowed, inviteStaff, setStaffActive } from "@/lib/auth";
+import { consumeMagicLink, deleteStaff, emailAllowed, inviteStaff, setStaffActive } from "@/lib/auth";
 import { resetDb, testDb } from "./helpers";
 
 let db: Db;
@@ -33,5 +33,9 @@ describe("staff invitations", () => {
     const [row] = await db.select().from(staffUsers).where(eq(staffUsers.id, user.id));
     expect(row.active).toBe(false);
     expect(await consumeMagicLink(new URL(again.link).searchParams.get("token")!)).toBeNull();
+
+    await deleteStaff(user.id);
+    expect(await db.select().from(staffUsers).where(eq(staffUsers.id, user.id))).toHaveLength(0);
+    expect(await db.select().from(magicLinks).where(eq(magicLinks.email, "sam@biktrix.com"))).toHaveLength(0);
   });
 });
