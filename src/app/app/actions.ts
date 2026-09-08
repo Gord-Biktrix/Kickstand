@@ -4,7 +4,7 @@ import { and, eq, inArray, ne } from "drizzle-orm";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { db } from "@/db/client";
-import { capacityOverrides, capacityRules, orders, staffSessions, staffUsers, units } from "@/db/schema";
+import { capacityOverrides, capacityRules, lsWorkorderStatuses, orders, staffSessions, staffUsers, units } from "@/db/schema";
 import { assignableRoles, canManage, clearPassword, deleteStaff, hasRole, inviteStaff, isRole, requireActor, roleLabel, SESSION_COOKIE, setPassword, setStaffActive, signOut, updateStaff } from "@/lib/auth";
 import { BOOKING_ERROR_TEXT, BookingError, bookGroup, cancelBooking, recordNoShow, rescheduleBooking } from "@/lib/booking";
 import { validateImport } from "@/lib/csv";
@@ -17,6 +17,8 @@ import { normalizeTime } from "@/lib/time";
 import { hashToken } from "@/lib/tokens";
 import { attachUnit, bookableSiblings, collectParts, completeHandover, createOrder, deleteUnit, detachUnit, grantExtension, inviteAllReceived, inviteOrders, inviteUnit, inviteUnits, markReady, receiveUnit, resendInvite, retagUnit, startBuild, unreceiveUnit, waiveStorage } from "@/lib/units";
 import { currentShowroom } from "@/lib/current-showroom";
+import { createShowroom, setLightspeedLink, updateShowroomDetails } from "@/lib/showroom-admin";
+import { LightspeedClient } from "@/lib/lightspeed";
 import { googleEnabled } from "@/lib/google-auth";
 import { mailerKind } from "@/lib/mailer";
 import { syncSpecialOrders } from "@/lib/special-orders";
@@ -430,6 +432,63 @@ export async function updateStaffAction(id: string, formData: FormData) {
     if (!assignableRoles(user.role).includes(role)) throw new Error(`You can't make someone a ${roleLabel(role).toLowerCase()}.`);
     await updateStaff(id, { role, showroomId: str(formData, "showroom_id") || null, name: str(formData, "name") || undefined });
     return "Account updated.";
+  });
+}
+
+// ---- Stores (showrooms) ---------------------------------------------------------
+
+export async function createShowroomAction(formData: FormData) {
+  return run("/app/settings/stores", async () => {
+    await requireActor("admin");
+    const s = await createShowroom(db, {
+      slug: str(formData, "slug"),
+      name: str(formData, "name"),
+      timezone: str(formData, "timezone") || "America/Vancouver",
+      addressLine: str(formData, "address_line"),
+      phone: str(formData, "phone") || null,
+      copyCapacityFrom: str(formData, "copy_from") || null,
+    });
+    return `${s.name} created. Link it to its Lightspeed shop below, then check Settings › Capacity for its hours.`;
+  });
+}
+
+export async function updateShowroomAction(id: string, formData: FormData) {
+  return run("/app/settings/stores", async () => {
+    await requireActor("admin");
+    await updateShowroomDetails(db, id, { name: str(formData, "name"), timezone: str(formData, "timezone"), addressLine: str(formData, "address_line"), phone: str(formData, "phone") || null });
+    return "Store details saved.";
+  });
+}
+
+export async function setLightspeedLinkAction(id: string, formData: FormData) {
+  return run("/app/settings/stores", async () => {
+    await requireActor("admin");
+    const n = (k: string) => { const v = str(formData, k); return v ? Number(v) : null; };
+    await setLightspeedLink(db, id, {
+      enabled: bool(formData, "enabled"),
+      shop_id: n("shop_id"),
+      employee_id: n("employee_id"),
+      open_status_id: n("open_status_id") ?? 1,
+      booked_status_id: n("booked_status_id"),
+      completed_status_id: n("completed_status_id"),
+    });
+    return "Lightspeed link saved.";
+  });
+}
+
+export async function refreshLightspeedStatusesAction() {
+  return run("/app/settings/stores", async () => {
+    await requireActor("admin");
+    const client = new LightspeedClient(db);
+    const statuses = await client.listWorkorderStatuses();
+    const now = new Date();
+    for (const st of statuses) {
+      await db
+        .insert(lsWorkorderStatuses)
+        .values({ id: Number(st.workorderStatusID), name: st.name, systemValue: null, sortOrder: Number(st.sortOrder) || 0, htmlColor: null, archived: false, syncedAt: now })
+        .onConflictDoUpdate({ target: lsWorkorderStatuses.id, set: { name: st.name, sortOrder: Number(st.sortOrder) || 0, archived: false, syncedAt: now } });
+    }
+    return `${statuses.length} work-order statuses refreshed from Lightspeed.`;
   });
 }
 

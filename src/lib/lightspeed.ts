@@ -236,6 +236,18 @@ export class LightspeedClient {
 
   // Typed helpers -----------------------------------------------------------
 
+  /** Shops on the account (Settings › Stores links a Kickstand store to one). */
+  async listShops(): Promise<{ shopID: string; name: string }[]> {
+    const res = await this.request("GET", "Shop.json?limit=100");
+    return asList<{ shopID: string; name: string }>(res, "Shop").map((s) => ({ shopID: String(s.shopID), name: String(s.name) }));
+  }
+
+  /** Active employees — the work order's assignee per store. */
+  async listEmployees(): Promise<{ employeeID: string; name: string }[]> {
+    const res = await this.request("GET", "Employee.json?limit=100&archived=false");
+    return asList<{ employeeID: string; firstName?: string; lastName?: string }>(res, "Employee").map((e) => ({ employeeID: String(e.employeeID), name: `${e.firstName ?? ""} ${e.lastName ?? ""}`.trim() || `Employee ${e.employeeID}` }));
+  }
+
   async listWorkorderStatuses(): Promise<{ workorderStatusID: string; name: string; sortOrder: string }[]> {
     const res = await this.request("GET", "WorkorderStatus.json?limit=100");
     return asList(res, "WorkorderStatus");
