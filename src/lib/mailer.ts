@@ -50,3 +50,19 @@ Questions? Reply to this email.`;
   });
   if (!res.ok) throw new Error(`Mailer failed: ${res.status}`);
 }
+
+/** Welcome when Google sign-in is on: no link to click, just where to go and how to sign in. */
+export async function sendWelcomeEmail(to: string, args: { name: string; inviter: string; showroom: string; url: string }): Promise<void> {
+  const apiKey = process.env.RESEND_API_KEY;
+  const text = `Hi ${args.name},\n\n${args.inviter} has added you to Kickstand, the Biktrix pickup scheduler, for ${args.showroom}.\n\nSign in here with your Biktrix Google account:\n\n${args.url}/login\n\nOnce you're in, you can set an optional password under your name (top right) for shared shop computers.\n\nQuestions? Reply to this email.`;
+  if (!apiKey) {
+    logger.info({ to }, "staff welcome (console mailer)");
+    return;
+  }
+  const res = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ from: process.env.AUTH_EMAIL_FROM ?? "pickups@biktrix.com", to, subject: `You've been added to Kickstand — ${args.showroom}`, text }),
+  });
+  if (!res.ok) throw new Error(`Mailer failed: ${res.status}`);
+}

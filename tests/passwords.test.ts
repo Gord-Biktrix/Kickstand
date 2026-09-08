@@ -26,7 +26,7 @@ describe("passwords", () => {
 
   it("signs in, locks after five misses, and unlocks by reset", async () => {
     process.env.AUTH_ALLOWED_DOMAIN = "biktrix.com";
-    const { user } = await inviteStaff({ email: "sam@biktrix.com", name: "Sam", role: "staff", showroomId: null }, { name: "Gordon", showroomName: "Vancouver" }, { sendEmail: false });
+    const { user } = await inviteStaff({ email: "sam@biktrix.com", name: "Sam", role: "staff", showroomId: null }, { name: "Gordon", showroomName: "Vancouver" }, { mode: "none" });
     expect(await signInWithPassword("sam@biktrix.com", "purple kettle sings")).toEqual({ ok: false, error: "invalid" }); // none set yet
     await expect(setPassword(user, "short")).rejects.toThrow(/at least 10/);
     await setPassword(user, "purple kettle sings");

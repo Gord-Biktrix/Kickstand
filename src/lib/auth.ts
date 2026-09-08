@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { db } from "@/db/client";
 import { magicLinks, staffSessions, staffUsers, type Role, type StaffUser } from "@/db/schema";
 import { logger } from "./logger";
-import { sendInviteEmail, sendMagicLinkEmail } from "./mailer";
+import { sendInviteEmail, sendMagicLinkEmail, sendWelcomeEmail } from "./mailer";
 import { baseUrl } from "./messages";
 import { hasRole } from "./roles";
 import { hashPassword, passwordProblem, verifyPassword } from "./passwords";
@@ -189,7 +189,7 @@ export type StaffInvite = { email: string; name: string; role: Role; showroomId:
 export async function inviteStaff(
   invite: StaffInvite,
   by: { name: string; showroomName: string },
-  opts: { sendEmail?: boolean } = {},
+  opts: { mode?: "link" | "welcome" | "none" } = {},
 ): Promise<{ user: StaffUser; link: string | null }> {
   const email = invite.email.trim().toLowerCase();
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new Error("Enter a valid email address.");
@@ -200,8 +200,13 @@ export async function inviteStaff(
     .values({ email, name, role: invite.role, showroomId: invite.showroomId, active: true })
     .onConflictDoUpdate({ target: staffUsers.email, set: { name, role: invite.role, showroomId: invite.showroomId, active: true } })
     .returning();
-  // With Google sign-in the person just signs in; there is nothing to email.
-  if (opts.sendEmail === false) return { user, link: null };
+  // With Google sign-in there is no link to click: send a welcome pointing at the login page instead.
+  const mode = opts.mode ?? "link";
+  if (mode === "none") return { user, link: null };
+  if (mode === "welcome") {
+    await sendWelcomeEmail(email, { name, inviter: by.name, showroom: by.showroomName, url: baseUrl() });
+    return { user, link: null };
+  }
   const token = generateToken();
   await db.insert(magicLinks).values({ email, tokenHash: hashToken(token), expiresAt: new Date(Date.now() + INVITE_LINK_DAYS * 86_400_000) });
   const link = `${baseUrl()}/auth/verify?token=${token}`;

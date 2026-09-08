@@ -36,7 +36,7 @@ describe("Sign in with Google", () => {
     process.env.AUTH_ALLOWED_DOMAIN = "biktrix.com";
     process.env.AUTH_ALLOWED_EMAILS = "gord@biktrix.com";
     expect(await createSessionForEmail("stranger@biktrix.com")).toBeNull();
-    const { user, link } = await inviteStaff({ email: "sam@biktrix.com", name: "Sam", role: "staff", showroomId: null }, { name: "Gordon", showroomName: "Vancouver" }, { sendEmail: false });
+    const { user, link } = await inviteStaff({ email: "sam@biktrix.com", name: "Sam", role: "staff", showroomId: null }, { name: "Gordon", showroomName: "Vancouver" }, { mode: "none" });
     expect(link).toBeNull();
     expect(await createSessionForEmail("Sam@biktrix.com")).toBeTruthy();
     await setStaffActive(user.id, false);

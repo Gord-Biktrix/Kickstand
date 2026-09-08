@@ -384,8 +384,9 @@ export async function inviteStaffAction(formData: FormData) {
     const showroomId = str(formData, "showroom_id") || null;
     if (!hasRole(user.role, "admin") && showroomId !== showroom.id) throw new Error("Managers can only invite people to their own store.");
     const google = googleEnabled();
-    const r = await inviteStaff({ email: str(formData, "email"), name: str(formData, "name"), role, showroomId }, { name: user.name, showroomName: showroom.name }, { sendEmail: !google });
-    if (google) return `${r.user.name} added — they can sign in with their Biktrix Google account now.`;
+    const mailer = !!process.env.RESEND_API_KEY;
+    const r = await inviteStaff({ email: str(formData, "email"), name: str(formData, "name"), role, showroomId }, { name: user.name, showroomName: showroom.name }, { mode: google ? (mailer ? "welcome" : "none") : "link" });
+    if (google) return `${r.user.name} added — ${mailer ? "welcome email sent; " : ""}they can sign in with their Biktrix Google account now.`;
     const dev = process.env.NODE_ENV !== "production" && process.env.AUTH_DEV_SHOW_LINK === "true" ? ` Dev link: ${r.link}` : "";
     return `Invitation sent to ${r.user.email}.${process.env.RESEND_API_KEY ? "" : " (No email key is set yet — the link was written to the server log instead.)"}${dev}`;
   });
