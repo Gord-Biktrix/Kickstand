@@ -38,7 +38,7 @@ export default async function StoresPage({ searchParams }: { searchParams: Promi
 
   return (
     <div>
-      <PageHeader title="Stores" subtitle="Each store has its own hours, capacity, staff and Lightspeed shop. Work orders and special orders stay inside their shop, and each store maps its own Pickup statuses, so stores never intersect." />
+      <PageHeader title="Stores" subtitle="Each store has its own hours, capacity, staff and Lightspeed shop. Work orders and special orders stay inside their shop, so stores never intersect; statuses can be shared or separate, your choice." />
       <Flash ok={sp(q.ok)} error={sp(q.error)} />
       {!connected && <div className="mb-4"><Alert tone="warn">Lightspeed isn&apos;t connected on this server yet, so shop and employee lists can&apos;t be loaded. Ids can still be typed in.</Alert></div>}
       {lsError && <div className="mb-4"><Alert tone="danger">Couldn&apos;t load shops from Lightspeed: {lsError}</Alert></div>}
@@ -116,7 +116,7 @@ export default async function StoresPage({ searchParams }: { searchParams: Promi
                       ) : <input id={`emp_${s.id}`} name="employee_id" type="number" defaultValue={ls.employee_id ?? ""} className="input" placeholder="Lightspeed employee id" />}
                     </Field>
                     <StatusSelect id={`open_${s.id}`} name="open_status_id" label="New work order starts in" value={ls.open_status_id} statuses={statuses} used={usedStatuses} me={s.name} allowNone={false} />
-                    <StatusSelect id={`booked_${s.id}`} name="booked_status_id" label="When a pickup is booked" value={ls.statuses.booked ?? null} statuses={statuses} used={usedStatuses} me={s.name} hint="Create a status like “Pickup: Booked (SK)” in Lightspeed for each store — statuses are account-wide, so each store needs its own." />
+                    <StatusSelect id={`booked_${s.id}`} name="booked_status_id" label="When a pickup is booked" value={ls.statuses.booked ?? null} statuses={statuses} used={usedStatuses} me={s.name} hint="Stores can share the same status — work orders are already separated by shop." />
                     <StatusSelect id={`done_${s.id}`} name="completed_status_id" label="When the bike is handed over" value={ls.statuses.completed ?? null} statuses={statuses} used={usedStatuses} me={s.name} />
                     <label className="flex items-center gap-2 text-sm"><input type="checkbox" name="enabled" defaultChecked={ls.enabled} className="h-4 w-4" /> Link on — create and update work orders in this shop</label>
                     <div className="flex items-center gap-2">
@@ -145,8 +145,8 @@ function StatusSelect({ id, name, label, value, statuses, used, me, hint, allowN
           {allowNone && <option value="">— none —</option>}
           {statuses.map((st) => {
             const owner = used.get(Number(st.id));
-            const taken = !!owner && owner !== me && name !== "open_status_id";
-            return <option key={st.id} value={st.id} disabled={taken}>{st.name} (#{st.id}){taken ? ` · used by ${owner}` : ""}</option>;
+            const shared = !!owner && owner !== me && name !== "open_status_id";
+            return <option key={st.id} value={st.id}>{st.name} (#{st.id}){shared ? ` · also ${owner}` : ""}</option>;
           })}
         </select>
       ) : <input id={id} name={name} type="number" defaultValue={value ?? ""} className="input" placeholder="Status id — press Refresh statuses to load names" />}

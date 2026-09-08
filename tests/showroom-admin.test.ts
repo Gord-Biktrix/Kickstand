@@ -25,11 +25,13 @@ describe("stores", () => {
     await expect(createShowroom(db, { slug: "x", name: "Bad tz", timezone: "Mars/Olympus", addressLine: "", phone: null })).rejects.toThrow(/time zone/);
   });
 
-  it("refuses a shop or status another store already uses", async () => {
+  it("refuses a shop another store already uses; statuses may be shared", async () => {
     await withSettings(db, vancouver, { lightspeed: { ...vancouver.settings.lightspeed, enabled: true, shop_id: 3, statuses: { booked: 29, completed: 5 } } });
     const sk = await createShowroom(db, { slug: "saskatoon", name: "Biktrix Saskatoon", timezone: "America/Regina", addressLine: "", phone: null });
     await expect(setLightspeedLink(db, sk.id, { enabled: true, shop_id: 3, employee_id: null, open_status_id: 1, booked_status_id: 31, completed_status_id: null })).rejects.toThrow(/already linked to Biktrix Vancouver/);
-    await expect(setLightspeedLink(db, sk.id, { enabled: true, shop_id: 7, employee_id: null, open_status_id: 1, booked_status_id: 29, completed_status_id: null })).rejects.toThrow(/already used by Biktrix Vancouver/);
+    // Statuses may be shared between stores (the shop is what keeps them apart).
+    await setLightspeedLink(db, sk.id, { enabled: false, shop_id: 7, employee_id: null, open_status_id: 1, booked_status_id: 29, completed_status_id: null });
+    await expect(setLightspeedLink(db, sk.id, { enabled: true, shop_id: 7, employee_id: null, open_status_id: 1, booked_status_id: 1, completed_status_id: null })).rejects.toThrow(/new work order/);
     await expect(setLightspeedLink(db, sk.id, { enabled: true, shop_id: null, employee_id: null, open_status_id: 1, booked_status_id: 31, completed_status_id: null })).rejects.toThrow(/Pick the Lightspeed shop/);
     await setLightspeedLink(db, sk.id, { enabled: true, shop_id: 7, employee_id: 12, open_status_id: 1, booked_status_id: 31, completed_status_id: 32 });
     const saved = (await listShowrooms(db)).find((s) => s.id === sk.id)!;

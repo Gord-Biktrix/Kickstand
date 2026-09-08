@@ -7,8 +7,8 @@ import { listShowrooms, patchShowroomSettings, type ShowroomCtx } from "./showro
 /**
  * Stores (showrooms) from the UI — Settings › Stores. Each store has its own Lightspeed link: a shop id
  * (work orders and special orders live per shop, so two stores never see each other's), its own
- * work-order status mapping and employee. Lightspeed work-order *statuses* are account-wide, so the
- * rule that keeps stores apart is enforced here: a status id mapped by one store can't be mapped by another.
+ * work-order status mapping and employee. Lightspeed work-order *statuses* are account-wide and may be
+ * shared between stores; the shop is what keeps stores apart, and a shop can belong to only one store.
  */
 export type NewShowroom = { slug: string; name: string; timezone: string; addressLine: string; phone: string | null; copyCapacityFrom?: string | null };
 
@@ -73,8 +73,9 @@ export type LightspeedLink = {
 };
 
 /**
- * Save a store's Lightspeed link. Refuses a shop or a booked/completed status already claimed by
- * another store, so work orders and status automations never cross between stores.
+ * Save a store's Lightspeed link. One Lightspeed shop per store (that is what keeps work orders and
+ * special orders apart). Statuses may be shared between stores — a work order only ever belongs to
+ * one shop, so "Pickup: Booked" can be the booked status for every store.
  */
 export async function setLightspeedLink(dbx: Db, showroomId: string, link: LightspeedLink): Promise<void> {
   const others = (await listShowrooms(dbx)).filter((s) => s.id !== showroomId);
@@ -84,10 +85,7 @@ export async function setLightspeedLink(dbx: Db, showroomId: string, link: Light
     if (clash) throw new Error(`Lightspeed shop ${link.shop_id} is already linked to ${clash.name}. One shop per store.`);
   }
   for (const [label, id] of [["booked", link.booked_status_id], ["completed", link.completed_status_id]] as const) {
-    if (!id) continue;
-    if (id === link.open_status_id) throw new Error(`The ${label} status can't be the same as the "new work order" status.`);
-    const clash = others.find((s) => Object.values(s.settings.lightspeed.statuses).includes(id));
-    if (clash) throw new Error(`That ${label} status is already used by ${clash.name}. Create a separate "Pickup: …" status in Lightspeed for this store so the two never intersect.`);
+    if (id && id === link.open_status_id) throw new Error(`The ${label} status can't be the same as the "new work order" status.`);
   }
   if (link.booked_status_id && link.completed_status_id && link.booked_status_id === link.completed_status_id) throw new Error("Booked and completed must be different statuses.");
   const statuses: Record<string, number> = {};
