@@ -14,7 +14,7 @@ const SESSION_DAYS = 30;
 const MAGIC_LINK_MINUTES = 15;
 const INVITE_LINK_DAYS = 7;
 
-export { hasRole, ROLE_RANK } from "./roles";
+export { assignableRoles, canManage, hasRole, isRole, ROLE_LABEL, ROLE_RANK, roleLabel, ROLES } from "./roles";
 export type { Role };
 
 export class AuthorizationError extends Error {

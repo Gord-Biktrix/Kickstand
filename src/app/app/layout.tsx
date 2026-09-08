@@ -7,7 +7,7 @@ import { ShowroomSwitcher } from "@/components/showroom-switcher";
 import { db } from "@/db/client";
 import { canSwitchShowroom, currentShowroom } from "@/lib/current-showroom";
 import { listShowrooms } from "@/lib/showroom";
-import { hasRole, requireUser } from "@/lib/auth";
+import { hasRole, requireUser, roleLabel } from "@/lib/auth";
 import { signOutAction } from "./actions";
 
 // Named after the questions staff ask, not the process steps: what's today, when is everything booked,
@@ -54,7 +54,7 @@ export default async function StaffLayout({ children }: { children: React.ReactN
           </form>
           <div className="flex items-center gap-3 text-xs text-muted">
             {hasRole(user.role, "admin") && <Link href="/app/reports" className="hover:text-accent">Reports</Link>}
-            <span className="hidden sm:inline">{user.name} · {user.role}</span>
+            <span className="hidden sm:inline">{user.name} · {roleLabel(user.role)}</span>
             <form action={signOutAction}><button type="submit" className="btn btn-sm">Sign out</button></form>
           </div>
         </div>

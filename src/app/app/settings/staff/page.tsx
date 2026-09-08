@@ -1,7 +1,7 @@
 import { db } from "@/db/client";
 import { ConfirmButton } from "@/components/confirm-button";
 import { Badge, Card, Field, Flash, PageHeader } from "@/components/ui";
-import { hasRole, listStaff, requireUser } from "@/lib/auth";
+import { assignableRoles, canManage, hasRole, listStaff, requireUser, ROLE_LABEL, roleLabel } from "@/lib/auth";
 import { currentShowroom } from "@/lib/current-showroom";
 import { sp, type SearchParams } from "@/lib/flash";
 import { googleEnabled } from "@/lib/google-auth";
@@ -15,6 +15,7 @@ export default async function StaffSettingsPage({ searchParams }: { searchParams
   const q = await searchParams;
   const user = await requireUser("manager");
   const admin = hasRole(user.role, "admin");
+  const options = assignableRoles(user.role);
   const showroom = await currentShowroom(user);
   const [staff, showrooms] = await Promise.all([listStaff(), listShowrooms(db)]);
   const storeName = (id: string | null) => (id ? showrooms.find((s) => s.id === id)?.name ?? "—" : "All stores");
@@ -37,11 +38,9 @@ export default async function StaffSettingsPage({ searchParams }: { searchParams
           <form action={inviteStaffAction} className="space-y-3">
             <Field label="Work email" htmlFor="inv_email"><input id="inv_email" name="email" type="email" required className="input" placeholder={`name@${process.env.AUTH_ALLOWED_DOMAIN ?? "biktrix.com"}`} /></Field>
             <Field label="Name" htmlFor="inv_name"><input id="inv_name" name="name" className="input" placeholder="As it should appear on the timeline" /></Field>
-            <Field label="Role" htmlFor="inv_role" hint="Staff: book, receive, hand over. Manager: plus capacity, settings, extensions, delete. Admin: every store.">
+            <Field label="Role" htmlFor="inv_role" hint="Staff: book, receive, hand over. Manager: plus capacity, settings, extensions, delete. Admin: every store and manages staff. Super admin: one person above the admins.">
               <select id="inv_role" name="role" className="input" defaultValue="staff">
-                <option value="staff">Staff</option>
-                <option value="manager">Manager</option>
-                {admin && <option value="admin">Admin</option>}
+                {options.map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
               </select>
             </Field>
             <Field label="Store" htmlFor="inv_store">
@@ -63,11 +62,11 @@ export default async function StaffSettingsPage({ searchParams }: { searchParams
                     <td className="font-medium">{s.name}{s.id === user.id && <span className="ml-1 text-xs text-muted">(you)</span>}</td>
                     <td className="text-sm">{s.email}</td>
                     <td>
-                      {admin ? (
+                      {admin && s.id !== user.id && canManage(user.role, s.role) ? (
                         <form action={updateStaffAction.bind(null, s.id)} className="flex items-center gap-1">
                           <input type="hidden" name="name" value={s.name} />
-                          <select name="role" defaultValue={s.role} className="input h-8 w-auto py-0 text-sm" disabled={s.id === user.id}>
-                            <option value="staff">Staff</option><option value="manager">Manager</option><option value="admin">Admin</option>
+                          <select name="role" defaultValue={s.role} className="input h-8 w-auto py-0 text-sm">
+                            {options.map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
                           </select>
                           <select name="showroom_id" defaultValue={s.showroomId ?? ""} className="input h-8 w-auto py-0 text-sm">
                             {showrooms.map((sh) => <option key={sh.id} value={sh.id}>{sh.name}</option>)}
@@ -75,9 +74,9 @@ export default async function StaffSettingsPage({ searchParams }: { searchParams
                           </select>
                           <button type="submit" className="btn btn-sm">Save</button>
                         </form>
-                      ) : <span className="capitalize">{s.role}</span>}
+                      ) : <span>{roleLabel(s.role)}</span>}
                     </td>
-                    <td className="text-sm">{admin ? "" : storeName(s.showroomId)}</td>
+                    <td className="text-sm">{admin && s.id !== user.id && canManage(user.role, s.role) ? "" : storeName(s.showroomId)}</td>
                     <td>{s.active ? <Badge tone="ok">active</Badge> : <Badge>deactivated</Badge>}</td>
                     <td className="text-right">
                       <div className="flex justify-end gap-1">
@@ -87,12 +86,12 @@ export default async function StaffSettingsPage({ searchParams }: { searchParams
                             <button type="submit" className="btn btn-sm" title="Email a fresh sign-in link">Resend link</button>
                           </form>
                         )}
-                        {admin && s.id !== user.id && (
+                        {admin && s.id !== user.id && canManage(user.role, s.role) && (
                           s.active
                             ? <form action={setStaffActiveAction.bind(null, s.id, false)}><ConfirmButton className="btn btn-danger btn-sm" message={`Deactivate ${s.name}? They are signed out everywhere and can't sign in until re-activated.`}>Deactivate</ConfirmButton></form>
                             : <form action={setStaffActiveAction.bind(null, s.id, true)}><button type="submit" className="btn btn-sm">Re-activate</button></form>
                         )}
-                        {admin && s.id !== user.id && (
+                        {admin && s.id !== user.id && canManage(user.role, s.role) && (
                           <form action={deleteStaffAction.bind(null, s.id)}><ConfirmButton className="btn btn-danger btn-sm" message={`Delete ${s.name} (${s.email}) permanently? Deactivate instead if they might come back.`}>Delete</ConfirmButton></form>
                         )}
                       </div>

@@ -22,9 +22,9 @@ function arg(name: string, fallback?: string) {
 async function main() {
   const db = createDb(process.env.DATABASE_URL!);
   const email = arg("email")?.trim().toLowerCase();
-  if (!email) throw new Error("usage: staff:add --email <email> --name <name> --role staff|manager|admin --showroom <slug|all> [--deactivate]");
-  const role = (arg("role", "staff") as "staff" | "manager" | "admin");
-  if (!["staff", "manager", "admin"].includes(role)) throw new Error("role must be staff, manager or admin");
+  if (!email) throw new Error("usage: staff:add --email <email> --name <name> --role staff|manager|admin|owner --showroom <slug|all> [--deactivate]");
+  const role = (arg("role", "staff") as "staff" | "manager" | "admin" | "owner");
+  if (!["staff", "manager", "admin", "owner"].includes(role)) throw new Error("role must be staff, manager, admin or owner (super admin)");
   const slug = arg("showroom", "all")!;
   let showroomId: string | null = null;
   if (slug !== "all") {

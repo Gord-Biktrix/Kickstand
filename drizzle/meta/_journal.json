@@ -43,6 +43,13 @@
       "when": 1788654389190,
       "tag": "0005_flowery_scorpion",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1788888034065,
+      "tag": "0006_parallel_lucky_pierre",
+      "breakpoints": true
     }
   ]
 }

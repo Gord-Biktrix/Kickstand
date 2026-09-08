@@ -3,8 +3,8 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { db } from "@/db/client";
-import { capacityOverrides, capacityRules, orders, units } from "@/db/schema";
-import { deleteStaff, hasRole, inviteStaff, requireActor, setStaffActive, signOut, updateStaff, type Role } from "@/lib/auth";
+import { capacityOverrides, capacityRules, orders, staffUsers, units } from "@/db/schema";
+import { assignableRoles, canManage, deleteStaff, hasRole, inviteStaff, isRole, requireActor, roleLabel, setStaffActive, signOut, updateStaff } from "@/lib/auth";
 import { BOOKING_ERROR_TEXT, BookingError, bookGroup, cancelBooking, recordNoShow, rescheduleBooking } from "@/lib/booking";
 import { validateImport } from "@/lib/csv";
 import { logEvent } from "@/lib/events";
@@ -374,9 +374,11 @@ export async function inviteStaffAction(formData: FormData) {
   return run("/app/settings/staff", async () => {
     const user = await requireActor("manager");
     const showroom = await currentShowroom(user);
-    const role = (str(formData, "role") || "staff") as Role;
-    if (!["staff", "manager", "admin"].includes(role)) throw new Error("Pick a role.");
-    if (role === "admin" && !hasRole(user.role, "admin")) throw new Error("Only an admin can invite another admin.");
+    const role = str(formData, "role") || "staff";
+    if (!isRole(role)) throw new Error("Pick a role.");
+    if (!assignableRoles(user.role).includes(role)) throw new Error(`Only a ${roleLabel(role === "admin" ? "owner" : "admin").toLowerCase()} can add a ${roleLabel(role).toLowerCase()}.`);
+    const [existing] = await db.select().from(staffUsers).where(eq(staffUsers.email, str(formData, "email").trim().toLowerCase()));
+    if (existing && !canManage(user.role, existing.role)) throw new Error(`You can't change ${existing.name}'s account.`);
     const showroomId = str(formData, "showroom_id") || null;
     if (!hasRole(user.role, "admin") && showroomId !== showroom.id) throw new Error("Managers can only invite people to their own store.");
     const google = googleEnabled();
@@ -387,10 +389,18 @@ export async function inviteStaffAction(formData: FormData) {
   });
 }
 
+async function managedTarget(actorRole: string, id: string) {
+  const [target] = await db.select().from(staffUsers).where(eq(staffUsers.id, id));
+  if (!target) throw new Error("That account no longer exists.");
+  if (!canManage(actorRole, target.role)) throw new Error(`Only someone above a ${roleLabel(target.role).toLowerCase()} can change that account.`);
+  return target;
+}
+
 export async function setStaffActiveAction(id: string, active: boolean) {
   return run("/app/settings/staff", async () => {
     const user = await requireActor("admin");
     if (user.id === id && !active) throw new Error("You can't deactivate your own account.");
+    await managedTarget(user.role, id);
     await setStaffActive(id, active);
     return active ? "Account re-activated." : "Account deactivated and signed out everywhere.";
   });
@@ -400,6 +410,7 @@ export async function deleteStaffAction(id: string) {
   return run("/app/settings/staff", async () => {
     const user = await requireActor("admin");
     if (user.id === id) throw new Error("You can't delete your own account.");
+    await managedTarget(user.role, id);
     await deleteStaff(id);
     return "Account deleted.";
   });
@@ -408,9 +419,11 @@ export async function deleteStaffAction(id: string) {
 export async function updateStaffAction(id: string, formData: FormData) {
   return run("/app/settings/staff", async () => {
     const user = await requireActor("admin");
-    const role = str(formData, "role") as Role;
-    if (!["staff", "manager", "admin"].includes(role)) throw new Error("Pick a role.");
-    if (user.id === id && role !== "admin") throw new Error("You can't remove your own admin role.");
+    const role = str(formData, "role");
+    if (!isRole(role)) throw new Error("Pick a role.");
+    if (user.id === id) throw new Error("You can't change your own role or store — ask someone above you.");
+    await managedTarget(user.role, id);
+    if (!assignableRoles(user.role).includes(role)) throw new Error(`You can't make someone a ${roleLabel(role).toLowerCase()}.`);
     await updateStaff(id, { role, showroomId: str(formData, "showroom_id") || null, name: str(formData, "name") || undefined });
     return "Account updated.";
   });
@@ -652,7 +665,7 @@ export async function saveProgramSettingsAction(formData: FormData) {
         next[key] = ["min_lead_hours", "reschedule_cutoff_hours", "early_bird_hours"].includes(key) ? n : Math.round(n);
       }
     }
-    if (user.role === "admin") {
+    if (hasRole(user.role, "admin")) {
       for (const key of FLAG_KEYS) next[key] = bool(formData, key);
     }
     const parsed = settingsSchema.safeParse(next);

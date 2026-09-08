@@ -43,7 +43,7 @@ export async function seed(db: ReturnType<typeof createDb>, opts: { sampleOrders
   const adminEmail = (process.env.AUTH_ALLOWED_EMAILS ?? "gord@biktrix.com").split(",")[0].trim();
   await db
     .insert(staffUsers)
-    .values({ email: adminEmail, name: "Gordon", role: "admin", showroomId: null })
+    .values({ email: adminEmail, name: "Gordon", role: "owner", showroomId: null })
     .onConflictDoNothing();
 
   if (opts.sampleOrders) {

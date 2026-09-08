@@ -32,7 +32,7 @@ export const staffUsers = pgTable(
     active: boolean("active").notNull().default(true),
     ...timestamps,
   },
-  (t) => [check("staff_users_role_check", sql`${t.role} in ('staff','manager','admin')`)],
+  (t) => [check("staff_users_role_check", sql`${t.role} in ('staff','manager','admin','owner')`)],
 );
 
 export const magicLinks = pgTable("magic_links", {
@@ -329,4 +329,4 @@ export type Event = typeof events.$inferSelect;
 
 export type UnitStatus = Unit["status"] &
   ("received" | "invited" | "booked" | "building" | "ready" | "picked_up" | "unassigned");
-export type Role = "staff" | "manager" | "admin";
+export type Role = "staff" | "manager" | "admin" | "owner";
