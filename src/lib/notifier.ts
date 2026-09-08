@@ -74,7 +74,12 @@ export class KlaviyoNotifier implements Notifier {
 
   async send(metric: string, profile: Profile, properties: Record<string, unknown>, uniqueId: string) {
     await this.registerSmsConsent(profile);
-    const profileAttrs: Record<string, unknown> = { properties: { sms_consent: profile.smsConsent } };
+    // Klaviyo applies SMS quiet hours in the profile's time zone and falls back to the account time zone
+    // (US/Eastern) when it is unknown, which held evening Vancouver texts until the next morning. Pin it.
+    const profileAttrs: Record<string, unknown> = {
+      properties: { sms_consent: profile.smsConsent },
+      location: { timezone: "America/Vancouver" },
+    };
     if (profile.email) profileAttrs.email = profile.email;
     if (profile.phone) profileAttrs.phone_number = profile.phone;
     if (profile.name) {
