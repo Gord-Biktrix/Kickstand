@@ -91,15 +91,35 @@ export async function consumeMagicLink(token: string): Promise<string | null> {
       .where(and(eq(staffUsers.email, link.email), eq(staffUsers.active, true)))
       .limit(1);
     if (!user) return null;
-    const sessionToken = generateToken();
-    await tx.insert(staffSessions).values({
-      staffUserId: user.id,
-      tokenHash: hashToken(sessionToken),
-      expiresAt: new Date(now.getTime() + SESSION_DAYS * 86_400_000),
-    });
-    return sessionToken;
+    return createSession(tx, user.id, now);
   });
   return result;
+}
+
+async function createSession(tx: Pick<typeof db, "insert">, staffUserId: string, now = new Date()): Promise<string> {
+  const sessionToken = generateToken();
+  await tx.insert(staffSessions).values({
+    staffUserId,
+    tokenHash: hashToken(sessionToken),
+    expiresAt: new Date(now.getTime() + SESSION_DAYS * 86_400_000),
+  });
+  return sessionToken;
+}
+
+/**
+ * Sign in an already-verified identity (Google). Only an active staff row gets a session; the domain rule
+ * applies too. Returns the session token or null when the person is not on the staff list.
+ */
+export async function createSessionForEmail(rawEmail: string): Promise<string | null> {
+  const email = rawEmail.trim().toLowerCase();
+  if (!emailAllowed(email, true)) return null;
+  const [user] = await db
+    .select()
+    .from(staffUsers)
+    .where(and(eq(staffUsers.email, email), eq(staffUsers.active, true)))
+    .limit(1);
+  if (!user) return null;
+  return createSession(db, user.id);
 }
 
 export function sessionCookieOptions() {
@@ -166,7 +186,8 @@ export type StaffInvite = { email: string; name: string; role: Role; showroomId:
 export async function inviteStaff(
   invite: StaffInvite,
   by: { name: string; showroomName: string },
-): Promise<{ user: StaffUser; link: string }> {
+  opts: { sendEmail?: boolean } = {},
+): Promise<{ user: StaffUser; link: string | null }> {
   const email = invite.email.trim().toLowerCase();
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new Error("Enter a valid email address.");
   if (!emailAllowed(email, true)) throw new Error(`Only ${process.env.AUTH_ALLOWED_DOMAIN ?? "company"} addresses can be invited.`);
@@ -176,6 +197,8 @@ export async function inviteStaff(
     .values({ email, name, role: invite.role, showroomId: invite.showroomId, active: true })
     .onConflictDoUpdate({ target: staffUsers.email, set: { name, role: invite.role, showroomId: invite.showroomId, active: true } })
     .returning();
+  // With Google sign-in the person just signs in; there is nothing to email.
+  if (opts.sendEmail === false) return { user, link: null };
   const token = generateToken();
   await db.insert(magicLinks).values({ email, tokenHash: hashToken(token), expiresAt: new Date(Date.now() + INVITE_LINK_DAYS * 86_400_000) });
   const link = `${baseUrl()}/auth/verify?token=${token}`;

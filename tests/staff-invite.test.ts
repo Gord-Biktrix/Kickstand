@@ -20,7 +20,7 @@ describe("staff invitations", () => {
 
     const { user, link } = await inviteStaff({ email: "Sam@Biktrix.com", name: "Sam Lee", role: "staff", showroomId: null }, { name: "Gordon", showroomName: "Biktrix Vancouver" });
     expect(user).toMatchObject({ email: "sam@biktrix.com", name: "Sam Lee", role: "staff", active: true });
-    const token = new URL(link).searchParams.get("token")!;
+    const token = new URL(link!).searchParams.get("token")!;
     const [ml] = await db.select().from(magicLinks).where(eq(magicLinks.email, "sam@biktrix.com"));
     expect(ml.expiresAt.getTime() - Date.now()).toBeGreaterThan(6 * 86_400_000);
     const session = await consumeMagicLink(token);
@@ -32,7 +32,7 @@ describe("staff invitations", () => {
     await setStaffActive(user.id, false);
     const [row] = await db.select().from(staffUsers).where(eq(staffUsers.id, user.id));
     expect(row.active).toBe(false);
-    expect(await consumeMagicLink(new URL(again.link).searchParams.get("token")!)).toBeNull();
+    expect(await consumeMagicLink(new URL(again.link!).searchParams.get("token")!)).toBeNull();
 
     await deleteStaff(user.id);
     expect(await db.select().from(staffUsers).where(eq(staffUsers.id, user.id))).toHaveLength(0);

@@ -4,6 +4,7 @@ import { Badge, Card, Field, Flash, PageHeader } from "@/components/ui";
 import { hasRole, listStaff, requireUser } from "@/lib/auth";
 import { currentShowroom } from "@/lib/current-showroom";
 import { sp, type SearchParams } from "@/lib/flash";
+import { googleEnabled } from "@/lib/google-auth";
 import { listShowrooms } from "@/lib/showroom";
 import { deleteStaffAction, inviteStaffAction, setStaffActiveAction, updateStaffAction } from "../../actions";
 
@@ -18,15 +19,21 @@ export default async function StaffSettingsPage({ searchParams }: { searchParams
   const [staff, showrooms] = await Promise.all([listStaff(), listShowrooms(db)]);
   const storeName = (id: string | null) => (id ? showrooms.find((s) => s.id === id)?.name ?? "—" : "All stores");
   const visible = admin ? staff : staff.filter((s) => s.showroomId === showroom.id);
+  const google = googleEnabled();
   const emailKey = !!process.env.RESEND_API_KEY;
 
   return (
     <div>
-      <PageHeader title="Staff" subtitle="People sign in with a link we email them — no passwords. Invite by work email. Deactivate keeps the account but signs them out everywhere; Delete removes it." />
+      <PageHeader
+        title="Staff"
+        subtitle={google
+          ? "Add someone by work email and they sign in with their Biktrix Google account — no passwords, nothing to send. Deactivate keeps the account but signs them out everywhere; Delete removes it."
+          : "People sign in with a link we email them — no passwords. Invite by work email. Deactivate keeps the account but signs them out everywhere; Delete removes it."}
+      />
       <Flash ok={sp(q.ok)} error={sp(q.error)} />
-      {!emailKey && <div className="mb-4"><Badge tone="warn">No email key set: invitations and sign-in links are written to the server log instead of being emailed.</Badge></div>}
+      {!google && !emailKey && <div className="mb-4"><Badge tone="warn">No email key set: invitations and sign-in links are written to the server log instead of being emailed.</Badge></div>}
       <div className="grid gap-6 lg:grid-cols-[360px_1fr]">
-        <Card title="Invite someone">
+        <Card title={google ? "Add someone" : "Invite someone"}>
           <form action={inviteStaffAction} className="space-y-3">
             <Field label="Work email" htmlFor="inv_email"><input id="inv_email" name="email" type="email" required className="input" placeholder={`name@${process.env.AUTH_ALLOWED_DOMAIN ?? "biktrix.com"}`} /></Field>
             <Field label="Name" htmlFor="inv_name"><input id="inv_name" name="name" className="input" placeholder="As it should appear on the timeline" /></Field>
@@ -43,7 +50,7 @@ export default async function StaffSettingsPage({ searchParams }: { searchParams
                 {admin && <option value="">All stores (admins)</option>}
               </select>
             </Field>
-            <button type="submit" className="btn btn-primary">Send invitation</button>
+            <button type="submit" className="btn btn-primary">{google ? "Add to staff" : "Send invitation"}</button>
           </form>
         </Card>
         <Card title={`People (${visible.length})`}>
@@ -74,7 +81,7 @@ export default async function StaffSettingsPage({ searchParams }: { searchParams
                     <td>{s.active ? <Badge tone="ok">active</Badge> : <Badge>deactivated</Badge>}</td>
                     <td className="text-right">
                       <div className="flex justify-end gap-1">
-                        {s.active && (
+                        {s.active && !google && (
                           <form action={inviteStaffAction}>
                             <input type="hidden" name="email" value={s.email} /><input type="hidden" name="name" value={s.name} /><input type="hidden" name="role" value={s.role} /><input type="hidden" name="showroom_id" value={s.showroomId ?? ""} />
                             <button type="submit" className="btn btn-sm" title="Email a fresh sign-in link">Resend link</button>

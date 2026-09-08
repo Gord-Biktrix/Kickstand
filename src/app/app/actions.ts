@@ -15,6 +15,7 @@ import { getCapacityConfig, patchShowroomSettings } from "@/lib/showroom";
 import { normalizeTime } from "@/lib/time";
 import { attachUnit, bookableSiblings, collectParts, completeHandover, createOrder, deleteUnit, detachUnit, grantExtension, inviteAllReceived, inviteOrders, inviteUnit, inviteUnits, markReady, receiveUnit, resendInvite, retagUnit, startBuild, unreceiveUnit, waiveStorage } from "@/lib/units";
 import { currentShowroom } from "@/lib/current-showroom";
+import { googleEnabled } from "@/lib/google-auth";
 import { syncSpecialOrders } from "@/lib/special-orders";
 import { deleteView, saveView, syncWorkorders } from "@/lib/workorders";
 
@@ -378,7 +379,9 @@ export async function inviteStaffAction(formData: FormData) {
     if (role === "admin" && !hasRole(user.role, "admin")) throw new Error("Only an admin can invite another admin.");
     const showroomId = str(formData, "showroom_id") || null;
     if (!hasRole(user.role, "admin") && showroomId !== showroom.id) throw new Error("Managers can only invite people to their own store.");
-    const r = await inviteStaff({ email: str(formData, "email"), name: str(formData, "name"), role, showroomId }, { name: user.name, showroomName: showroom.name });
+    const google = googleEnabled();
+    const r = await inviteStaff({ email: str(formData, "email"), name: str(formData, "name"), role, showroomId }, { name: user.name, showroomName: showroom.name }, { sendEmail: !google });
+    if (google) return `${r.user.name} added — they can sign in with their Biktrix Google account now.`;
     const dev = process.env.NODE_ENV !== "production" && process.env.AUTH_DEV_SHOW_LINK === "true" ? ` Dev link: ${r.link}` : "";
     return `Invitation sent to ${r.user.email}.${process.env.RESEND_API_KEY ? "" : " (No email key is set yet — the link was written to the server log instead.)"}${dev}`;
   });
