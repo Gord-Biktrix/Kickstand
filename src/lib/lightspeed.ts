@@ -382,25 +382,36 @@ export class LightspeedClient {
    * matrix and one for the attribute-set names (cached on the client). Failures fall back to the
    * plain description so the prefill never blocks the form.
    */
-  async describeSaleLines(rows: Record<string, unknown>[]): Promise<SaleLineInfo[]> {
-    const out: SaleLineInfo[] = [];
-    for (const l of rows) {
-      const item = l.Item as Record<string, unknown> | undefined;
-      const description = String(item?.description ?? l.description ?? "").trim();
-      if (!description) continue;
-      const qty = Number(l.unitQuantity ?? 1);
-      const itemID = String(l.itemID ?? item?.itemID ?? "0");
-      let info: SaleLineInfo = { description, qty, ...splitItemDescription(description, {}) };
-      if (itemID !== "0") {
-        try {
-          info = { description, qty, ...(await this.describeItem(itemID, description)) };
-        } catch (err) {
-          logger.warn({ err: err instanceof Error ? err.message : String(err), itemID }, "lightspeed: item attributes unavailable");
-        }
-      }
-      out.push(info);
+  async describeSaleLines(rows: Record<string, unknown>[], concurrency = 6): Promise<SaleLineInfo[]> {
+    const usable = rows.filter((l) => String(((l.Item as Record<string, unknown> | undefined)?.description ?? l.description ?? "")).trim());
+    const out: SaleLineInfo[] = new Array(usable.length);
+    // Six lookups in flight at once: a 130-line store took 90 s one at a time, past Vercel's 60 s limit.
+    for (let i = 0; i < usable.length; i += concurrency) {
+      await Promise.all(
+        usable.slice(i, i + concurrency).map(async (l, j) => {
+          const item = l.Item as Record<string, unknown> | undefined;
+          const description = String(item?.description ?? l.description ?? "").trim();
+          const qty = Number(l.unitQuantity ?? 1);
+          const itemID = String(l.itemID ?? item?.itemID ?? "0");
+          let info: SaleLineInfo = { description, qty, ...splitItemDescription(description, {}) };
+          if (itemID !== "0") {
+            try {
+              info = { description, qty, ...(await this.describeItem(itemID, description)) };
+            } catch (err) {
+              logger.warn({ err: err instanceof Error ? err.message : String(err), itemID }, "lightspeed: item attributes unavailable");
+            }
+          }
+          out[i + j] = info;
+        }),
+      );
     }
     return out;
+  }
+
+  /** Model/size/colour from the description alone — no extra calls. For lines the sync already knows. */
+  static describeFromText(l: Record<string, unknown>): SaleLineInfo {
+    const description = String(((l.Item as Record<string, unknown> | undefined)?.description ?? l.description ?? "")).trim();
+    return { description, qty: Number(l.unitQuantity ?? 1), ...splitItemDescription(description, {}) };
   }
 
   private attributeSets: Promise<Map<string, string[]>> | null = null;

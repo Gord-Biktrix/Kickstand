@@ -7,7 +7,7 @@
  * parts and accessories are counted and skipped (they get their own view later). Idempotent: the line
  * id is stored on the order (orders.ls_sale_line_id) and re-runs update rather than duplicate.
  */
-import { and, eq, inArray, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { appointments, orders, units, type Order } from "@/db/schema";
 import { logEvent } from "./events";
@@ -27,7 +27,12 @@ export type SpecialOrderLine = {
   bike: SaleLineInfo;
   /** Free-text note on the Lightspeed sale line, if any. */
   note?: string | null;
+  /** false = model/size/colour came from the description only (line already known; the item lookup was skipped). */
+  described?: boolean;
 };
+
+/** What the source may skip for lines Kickstand has already imported. */
+export type LineHints = { known?: Set<string> };
 
 function lineNote(l: Record<string, unknown>): string | null {
   const n = (l.Note as Record<string, unknown> | undefined)?.note;
@@ -37,7 +42,7 @@ function lineNote(l: Record<string, unknown>): string | null {
 
 /** What the sync needs from Lightspeed — an interface so tests can feed lines without the API. */
 export interface SpecialOrderSource {
-  lines(shopID: number, since: string): Promise<SpecialOrderLine[]>;
+  lines(shopID: number, since: string, hints?: LineHints): Promise<SpecialOrderLine[]>;
   customer(customerID: string): Promise<{ name: string; email: string | null; phone: string | null }>;
 }
 
@@ -51,16 +56,21 @@ export class LightspeedSpecialOrderSource implements SpecialOrderSource {
   constructor(dbx: Db) {
     this.client = new LightspeedClient(dbx);
   }
-  async lines(shopID: number, since: string): Promise<SpecialOrderLine[]> {
+  async lines(shopID: number, since: string, hints: LineHints = {}): Promise<SpecialOrderLine[]> {
     const [rows, categories] = await Promise.all([this.client.listOpenSpecialOrderLines(shopID, since), this.client.listCategories()]);
     const usable = rows.filter((l) => String(l.itemID ?? "0") !== "0" && String(l.customerID ?? "0") !== "0" && String(l.isWorkorder) !== "true");
     const category = (l: Record<string, unknown>) => categories.get(String((l.Item as Record<string, unknown> | undefined)?.categoryID ?? "")) ?? "";
-    // Only bikes get the per-item attribute lookups (one Lightspeed call each); parts are counted and skipped.
+    // Only *new* bikes get the per-item attribute lookups (one Lightspeed call each); lines Kickstand already
+    // holds keep their stored model/size/colour, so a store with 130 open orders syncs in seconds, not minutes.
+    const known = hints.known ?? new Set<string>();
     const bikes = usable.filter((l) => isBikeCategory(category(l)));
     const parts = usable.filter((l) => !isBikeCategory(category(l)));
-    const described = await this.client.describeSaleLines(bikes);
-    // describeSaleLines drops lines without a description; realign by index on the kept rows.
-    const kept = bikes.filter((l) => String(((l.Item as Record<string, unknown> | undefined)?.description ?? l.description ?? "")).trim());
+    const hasText = (l: Record<string, unknown>) => String(((l.Item as Record<string, unknown> | undefined)?.description ?? l.description ?? "")).trim();
+    const fresh = bikes.filter((l) => hasText(l) && !known.has(String(l.saleLineID)));
+    const freshInfo = await this.client.describeSaleLines(fresh);
+    const freshByLine = new Map(fresh.map((l, i) => [String(l.saleLineID), freshInfo[i]]));
+    const kept = bikes.filter((l) => hasText(l));
+    const described = kept.map((l) => freshByLine.get(String(l.saleLineID)) ?? LightspeedClient.describeFromText(l));
     const partLines: SpecialOrderLine[] = parts.map((l) => ({
       saleLineID: String(l.saleLineID), customerID: String(l.customerID), itemID: String(l.itemID), categoryPath: category(l),
       createTime: String(l.createTime ?? ""), qty: Number(l.unitQuantity ?? 1), note: lineNote(l),
@@ -74,6 +84,7 @@ export class LightspeedSpecialOrderSource implements SpecialOrderSource {
       createTime: String(l.createTime ?? ""),
       qty: Number(l.unitQuantity ?? 1),
       note: lineNote(l),
+      described: freshByLine.has(String(l.saleLineID)),
       bike: described[i],
     })));
   }
@@ -101,14 +112,17 @@ export async function syncSpecialOrders(
   const since = new Date(now.getTime() - (args.sinceDays ?? 180) * 86_400_000).toISOString();
   const summary: SyncSummary = { seen: 0, bikes: 0, created: 0, adopted: 0, updated: 0, skippedParts: 0, errors: [] };
 
-  const lines = await source.lines(shopID, since);
+  // Lines already imported (bikes and parts) need no item or customer lookups — only their note/status matter.
+  const knownRows = await dbx.select({ id: orders.lsSaleLineId }).from(orders).where(and(eq(orders.showroomId, showroom.id), isNotNull(orders.lsSaleLineId)));
+  const known = new Set(knownRows.map((r) => r.id!));
+  const lines = await source.lines(shopID, since, { known });
   summary.seen = lines.length;
   const bikeLines = lines.filter((l) => isBikeCategory(l.categoryPath));
   summary.skippedParts = lines.length - bikeLines.length;
   summary.bikes = bikeLines.length;
   // Parts & accessories get their own orders (Parts tab) and are fulfilled when Lightspeed completes them.
   try {
-    summary.parts = await syncPartsOrders(dbx, { showroom, actor: args.actor, lines, customer: (id) => source.customer(id), now });
+    summary.parts = await syncPartsOrders(dbx, { showroom, actor: args.actor, lines, customer: (id) => source.customer(id), now, known });
   } catch (err) {
     summary.errors.push(`parts: ${err instanceof Error ? err.message : String(err)}`);
   }
@@ -128,6 +142,8 @@ export async function syncSpecialOrders(
   const norm = (v: string | null | undefined) => (v ?? "").trim().toLowerCase();
 
   // Customer lookups dominate the run time (one Lightspeed call each); fetch them in parallel, a few at a time.
+  // Every line's customer is re-read (a phone number fixed in Lightspeed must reach Kickstand); it's the
+  // per-item attribute lookups that are skipped for known lines.
   const customerIds = [...new Set(bikeLines.map((l) => l.customerID))];
   const customers = new Map<string, { name: string; email: string | null; phone: string | null }>();
   for (let i = 0; i < customerIds.length; i += 6) {
@@ -144,19 +160,18 @@ export async function syncSpecialOrders(
 
   for (const line of bikeLines) {
     try {
-      const cust = customers.get(line.customerID) ?? { name: "", email: null, phone: null };
+      let prev = byLine.get(line.saleLineID);
+      const cust = customers.get(line.customerID) ?? (prev ? { name: prev.customerName, email: prev.customerEmail, phone: prev.customerPhone } : { name: "", email: null, phone: null });
       const orderDate = line.createTime ? toLocalDate(new Date(line.createTime), showroom.timezone) : toLocalDate(now, showroom.timezone);
       const fields = {
         customerName: cust.name || `Lightspeed customer ${line.customerID}`,
         customerEmail: cust.email,
         customerPhone: cust.phone,
-        model: line.bike.model,
-        size: line.bike.size,
-        colour: line.bike.colour,
+        // A known line skipped the item lookup: its stored model/size/colour are better than a text-only guess.
+        ...(prev && line.described === false ? { model: prev.model, size: prev.size, colour: prev.colour } : { model: line.bike.model, size: line.bike.size, colour: line.bike.colour }),
         lsCustomerId: line.customerID,
         lsNote: line.note ?? null,
       };
-      let prev = byLine.get(line.saleLineID);
       if (!prev) {
         const idx = unlinked.findIndex(
           (o) =>
@@ -233,7 +248,7 @@ export async function ordersOnOrder(dbx: Db, showroom: ShowroomCtx, kind: "bike"
  */
 export async function syncPartsOrders(
   dbx: Db,
-  args: { showroom: ShowroomCtx; actor: string; lines: SpecialOrderLine[]; customer: (id: string) => Promise<{ name: string; email: string | null; phone: string | null }>; now?: Date },
+  args: { showroom: ShowroomCtx; actor: string; lines: SpecialOrderLine[]; customer: (id: string) => Promise<{ name: string; email: string | null; phone: string | null }>; now?: Date; known?: Set<string> },
 ): Promise<{ created: number; updated: number; fulfilled: number }> {
   const { showroom } = args;
   const now = args.now ?? new Date();
@@ -251,7 +266,7 @@ export async function syncPartsOrders(
   }
   for (const line of partLines) {
     const prev = byLine.get(line.saleLineID);
-    const cust = customers.get(line.customerID) ?? { name: "", email: null, phone: null };
+    const cust = customers.get(line.customerID) ?? (prev ? { name: prev.customerName, email: prev.customerEmail, phone: prev.customerPhone } : { name: "", email: null, phone: null });
     const fields = {
       customerName: cust.name || `Lightspeed customer ${line.customerID}`,
       customerEmail: cust.email,
