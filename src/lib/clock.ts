@@ -31,6 +31,12 @@ export type ClockSummary = {
 export type ClockOptions = {
   /** Tests: skip the Lightspeed special-order pull. */
   skipSpecialOrders?: boolean;
+  /**
+   * Wall-clock budget for the Lightspeed syncs, measured from the start of the run. Stores whose
+   * sync would start after the budget is spent are skipped (and logged) so the request returns a
+   * clean summary instead of being killed by the platform (Vercel Hobby: 60 s). Default 45 s.
+   */
+  syncBudgetMs?: number;
   now?: Date;
   /** Run the daily actions regardless of local hour (tests, manual replay). Dedupe still applies. */
   forceDaily?: boolean;
@@ -51,14 +57,30 @@ async function nextSaturdayRemaining(dbx: Db, showroom: ShowroomCtx, today: stri
   return `${remaining} of ${day.capacity}`;
 }
 
-/** §8 — hourly entry point. Safe to replay: every message is deduped on (unit, type, key). */
+/**
+ * §8 — the tick. Safe to replay: every message is deduped on (unit, type, key). Runs at least once a
+ * day (Vercel cron, see vercel.json) and tolerates any cadence up to hourly.
+ *
+ * Customer-facing work (daily actions, reminders) runs for every store first; the Lightspeed pulls
+ * follow, within a time budget, so a slow special-order sync at one store can never delay or lose
+ * another store's messages.
+ */
 export async function runClock(dbx: Db, opts: ClockOptions = {}): Promise<ClockSummary[]> {
   const now = opts.now ?? new Date();
+  const started = Date.now();
+  const budget = opts.syncBudgetMs ?? 45_000;
+  const showrooms = await listShowrooms(dbx);
   const summaries: ClockSummary[] = [];
-  for (const showroom of await listShowrooms(dbx)) {
-    summaries.push(await runClockForShowroom(dbx, showroom, now, opts));
-    // Pull new bike special orders from Lightspeed every tick (best-effort; the tick must not fail on it).
-    if (showroom.settings.lightspeed.shop_id && !opts.skipSpecialOrders) {
+  for (const showroom of showrooms) summaries.push(await runClockForShowroom(dbx, showroom, now, opts));
+
+  // Pull new special orders and mirror open work orders from Lightspeed (best-effort; the tick must not fail on it).
+  if (!opts.skipSpecialOrders) {
+    for (const showroom of showrooms) {
+      if (!showroom.settings.lightspeed.shop_id) continue;
+      if (Date.now() - started > budget) {
+        logger.warn({ showroom: showroom.slug, elapsedMs: Date.now() - started }, "clock: Lightspeed sync skipped — out of time this tick");
+        continue;
+      }
       try {
         await syncSpecialOrders(dbx, { showroom, actor: "clock", now });
       } catch (err) {

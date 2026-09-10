@@ -54,7 +54,7 @@ pnpm lint
 | §6.1–6.2 capacity and slots | `src/lib/capacity.ts` (pure), `src/lib/availability.ts` (two queries per range) |
 | §6.3 booking transaction | `src/lib/booking.ts` — counter row lock, `DAY_FULL` / `TIME_FULL`, cancel/reschedule/no-show |
 | §7 lifecycle | `src/lib/units.ts` — receive, invite, build, ready, handover, extension, waive, defer, release/re-tag, attach |
-| §8 clock job | `src/lib/clock.ts`, route `src/app/api/cron/clock/route.ts`, schedule in `vercel.json` (hourly) |
+| §8 clock job | `src/lib/clock.ts`, route `src/app/api/cron/clock/route.ts`, schedule in `vercel.json` (two daily Vercel crons; GitHub Actions can add hourly) |
 | §9 notifications | `src/lib/notifier.ts` (Klaviyo / console / memory), `src/lib/messages.ts` (properties, dedupe, outbox) |
 | §10.1 customer | `src/app/b/[token]/…` — landing, book, manage; no sign-in |
 | §10.2 staff | `src/app/app/…` — today, arrivals (+CSV import), build board, watchlist, unit/order detail, settings, reports |
@@ -73,7 +73,7 @@ pnpm lint
 - **No-show on an unbuilt bike** returns the unit to `invited` (so it counts as unbooked and, with the flag on, releasable); built bikes stay `ready` per R11.
 - **Rate limiting** in `proxy.ts` is per-instance memory. On Vercel, add a WAF rule or Upstash for a hard limit.
 - **Navigation** (after the 2026-09-03 UX panel): Today · Schedule · Arrivals · Build board · Watchlist · Settings, with Reports as an admin-only utility link. Capacity and Program are tabs under Settings, and the **CSV import moved from Arrivals to Settings › Import** — a deliberate deviation from §10.2, since it is a one-off migration rather than delivery-day work.
-- The hourly tick comes from **GitHub Actions** (`.github/workflows/clock.yml`, secrets `APP_BASE_URL` and `CRON_SECRET`) because Vercel's Hobby plan only allows daily crons; `vercel.json` therefore declares none. The route accepts `GET` or `POST` with `Authorization: Bearer $CRON_SECRET`. Daily actions run at or after `clock_run_hour_local` once per local date; reminders at or after `reminder_send_hour_local`, deduped per appointment. Run it by hand from the Actions tab (workflow_dispatch, optional `force`).
+- **Schedule (2026-09-09):** `vercel.json` declares two daily Vercel crons on `/api/cron/clock` — `0 15 * * *` (07:00–09:00 local across the stores: daily actions + Lightspeed syncs) and `0 1 * * *` (17:00–19:00 local: day-before reminders + Lightspeed syncs). Vercel calls the route with `Authorization: Bearer $CRON_SECRET` on its own; the Hobby plan allows exactly this (up to two crons, once a day each, start time may slip within the hour — the tick tolerates that). The GitHub Actions workflow `.github/workflows/clock.yml` (secrets `APP_BASE_URL` and `CRON_SECRET`) can still add an hourly tick on top; before 2026-09-09 it was the *only* trigger and its secrets were never set, so the clock had never run in production. The route accepts `GET` or `POST`. Daily actions run at or after `clock_run_hour_local` once per local date; reminders at or after `reminder_send_hour_local`, deduped per appointment. Each tick runs every store's daily/reminder pass first, then the Lightspeed special-order + work-order syncs per store within `syncBudgetMs` (45 s of the route's 60 s `maxDuration`); stores that miss the budget are logged and picked up next tick.
 
 ## Lightspeed bridge
 
