@@ -52,3 +52,23 @@ export async function showroomForLightspeedShop(dbx: DbOrTx, shopID: string | nu
   const all = await listShowrooms(dbx);
   return all.find((s) => s.settings.lightspeed.shop_id === n) ?? null;
 }
+
+/**
+ * Where a store switch should land. Detail pages (a bike, an order, a customer) belong to one store,
+ * so keeping the path after switching would 404; `recordInTarget` says whether the record also exists
+ * in the store being switched to. When it doesn't, fall back to that section's list page. Anything
+ * else (lists, settings, the schedule) is the same page in every store and is kept as-is.
+ */
+export function landingAfterSwitch(nextPath: string, recordInTarget: boolean): string {
+  const m = /^\/app\/(units|orders|customers)\/[^/?#]+/.exec(nextPath);
+  if (!m || recordInTarget) return nextPath;
+  return m[1] === "customers" ? "/app/search" : "/app/bikes";
+}
+
+/** The detail record a path points at, if any — used by /app/switch to check it exists in the new store. */
+export function detailTarget(nextPath: string): { kind: "unit" | "order" | "customer"; id: string } | null {
+  const m = /^\/app\/(units|orders|customers)\/([^/?#]+)/.exec(nextPath);
+  if (!m) return null;
+  const kind = m[1] === "units" ? "unit" : m[1] === "orders" ? "order" : "customer";
+  return { kind, id: decodeURIComponent(m[2]) };
+}
