@@ -370,6 +370,46 @@ export class LightspeedClient {
     return this.listAll(`SaleLine.json?${q.toString()}`, "SaleLine");
   }
 
+  /** One sale line by id, or null once Lightspeed has deleted it (404). */
+  async getSaleLine(saleLineID: string): Promise<Record<string, unknown> | null> {
+    try {
+      const res = await this.request<Record<string, unknown>>("GET", `SaleLine/${encodeURIComponent(saleLineID)}.json`);
+      return asList<Record<string, unknown>>(res, "SaleLine")[0] ?? null;
+    } catch (err) {
+      if (err instanceof LightspeedError && err.status === 404) return null;
+      throw err;
+    }
+  }
+
+  private saleCompleted = new Map<string, Promise<boolean>>();
+  /** Whether a sale has been completed at the register (cached per client — a sync asks about the same sale for every line on it). */
+  async isSaleCompleted(saleID: string): Promise<boolean> {
+    let p = this.saleCompleted.get(saleID);
+    if (!p) {
+      p = this.request<Record<string, unknown>>("GET", `Sale/${encodeURIComponent(saleID)}.json`).then(
+        (r) => String((asList<Record<string, unknown>>(r, "Sale")[0] ?? {}).completed) === "true",
+      );
+      this.saleCompleted.set(saleID, p);
+    }
+    return p;
+  }
+
+  /**
+   * Special-order lines that sit on a sale which is not completed — rung up but the sale was parked or
+   * left open at the register. Lightspeed does not list them as open special orders (saleID ≠ 0), so the
+   * sync cannot see them until the sale is completed; `since` (ISO) is on the line's timeStamp.
+   */
+  async listSpecialOrderLinesInUnfinishedSales(shopID: number, since: string, concurrency = 6): Promise<Record<string, unknown>[]> {
+    const q = new URLSearchParams({ isSpecialOrder: "true", saleID: "!=,0", shopID: String(shopID), timeStamp: `>,${since}`, limit: "100", load_relations: '["Item"]' });
+    const rows = await this.listAll(`SaleLine.json?${q.toString()}`, "SaleLine", 500);
+    const out: Record<string, unknown>[] = [];
+    for (let i = 0; i < rows.length; i += concurrency) {
+      const done = await Promise.all(rows.slice(i, i + concurrency).map((l) => this.isSaleCompleted(String(l.saleID))));
+      rows.slice(i, i + concurrency).forEach((l, j) => { if (!done[j]) out.push(l); });
+    }
+    return out;
+  }
+
   /** categoryID → full path ("Bikes/Juggernauts/Ultra FS"). */
   async listCategories(): Promise<Map<string, string>> {
     const rows = await this.listAll("Category.json?limit=100", "Category");

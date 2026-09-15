@@ -353,10 +353,23 @@ export async function syncSpecialOrdersAction(returnTo: string) {
   return run(safeReturn(returnTo, "/app/bikes"), async () => {
     const user = await requireActor("staff");
     const showroom = await currentShowroom(user);
-    const r = await syncSpecialOrders(db, { showroom, actor: user.id });
+    const r = await syncSpecialOrders(db, { showroom, actor: user.id, explain: true });
     const tail = r.errors.length ? ` · ${r.errors.length} skipped (see logs)` : "";
     const parts = r.parts ? ` · parts & accessories: ${r.parts.created} new, ${r.parts.fulfilled} fulfilled in Lightspeed` : "";
-    return `Lightspeed sync: ${r.bikes} bike special order${r.bikes === 1 ? "" : "s"} open — ${r.created} new${r.adopted ? `, ${r.adopted} matched to existing orders` : ""}, ${r.updated} updated${parts}${tail}.`;
+    const rec = r.reconciled;
+    const closed = [
+      rec.fulfilled ? `${rec.fulfilled} sold in Lightspeed → fulfilled` : "",
+      rec.cancelled ? `${rec.cancelled} deleted in Lightspeed → cancelled` : "",
+      rec.reopened ? `${rec.reopened} back on order` : "",
+    ].filter(Boolean);
+    const closedText = closed.length ? ` · ${closed.join(", ")}` : "";
+    const list = (xs: string[], max = 3) => `${xs.slice(0, max).join("; ")}${xs.length > max ? `; +${xs.length - max} more` : ""}`;
+    // The usual answer to "why isn't this bike here?": the sale is still open at the register.
+    const unfinished = r.unfinished?.length
+      ? ` · ${r.unfinished.length} still in an unfinished Lightspeed sale, so not a special order yet (${list(r.unfinished)}) — complete the sale, then sync again`
+      : "";
+    const attention = r.attention.length ? ` · needs a look: ${list(r.attention)}` : "";
+    return `Lightspeed sync: ${r.bikes} bike special order${r.bikes === 1 ? "" : "s"} open — ${r.created} new${r.adopted ? `, ${r.adopted} matched to existing orders` : ""}, ${r.updated} updated${parts}${closedText}${unfinished}${attention}${tail}.`;
   });
 }
 

@@ -6,7 +6,7 @@ import { getAvailability } from "@/lib/availability";
 import { bookSlot } from "@/lib/booking";
 import { MemoryNotifier, setNotifier } from "@/lib/notifier";
 import { patchShowroomSettings, type ShowroomCtx } from "@/lib/showroom";
-import { ordersOnOrder, syncSpecialOrders, type SpecialOrderLine, type SpecialOrderSource } from "@/lib/special-orders";
+import { ordersOnOrder, syncSpecialOrders, type LineState, type SpecialOrderLine, type SpecialOrderSource } from "@/lib/special-orders";
 import { localToUtc } from "@/lib/time";
 import { collectParts, inviteOrders } from "@/lib/units";
 import { resetDb, testDb, TZ } from "./helpers";
@@ -21,6 +21,9 @@ class Fake implements SpecialOrderSource {
   constructor(public rows: SpecialOrderLine[]) {}
   async lines() { return this.rows; }
   async customer() { return { name: "Basket Buyer", email: "b@x.ca", phone: "+16045550300" }; }
+  /** A line that left the list was completed onto a paid sale unless a test says otherwise. */
+  states: Record<string, LineState> = {};
+  async lineState(id: string): Promise<LineState> { return this.states[id] ?? "sold"; }
 }
 
 let db: Db;

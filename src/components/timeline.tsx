@@ -18,6 +18,14 @@ function describe(e: Event): string {
       return `No-show #${p.no_show_count}${p.reason === "late_change" ? " (late change)" : ""}`;
     case "booking_cancelled":
       return `Cancelled (${p.reason})`;
+    case "fulfilled_in_lightspeed":
+      return "Special order completed on a Lightspeed sale — nothing left to hand over here";
+    case "cancelled_in_lightspeed":
+      return "Special order deleted in Lightspeed";
+    case "lightspeed_line_deleted":
+      return `Special order deleted in Lightspeed but ${(p.boxes as string[] | undefined)?.length === 1 ? "a box is" : "boxes are"} already here — check with the customer, then cancel or keep by hand`;
+    case "order_reopened":
+      return p.source === "lightspeed_special_order" ? `Back on Lightspeed's open special orders (was ${p.from})` : `Reopened (was ${p.from})`;
     case "settings_changed":
       return `Settings: ${Object.keys((p.changes as Record<string, unknown>) ?? {}).join(", ")}`;
     default:
