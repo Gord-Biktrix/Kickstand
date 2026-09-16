@@ -7,7 +7,7 @@ import { bookGroup, bookSlot, cancelBooking, recordNoShow, rescheduleBooking } f
 import { MemoryNotifier, setNotifier } from "@/lib/notifier";
 import type { ShowroomCtx } from "@/lib/showroom";
 import { localToUtc } from "@/lib/time";
-import { inviteUnit, inviteUnits } from "@/lib/units";
+import { futureVisitFor, inviteUnit, inviteUnits, joinVisit } from "@/lib/units";
 import { makeOrder, makeUnit, resetDb, testDb, TZ } from "./helpers";
 
 let db: Db;
@@ -134,5 +134,64 @@ describe("one visit, several bikes", () => {
     expect(notifier.sent.map((m) => m.metric)).toEqual(["Pickup: Bike Arrived"]);
     expect(notifier.sent[0].properties.joined_existing_pickup).toBe(true);
     expect(notifier.sent[0].properties.slot_start_local).toContain("12 September");
+  });
+});
+
+describe("joining a pickup the customer already has (staff: Add to that pickup)", () => {
+  const SAT13 = localToUtc("2026-09-12", "12:30", TZ); // second 45-minute slot
+
+  it("a received box is invited silently and booked into the visit; one text says it joined", async () => {
+    const { o1, o2, u1, u2 } = await twoBikes();
+    await inviteUnit(db, { showroom, unitId: u1.id, actor: "s", now: NOW });
+    await bookSlot(db, { showroom, unitId: u1.id, startsAt: SAT, createdBy: "customer", now: NOW });
+    expect(await futureVisitFor(db, showroom, o1, NOW, { excludeUnitId: u1.id })).toBeNull(); // their own booking doesn't count
+    const visit = (await futureVisitFor(db, showroom, o2, NOW, { excludeUnitId: u2.id }))!;
+    expect(visit.unitId).toBe(u1.id);
+    notifier.sent = [];
+    const r = await joinVisit(db, { showroom, unitId: u2.id, visit, actor: "staff", now: NOW, notify: true });
+    expect(r.appointment.startsAt.getTime()).toBe(SAT.getTime());
+    expect(r.appointment.groupId).toBeTruthy();
+    expect((await booked(u1.id))!.groupId).toBe(r.appointment.groupId);
+    expect(r.unit.status).toBe("booked");
+    expect(await counter("2026-09-12")).toBe(2);
+    expect(notifier.sent.map((m) => m.metric)).toEqual(["Pickup: Bike Arrived"]);
+    expect(notifier.sent[0].properties.joined_existing_pickup).toBe(true);
+    expect(notifier.sent[0].properties.bikes).toEqual([`${u2.model} · ${u2.colour} · ${u2.size}`]);
+  });
+
+  it("notify off → nothing is sent; a bike booked on its own is moved into the visit", async () => {
+    const { u1, u2, o2 } = await twoBikes();
+    await inviteUnit(db, { showroom, unitId: u1.id, actor: "s", now: NOW });
+    await inviteUnit(db, { showroom, unitId: u2.id, actor: "s", now: NOW });
+    await bookSlot(db, { showroom, unitId: u1.id, startsAt: SAT, createdBy: "customer", now: NOW });
+    await bookSlot(db, { showroom, unitId: u2.id, startsAt: SAT13, createdBy: "customer", now: NOW });
+    const old = (await booked(u2.id))!;
+    const visit = (await futureVisitFor(db, showroom, o2, NOW, { excludeUnitId: u2.id }))!;
+    notifier.sent = [];
+    const r = await joinVisit(db, { showroom, unitId: u2.id, visit, actor: "staff", now: NOW, notify: false });
+    expect(notifier.sent).toEqual([]);
+    expect(r.appointment.startsAt.getTime()).toBe(SAT.getTime());
+    expect(r.appointment.groupId).toBe((await booked(u1.id))!.groupId);
+    const [replaced] = await db.select().from(appointments).where(eq(appointments.id, old.id));
+    expect(replaced.status).toBe("cancelled");
+    expect(replaced.replacedBy).toBe(r.appointment.id);
+    expect(await counter("2026-09-12")).toBe(2); // moved, not added
+    expect((await db.select().from(units).where(eq(units.id, u2.id)))[0].noShowCount).toBe(0);
+  });
+
+  it("refuses to pull one bike out of a multi-bike visit, and to join the visit it is already in", async () => {
+    const { o1, u1, u2 } = await twoBikes();
+    const o3 = await makeOrder(db, showroom, { orderRef: "SO3", customerName: "Pat Benell", customerPhone: "+16045550100", lsCustomerId: "77", model: "Swift" });
+    const u3 = await makeUnit(db, showroom, o3.id, { boxTag: "SO3" });
+    for (const u of [u1, u2, u3]) await inviteUnit(db, { showroom, unitId: u.id, actor: "s", now: NOW });
+    await bookGroup(db, { showroom, unitIds: [u2.id, u3.id], startsAt: SAT13, createdBy: "customer", now: NOW });
+    await bookSlot(db, { showroom, unitId: u1.id, startsAt: SAT, createdBy: "customer", now: NOW });
+    const solo = (await booked(u1.id))!;
+    await expect(joinVisit(db, { showroom, unitId: u2.id, visit: solo, actor: "staff", now: NOW, notify: false })).rejects.toThrow(/already in a visit with other bikes/);
+    const pair = (await booked(u2.id))!;
+    await expect(joinVisit(db, { showroom, unitId: u3.id, visit: pair, actor: "staff", now: NOW, notify: false })).rejects.toThrow(/already in that visit/);
+    const theirs = (await futureVisitFor(db, showroom, o1, NOW, { excludeUnitId: u1.id }))!;
+    expect([u2.id, u3.id]).toContain(theirs.unitId); // the pair's visit, whichever bike sorts first
+    expect(theirs.startsAt.getTime()).toBe(SAT13.getTime());
   });
 });

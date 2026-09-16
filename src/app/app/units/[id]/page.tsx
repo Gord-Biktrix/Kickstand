@@ -24,6 +24,7 @@ import {
   deleteUnitAction,
   grantExtensionAction,
   inviteUnitAction,
+  staffBookReceivedAction,
   markReadyAction,
   recordNoShowAction,
   resendInviteAction,
@@ -185,6 +186,9 @@ export default async function UnitPage({ params, searchParams }: { params: Promi
             <div className="flex flex-wrap items-start gap-2">
               {unit.status === "received" && (
                 <form action={inviteUnitAction.bind(null, unit.id, RETURN)}><button type="submit" className="btn btn-primary" disabled={!order?.customerEmail && !order?.customerPhone}>Send invite</button></form>
+              )}
+              {unit.status === "received" && (
+                <form action={staffBookReceivedAction.bind(null, unit.id)}><button type="submit" className="btn" title="No invite text — the customer's link is minted silently and you pick the time">Book for customer</button></form>
               )}
               {["invited", "building", "ready"].includes(unit.status) && <Link href={`/app/book?unit=${unit.id}`} className="btn btn-primary">Book for customer</Link>}
               {unit.kind === "parts" && unit.status !== "received" && <form action={collectPartsAction.bind(null, unit.id, RETURN)}><button type="submit" className="btn">Collected</button></form>}

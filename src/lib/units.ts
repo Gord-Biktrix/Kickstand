@@ -3,7 +3,7 @@ import { and, asc, eq, gt, inArray, notExists, sql } from "drizzle-orm";
 import type { Db, Tx } from "@/db/client";
 import { appointments, events, orders, units, type Appointment, type NewOrder, type Order, type StaffUser, type Unit } from "@/db/schema";
 import { hasRole } from "./roles";
-import { bookSlot, cancelBookingTx, decrementCounter } from "./booking";
+import { bookSlotTx, cancelBookingTx, decrementCounter, groupUnitIds } from "./booking";
 import { buildDeadline } from "./build-schedule";
 import { customerKey, customerOrders, groupOrders } from "./customers";
 import { logEvent } from "./events";
@@ -290,36 +290,15 @@ export async function inviteUnits(
     for (const unit of ready) {
       try {
         if (visit && joinable) {
-          await inviteUnit(dbx, { showroom, unitId: unit.id, actor: args.actor, now, silent: true });
           try {
-            await bookSlot(dbx, {
-              showroom,
-              unitId: unit.id,
-              startsAt: visit.startsAt,
-              createdBy: args.actor,
-              now,
-              allowShortNotice: true,
-              groupId: await ensureGroup(dbx, visit),
-              silent: true,
-            });
+            await joinVisit(dbx, { showroom, unitId: unit.id, visit, actor: args.actor, now, notify: !announced, extra: summary, dedupeKey: `joined:${visit.id}:${now.toISOString()}` });
+            announced = true;
             result.joined++;
-            if (!announced) {
-              announced = true;
-              const [fresh] = await dbx.select().from(units).where(eq(units.id, unit.id));
-              await sendUnitMessage(dbx, {
-                showroom,
-                unit: fresh,
-                order: primaryOrder,
-                metric: METRIC.bikeArrived,
-                dedupeKey: `joined:${visit.id}:${now.toISOString()}`,
-                actor: args.actor,
-                extra: { ...summary, joined_existing_pickup: true, slot_start_local: formatDateTime(visit.startsAt, showroom.timezone) },
-              });
-            }
             continue;
           } catch {
             // Could not join (day full, slot passed …): the bike is invited on its own below and the customer picks a time.
-            const [fresh] = await dbx.select().from(units).where(eq(units.id, unit.id));
+            let [fresh] = await dbx.select().from(units).where(eq(units.id, unit.id));
+            if (fresh.status === "received") fresh = (await inviteUnit(dbx, { showroom, unitId: unit.id, actor: args.actor, now, silent: true })).unit;
             await sendUnitMessage(dbx, { showroom, unit: fresh, order: primaryOrder, metric: METRIC.bikeArrived, dedupeKey: `invite:${unit.id}`, actor: args.actor, extra: summary });
             result.invited++;
             continue;
@@ -336,22 +315,30 @@ export async function inviteUnits(
   return result;
 }
 
-/** The customer's next booked appointment (any of their bikes), or null. */
-async function futureVisitFor(dbx: Db, showroom: ShowroomCtx, order: Order, now: Date): Promise<Appointment | null> {
+/** The customer's next booked appointment (any of their bikes, optionally not this one), or null. */
+export async function futureVisitFor(dbx: Db, showroom: ShowroomCtx, order: Order, now: Date, opts: { excludeUnitId?: string } = {}): Promise<Appointment | null> {
   const theirs = await customerOrders(dbx, showroom, customerKey(order));
   if (theirs.length === 0) return null;
   const [a] = await dbx
     .select({ appointment: appointments })
     .from(appointments)
     .innerJoin(units, eq(units.id, appointments.unitId))
-    .where(and(eq(appointments.showroomId, showroom.id), eq(appointments.status, "booked"), inArray(units.orderId, theirs.map((o) => o.id)), gt(appointments.startsAt, now)))
+    .where(
+      and(
+        eq(appointments.showroomId, showroom.id),
+        eq(appointments.status, "booked"),
+        inArray(units.orderId, theirs.map((o) => o.id)),
+        gt(appointments.startsAt, now),
+        opts.excludeUnitId ? sql`${appointments.unitId} <> ${opts.excludeUnitId}` : undefined,
+      ),
+    )
     .orderBy(asc(appointments.startsAt))
     .limit(1);
   return a?.appointment ?? null;
 }
 
 /** Can one more bike be built for this visit? Its build deadline must still be at least min_lead_hours away. */
-async function canJoinVisit(dbx: Db, showroom: ShowroomCtx, visit: Appointment, now: Date): Promise<boolean> {
+export async function canJoinVisit(dbx: Db, showroom: ShowroomCtx, visit: Appointment, now: Date): Promise<boolean> {
   const { rules, overrides } = await getCapacityConfig(dbx, showroom.id);
   const deadline = buildDeadline(showroom, visit, rules, overrides);
   const due = deadline.at ?? visit.startsAt;
@@ -365,6 +352,56 @@ async function ensureGroup(dbx: Db, visit: Appointment): Promise<string> {
   await dbx.update(appointments).set({ groupId }).where(eq(appointments.id, visit.id));
   visit.groupId = groupId;
   return groupId;
+}
+
+/**
+ * Add a bike to a pickup the customer already has booked (README "One visit, several bikes"). Used by
+ * `inviteUnits` when a new arrival can join, and by staff from the slot picker ("Add to that pickup").
+ * A box not yet invited is invited silently first; a bike booked on its own is moved into the visit
+ * (its old appointment cancelled silently, never counted against the customer). Capacity and the
+ * same-time rule apply as for any booking; staff may join inside the notice window. `notify` texts
+ * the customer that the bike has joined their pickup (Bike Arrived with `joined_existing_pickup`).
+ */
+export async function joinVisit(
+  dbx: Db,
+  args: { showroom: ShowroomCtx; unitId: string; visit: Appointment; actor: string; now?: Date; notify: boolean; extra?: Record<string, unknown>; dedupeKey?: string },
+): Promise<{ appointment: Appointment; unit: Unit; order: Order | null }> {
+  const { showroom, visit, actor } = args;
+  const now = args.now ?? new Date();
+  if (visit.status !== "booked" || visit.startsAt.getTime() <= now.getTime()) throw new UnitError("That pickup is no longer booked");
+  const [current] = await dbx.select().from(units).where(and(eq(units.id, args.unitId), eq(units.showroomId, showroom.id)));
+  if (!current) throw new UnitError("Unit not found");
+  if (current.status === "received") await inviteUnit(dbx, { showroom, unitId: current.id, actor, now, silent: true });
+  const groupId = await ensureGroup(dbx, visit);
+  const booked = await withOutbox(dbx, async (tx, outbox) => {
+    const [active] = await tx.select().from(appointments).where(and(eq(appointments.unitId, current.id), eq(appointments.status, "booked"))).limit(1);
+    const slot = { showroom, unitId: current.id, startsAt: visit.startsAt, createdBy: actor, now, allowShortNotice: true, groupId, silent: true };
+    if (!active) return bookSlotTx(tx, outbox, slot);
+    if (active.id === visit.id || active.groupId === groupId) throw new UnitError("This bike is already in that visit");
+    if ((await groupUnitIds(tx, active)).length > 1) throw new UnitError("This bike is already in a visit with other bikes — reschedule that visit instead");
+    const cancelled = await cancelBookingTx(tx, outbox, { showroom, unitId: current.id, reason: "staff", actor, now, silent: true, _rescheduling: true });
+    const b = await bookSlotTx(tx, outbox, { ...slot, replacingAppointmentId: cancelled.appointment.id });
+    await tx.update(appointments).set({ replacedBy: b.appointment.id }).where(eq(appointments.id, cancelled.appointment.id));
+    return b;
+  });
+  if (args.notify && booked.order) {
+    await sendUnitMessage(dbx, {
+      showroom,
+      unit: booked.unit,
+      order: booked.order,
+      metric: METRIC.bikeArrived,
+      dedupeKey: args.dedupeKey ?? `joined:${visit.id}:${booked.appointment.id}`,
+      actor,
+      extra: {
+        bike_count: 1,
+        bikes: [[booked.unit.model, booked.unit.colour, booked.unit.size].filter(Boolean).join(" · ")],
+        ...(args.extra ?? {}),
+        joined_existing_pickup: true,
+        slot_start_local: formatDateTime(visit.startsAt, showroom.timezone),
+      },
+    });
+  }
+  return booked;
 }
 
 export async function inviteAllReceived(

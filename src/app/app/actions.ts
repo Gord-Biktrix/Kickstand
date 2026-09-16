@@ -13,9 +13,9 @@ import { bool, dollarsToCents, errorMessage, num, str, withFlash } from "@/lib/f
 import { normalizePhone } from "@/lib/phone";
 import { FLAG_KEYS, PROGRAM_KEYS, settingsSchema, validateSettings, type ProgramSettings } from "@/lib/settings";
 import { getCapacityConfig, patchShowroomSettings } from "@/lib/showroom";
-import { normalizeTime } from "@/lib/time";
+import { formatDateTime, normalizeTime } from "@/lib/time";
 import { hashToken } from "@/lib/tokens";
-import { attachUnit, bookableSiblings, collectParts, completeHandover, createOrder, deleteUnit, detachUnit, grantExtension, inviteAllReceived, inviteOrders, inviteUnit, inviteUnits, markReady, receiveUnit, resendInvite, retagUnit, startBuild, unreceiveUnit, waiveStorage } from "@/lib/units";
+import { attachUnit, bookableSiblings, collectParts, completeHandover, createOrder, deleteUnit, detachUnit, futureVisitFor, grantExtension, inviteAllReceived, inviteOrders, inviteUnit, inviteUnits, joinVisit, markReady, receiveUnit, resendInvite, retagUnit, startBuild, unreceiveUnit, waiveStorage } from "@/lib/units";
 import { currentShowroom } from "@/lib/current-showroom";
 import { createShowroom, importShowroomsFromLightspeed, setLightspeedLink, updateShowroomDetails } from "@/lib/showroom-admin";
 import { LightspeedClient } from "@/lib/lightspeed";
@@ -654,6 +654,46 @@ export async function bulkBikesAction(returnTo: string, formData: FormData) {
     }
     return `${verb}: ${done}${tail}`;
   });
+}
+
+/** Bike page → Book for customer on a box that hasn't been invited: the link is minted silently (no
+ *  Bike Arrived text), then the slot picker — the same path the Lightspeed button takes. */
+export async function staffBookReceivedAction(unitId: string) {
+  let error: string | null = null;
+  try {
+    const user = await requireActor("staff");
+    const showroom = await currentShowroom();
+    await inviteUnit(db, { showroom, unitId, actor: user.id, silent: true });
+  } catch (err) {
+    error = errorMessage(err);
+  }
+  if (error) redirect(withFlash(`/app/units/${unitId}`, { error }));
+  redirect(`/app/book?unit=${unitId}`);
+}
+
+/** Slot picker → "Add to that pickup": the bike joins the visit the customer already has booked. */
+export async function joinVisitAction(unitId: string, formData: FormData) {
+  const appointmentId = str(formData, "appointment_id");
+  const notify = bool(formData, "notify");
+  const back = `/app/book?unit=${unitId}`;
+  let ok: string | null = null;
+  let error: string | null = null;
+  try {
+    const user = await requireActor("staff");
+    const showroom = await currentShowroom();
+    const [unit] = await db.select().from(units).where(and(eq(units.id, unitId), eq(units.showroomId, showroom.id)));
+    const [order] = unit?.orderId ? await db.select().from(orders).where(eq(orders.id, unit.orderId)) : [];
+    if (!unit || !order) throw new Error("Unit not found");
+    // Only the visit the page offered: the customer's own next pickup, re-read now in case it moved.
+    const visit = await futureVisitFor(db, showroom, order, new Date(), { excludeUnitId: unitId });
+    if (!visit || visit.id !== appointmentId) throw new Error("That pickup has changed since the page loaded — check the booking and try again.");
+    const r = await joinVisit(db, { showroom, unitId, visit, actor: user.id, notify });
+    ok = `Added to the pickup on ${formatDateTime(r.appointment.startsAt, showroom.timezone)}. ${notify ? "The customer has been texted." : "No message was sent."}`;
+  } catch (err) {
+    error = err instanceof BookingError ? BOOKING_ERROR_TEXT[err.code] : errorMessage(err);
+  }
+  if (error || !ok) redirect(withFlash(back, { error: error ?? "Could not add the bike" }));
+  redirect(withFlash(`/app/units/${unitId}`, { ok }));
 }
 
 /** Staff moves an existing booking to a new slot (customer-requested; the late-change rule applies). */

@@ -7,8 +7,8 @@ import { StatusBadge } from "@/components/status-badge";
 import { Alert, Card, Field, Flash, PageHeader } from "@/components/ui";
 import { requireUser } from "@/lib/auth";
 import { getAvailability } from "@/lib/availability";
-import { groupUnitIds } from "@/lib/booking";
-import { bookableSiblings } from "@/lib/units";
+import { describeUnits, groupUnitIds } from "@/lib/booking";
+import { bookableSiblings, canJoinVisit, futureVisitFor } from "@/lib/units";
 import type { DaySummary } from "@/lib/capacity";
 import { sp, type SearchParams } from "@/lib/flash";
 import { formatMoney } from "@/lib/format";
@@ -17,7 +17,7 @@ import { getConnection, LightspeedClient, type SaleLineInfo } from "@/lib/lights
 import { logger } from "@/lib/logger";
 import { getUnitView } from "@/lib/queries";
 import { formatLongDateFromLocal, formatShortDateFromLocal, formatTime, toLocalDate } from "@/lib/time";
-import { staffBookAction, staffPrepareUnitAction, staffRescheduleAction } from "../actions";
+import { joinVisitAction, staffBookAction, staffPrepareUnitAction, staffRescheduleAction } from "../actions";
 import { currentShowroom, showroomForLightspeedShop } from "@/lib/current-showroom";
 import { listShowrooms } from "@/lib/showroom";
 
@@ -52,6 +52,14 @@ export default async function StaffBookPage({ searchParams }: { searchParams: Pr
     if (!view) return <div><PageHeader title="Book pickup" />{flash}<Alert tone="danger">Unit not found.</Alert></div>;
     const { unit, order, appointment } = view;
     const reschedule = sp(q.reschedule) === "1" && !!appointment;
+    // The customer's other pickup, if they have one: the usual answer to "their second bike came in".
+    const otherVisit = order && ["received", "invited", "booked", "building", "ready"].includes(unit.status) ? await futureVisitFor(db, showroom, order, now, { excludeUnitId: unit.id }) : null;
+    const joinOffer =
+      otherVisit && (!appointment?.groupId || appointment.groupId !== otherVisit.groupId) ? (
+        <JoinVisitOffer unitId={unit.id} customerName={order!.customerName} visit={otherVisit} moving={!!appointment} tz={tz}
+          bikes={(await describeUnits(db, await groupUnitIds(db, otherVisit))).bikes}
+          shortNotice={unit.kind !== "parts" && !(await canJoinVisit(db, showroom, otherVisit, now))} minLeadHours={showroom.settings.min_lead_hours} />
+      ) : null;
     if (appointment && !reschedule) {
       return (
         <div>
@@ -60,6 +68,7 @@ export default async function StaffBookPage({ searchParams }: { searchParams: Pr
           <Alert tone="ok">Already booked for {formatLongDateFromLocal(appointment.onDate)} at {formatTime(appointment.startsAt, tz)}.{" "}
             <Link className="underline" href={`/app/book?unit=${unit.id}&reschedule=1`}>Reschedule</Link> · <Link className="underline" href={`/app/units/${unit.id}`}>Open the bike</Link>
           </Alert>
+          {joinOffer && <div className="mt-4">{joinOffer}</div>}
         </div>
       );
     }
@@ -91,6 +100,7 @@ export default async function StaffBookPage({ searchParams }: { searchParams: Pr
             {appointment.startsAt.getTime() - now.getTime() < showroom.settings.reschedule_cutoff_hours * 3600_000 && <> The slot is inside the {showroom.settings.reschedule_cutoff_hours}-hour cutoff, so moving it counts as a missed pickup.</>}
           </Alert>
         )}
+        {joinOffer && <div className="mb-6">{joinOffer}</div>}
         <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
           <Card title={slot ? "Confirm" : selected ? formatLongDateFromLocal(selected.date) : "Pick a day"}>
             {slot ? (
@@ -332,5 +342,31 @@ export default async function StaffBookPage({ searchParams }: { searchParams: Pr
         </Card>
       </div>
     </div>
+  );
+}
+
+/** "Their other bike is booked for Saturday — add this one to that visit" (README "One visit, several bikes"). */
+function JoinVisitOffer({ unitId, customerName, visit, bikes, moving, shortNotice, minLeadHours, tz }: {
+  unitId: string; customerName: string; visit: { id: string; onDate: string; startsAt: Date }; bikes: string[]; moving: boolean; shortNotice: boolean; minLeadHours: number; tz: string;
+}) {
+  return (
+    <Card title="Collect with their other pickup">
+      <p className="text-sm">
+        {customerName} already has a pickup booked for <span className="font-medium">{formatLongDateFromLocal(visit.onDate)} at {formatTime(visit.startsAt, tz)}</span>
+        {bikes.length > 0 && <> — {bikes.join(", ")}</>}. {moving ? "Move this bike into that visit" : "Add this bike to that visit"} so everything is built for the same time, or pick a separate time below.
+      </p>
+      <form action={joinVisitAction.bind(null, unitId)} className="mt-3 space-y-3">
+        <input type="hidden" name="appointment_id" value={visit.id} />
+        {shortNotice && <Alert tone="warn">Inside the {minLeadHours}-hour notice window for the build — make sure this bike can be built in time.</Alert>}
+        <label className="flex items-start gap-3 text-sm">
+          <input type="checkbox" name="notify" defaultChecked className="mt-1 h-4 w-4" />
+          <span>Text the customer that this bike has been added to that pickup.</span>
+        </label>
+        <div className="flex flex-wrap items-center gap-3">
+          <button type="submit" className="btn btn-primary">{moving ? "Move into that pickup" : "Add to that pickup"}</button>
+          <span className="text-xs text-muted">Each bike still counts against the day&apos;s capacity.</span>
+        </div>
+      </form>
+    </Card>
   );
 }
