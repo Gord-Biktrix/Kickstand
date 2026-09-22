@@ -7,8 +7,9 @@ import { BookingError, bookSlot, cancelBooking, recordNoShow, rescheduleBooking 
 import { MemoryNotifier, setNotifier } from "@/lib/notifier";
 import type { ShowroomCtx } from "@/lib/showroom";
 import { localToUtc } from "@/lib/time";
+import { createShowroom } from "@/lib/showroom-admin";
 import { completeHandover, detachUnit, grantExtension, HANDOVER_CHECKLIST, inviteUnit, receiveUnit, retagUnit } from "@/lib/units";
-import { makeOrder, makeUnit, resetDb, testDb, TZ, withSettings } from "./helpers";
+import { makeOrder, makeUnit, resetDb, testDb, TZ, van, withSettings } from "./helpers";
 
 let db: Db;
 let showroom: ShowroomCtx;
@@ -58,6 +59,13 @@ describe("invite (R7)", () => {
 });
 
 describe("booking transaction (§6.3)", () => {
+  it("refuses to book a bike into another store's calendar", async () => {
+    const { unit } = await invitedUnit();
+    const calgary = await createShowroom(db, { slug: "calgary", name: "Biktrix Calgary", timezone: "America/Edmonton", addressLine: "", phone: null, copyCapacityFrom: showroom.slug });
+    await expect(bookSlot(db, { showroom: calgary, unitId: unit.id, startsAt: van("2026-09-03", "13:00"), createdBy: "staff-1", now: NOW })).rejects.toMatchObject({ code: "WRONG_STORE" });
+    expect(await db.select().from(appointments)).toHaveLength(0);
+  });
+
   it("books a valid slot, moves the unit to booked and sends Booked", async () => {
     const { unit } = await invitedUnit();
     const startsAt = localToUtc("2026-09-08", "12:00", TZ);

@@ -51,6 +51,13 @@ export default async function StaffBookPage({ searchParams }: { searchParams: Pr
     const view = await getUnitView(db, unitParam);
     if (!view) return <div><PageHeader title="Book pickup" />{flash}<Alert tone="danger">Unit not found.</Alert></div>;
     const { unit, order, appointment } = view;
+    // Book in the bike's own store (its calendar and capacity), not whichever store the header is on.
+    if (unit.showroomId !== showroom.id) {
+      const home = (await listShowrooms(db)).find((s) => s.id === unit.showroomId);
+      const here = new URLSearchParams();
+      for (const [k, v] of Object.entries(q)) { const val = sp(v); if (val) here.set(k, val); }
+      if (home) redirect(`/app/switch?showroom=${encodeURIComponent(home.slug)}&next=${encodeURIComponent(`/app/book?${here.toString()}`)}`);
+    }
     const reschedule = sp(q.reschedule) === "1" && !!appointment;
     // The customer's other pickup, if they have one: the usual answer to "their second bike came in".
     const otherVisit = order && ["received", "invited", "booked", "building", "ready"].includes(unit.status) ? await futureVisitFor(db, showroom, order, now, { excludeUnitId: unit.id }) : null;

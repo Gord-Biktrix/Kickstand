@@ -29,7 +29,8 @@ export type BookingErrorCode =
   | "ALREADY_BOOKED"
   | "NOT_BOOKABLE"
   | "NO_APPOINTMENT"
-  | "SLOT_NOT_PASSED";
+  | "SLOT_NOT_PASSED"
+  | "WRONG_STORE";
 
 export class BookingError extends Error {
   constructor(
@@ -52,6 +53,7 @@ export const BOOKING_ERROR_TEXT: Record<BookingErrorCode, string> = {
   NOT_BOOKABLE: "This bike can't be booked right now. Please call the showroom.",
   NO_APPOINTMENT: "There is no booked pickup to change.",
   SLOT_NOT_PASSED: "You can only record a no-show after the slot start time.",
+  WRONG_STORE: "This bike belongs to another store. Switch to its store and book it there.",
 };
 
 async function loadUnitForUpdate(tx: Tx, unitId: string): Promise<{ unit: Unit; order: Order | null }> {
@@ -143,6 +145,8 @@ export async function bookSlotTx(
   const settings = showroom.settings;
 
   const { unit, order } = await loadUnitForUpdate(tx, args.unitId);
+  // The slot, capacity and calendar are the showroom's; a bike from another store would land on the wrong schedule.
+  if (unit.showroomId !== showroom.id) throw new BookingError("WRONG_STORE");
   if (!["invited", "booked", "building", "ready"].includes(unit.status) || !unit.invitedAt || !unit.pickupBy) {
     throw new BookingError("NOT_BOOKABLE");
   }
