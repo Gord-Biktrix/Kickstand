@@ -14,6 +14,7 @@ import { ordersOnOrder } from "@/lib/special-orders";
 import { daysBetween, formatDateTime, formatLongDate, formatLongDateFromLocal, formatShortDateFromLocal, toLocalDate } from "@/lib/time";
 import { bulkBikesAction, inviteOrdersAction, inviteUnitAction, markReadyAction, startBuildAction, syncSpecialOrdersAction } from "../actions";
 import { currentShowroom } from "@/lib/current-showroom";
+import { ContactFlag } from "@/components/contact-flag";
 
 // Lightspeed syncs run inside this route (server actions / cron); Vercel Hobby caps requests at 10s by default, 60s allowed.
 export const maxDuration = 60;
@@ -170,7 +171,7 @@ export default async function BikesPage({ searchParams }: { searchParams: Promis
                     <td>
                       {order ? (
                         <>
-                          <Link href={`/app/customers/${encodeURIComponent(customerKey(order))}`} className="hover:text-accent">{order.customerName}</Link>
+                          <Link href={`/app/customers/${encodeURIComponent(customerKey(order))}`} className="hover:text-accent">{order.customerName}</Link><ContactFlag order={order} />
                           <p className="text-xs text-muted">{order.customerPhone ?? order.customerEmail ?? order.orderRef}</p>
                           {order.lsNote && <p className="mt-0.5 max-w-xs text-xs italic text-warn" title={order.lsNote}>“{order.lsNote}”</p>}
                         </>
@@ -254,7 +255,7 @@ export default async function BikesPage({ searchParams }: { searchParams: Promis
                         {o.lsNote && <p className="mt-0.5 max-w-xs text-xs italic text-warn" title={o.lsNote}>“{o.lsNote}”</p>}
                       </td>
                       <td>
-                        <Link className="hover:text-accent" href={`/app/customers/${encodeURIComponent(customerKey(o))}`}>{o.customerName}</Link>
+                        <Link className="hover:text-accent" href={`/app/customers/${encodeURIComponent(customerKey(o))}`}>{o.customerName}</Link><ContactFlag order={o} />
                         <p className="text-xs text-muted">{o.customerPhone ?? o.customerEmail ?? <span className="text-danger">no contact</span>}</p>
                       </td>
                       <td className="text-xs text-muted">{formatShortDateFromLocal(o.orderDate)} · {daysBetween(o.orderDate, today)}d · {o.source} {o.orderRef}</td>

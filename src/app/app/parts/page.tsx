@@ -13,6 +13,7 @@ import { sp, type SearchParams } from "@/lib/flash";
 import { ordersOnOrder } from "@/lib/special-orders";
 import { daysBetween, formatDateTime, formatShortDateFromLocal, toLocalDate } from "@/lib/time";
 import { collectPartsAction, inviteOrdersAction, syncSpecialOrdersAction } from "../actions";
+import { ContactFlag } from "@/components/contact-flag";
 
 export const metadata = { title: "Parts & accessories" };
 export const maxDuration = 60;
@@ -83,7 +84,7 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
                   const a = apptByUnit.get(unit.id);
                   return (
                     <tr key={unit.id}>
-                      <td><Link href={`/app/customers/${encodeURIComponent(customerKey(order))}`} className="font-medium hover:text-accent">{order.customerName}</Link><p className="text-xs text-muted">{order.customerPhone ?? order.customerEmail ?? ""}</p></td>
+                      <td><Link href={`/app/customers/${encodeURIComponent(customerKey(order))}`} className="font-medium hover:text-accent">{order.customerName}</Link><ContactFlag order={order} /><p className="text-xs text-muted">{order.customerPhone ?? order.customerEmail ?? ""}</p></td>
                       <td>{unit.model}<p className="text-xs text-muted">{order.source} {order.orderRef}</p></td>
                       <td><StatusBadge status={unit.status} /></td>
                       <td className="text-sm">{a ? formatDateTime(a.startsAt, tz) : <span className="text-muted">Not booked · any slot</span>}</td>
@@ -126,7 +127,7 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
                     return (
                       <tr key={primary.id}>
                         <td><input type="checkbox" name="order_ids" value={ids.join(",")} form="onorder" className="h-4 w-4" aria-label={`Select ${primary.customerName}`} /></td>
-                        <td><Link href={`/app/customers/${encodeURIComponent(customerKey(primary))}`} className="font-medium hover:text-accent">{primary.customerName}</Link><p className="text-xs text-muted">{primary.customerPhone ?? primary.customerEmail ?? <span className="text-danger">no contact</span>}</p></td>
+                        <td><Link href={`/app/customers/${encodeURIComponent(customerKey(primary))}`} className="font-medium hover:text-accent">{primary.customerName}</Link><ContactFlag order={primary} /><p className="text-xs text-muted">{primary.customerPhone ?? primary.customerEmail ?? <span className="text-danger">no contact</span>}</p></td>
                         <td>
                           <ul className="text-sm">{group.map((o) => <li key={o.id}>{o.model} <span className="text-xs text-muted">· {o.orderRef}</span>{o.lsNote && <span className="ml-1 text-xs italic text-warn" title={o.lsNote}>“{o.lsNote}”</span>}</li>)}</ul>
                           {group.length > 1 && <Badge>{group.length} items</Badge>}

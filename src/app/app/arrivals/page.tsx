@@ -10,6 +10,7 @@ import { formatDateTime, formatLongDateFromLocal, toLocalDate } from "@/lib/time
 import { defaultTermsVersion, waitlistFor } from "@/lib/units";
 import { attachUnitAction, createOrderAction, inviteAllAction, inviteUnitAction, receiveUnitAction } from "../actions";
 import { currentShowroom } from "@/lib/current-showroom";
+import { ContactFlag } from "@/components/contact-flag";
 
 export const metadata = { title: "Receive a box" };
 
@@ -42,7 +43,7 @@ export default async function ArrivalsPage({ searchParams }: { searchParams: Pro
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="min-w-0">
                       <p className="font-medium">
-                        <Link href={`/app/orders/${order.id}`} className="hover:text-accent">{order.customerName}</Link>
+                        <Link href={`/app/orders/${order.id}`} className="hover:text-accent">{order.customerName}</Link><ContactFlag order={order} />
                         <span className="ml-2 text-xs text-muted">{order.source} {order.orderRef}</span>
                       </p>
                       <p className="text-sm">{order.model} · {[order.size, order.colour].filter(Boolean).join(" · ")}</p>
@@ -136,7 +137,7 @@ export default async function ArrivalsPage({ searchParams }: { searchParams: Pro
               {pending.map(({ unit, order }) => (
                 <li key={unit.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
                   <div>
-                    <p className="font-medium"><Link href={`/app/units/${unit.id}`} className="hover:text-accent">{order?.customerName ?? "—"}</Link> <span className="text-xs text-muted">{order?.orderRef}</span></p>
+                    <p className="font-medium"><Link href={`/app/units/${unit.id}`} className="hover:text-accent">{order?.customerName ?? "—"}</Link><ContactFlag order={order} /> <span className="text-xs text-muted">{order?.orderRef}</span></p>
                     <p className="text-sm">{unit.model} · {[unit.size, unit.colour].filter(Boolean).join(" · ")} · box {unit.boxTag}</p>
                     <p className="text-xs text-muted">Received {formatDateTime(unit.receivedAt, showroom.timezone)}{!order?.customerEmail && !order?.customerPhone ? " · no contact details — edit the order first" : ""}</p>
                   </div>

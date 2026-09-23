@@ -9,6 +9,7 @@ import { todayAppointments } from "@/lib/queries";
 import { addLocalDays, formatLongDateFromLocal, formatTime, toLocalDate } from "@/lib/time";
 import { collectPartsAction, recordNoShowAction } from "./actions";
 import { currentShowroom } from "@/lib/current-showroom";
+import { ContactFlag } from "@/components/contact-flag";
 
 export const metadata = { title: { absolute: "Today · Kickstand" } };
 
@@ -62,7 +63,7 @@ export default async function TodayPage({ searchParams }: { searchParams: Promis
                   </div>
                   <div className="min-w-0 flex-1">
                     <p className="font-semibold">
-                      <Link href={`/app/units/${first.unit.id}`} className="hover:text-accent">{first.order?.customerName ?? "Unassigned"}</Link>
+                      <Link href={`/app/units/${first.unit.id}`} className="hover:text-accent">{first.order?.customerName ?? "Unassigned"}</Link><ContactFlag order={first.order} />
                       <span className="ml-2 text-sm font-normal text-muted">{visit.map((v) => v.order?.orderRef).filter(Boolean).join(", ")}</span>
                     </p>
                     <ul className="mt-1 space-y-2">

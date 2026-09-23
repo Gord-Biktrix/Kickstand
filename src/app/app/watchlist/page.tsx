@@ -9,6 +9,7 @@ import { watchlist, type WatchRow } from "@/lib/queries";
 import { formatDateTime, formatLongDate, formatLongDateFromLocal } from "@/lib/time";
 import { grantExtensionAction, resendInviteAction, retagUnitAction, waiveStorageAction } from "../actions";
 import { currentShowroom } from "@/lib/current-showroom";
+import { ContactFlag } from "@/components/contact-flag";
 
 export const metadata = { title: "Alerts" };
 
@@ -20,7 +21,7 @@ function UnitLine({ r, tz }: { r: WatchRow; tz: string }) {
   return (
     <div className="min-w-0">
       <p className="font-medium">
-        <Link href={`/app/units/${r.unit.id}`} className="hover:text-accent">{r.order?.customerName ?? "Unassigned"}</Link>
+        <Link href={`/app/units/${r.unit.id}`} className="hover:text-accent">{r.order?.customerName ?? "Unassigned"}</Link><ContactFlag order={r.order} />
         <span className="ml-2 text-sm font-normal text-muted">{r.unit.model} · box {r.unit.boxTag}</span>
       </p>
       <p className="text-xs text-muted">
@@ -151,7 +152,7 @@ export default async function WatchlistPage({ searchParams }: { searchParams: Pr
               {w.unrecorded.map(({ appointment, unit, order }) => (
                 <li key={appointment.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
                   <div>
-                    <p className="font-medium"><Link href={`/app/units/${unit.id}?handover=1`} className="hover:text-accent">{order?.customerName}</Link> <span className="text-sm text-muted">{unit.model} · box {unit.boxTag}</span></p>
+                    <p className="font-medium"><Link href={`/app/units/${unit.id}?handover=1`} className="hover:text-accent">{order?.customerName}</Link><ContactFlag order={order} /> <span className="text-sm text-muted">{unit.model} · box {unit.boxTag}</span></p>
                     <p className="text-xs text-muted">Slot {formatDateTime(appointment.startsAt, tz)} — mark completed (handover) or no-show.</p>
                   </div>
                   <Link href={`/app/units/${unit.id}?handover=1`} className="btn btn-sm">Record outcome</Link>

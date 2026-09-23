@@ -35,6 +35,8 @@ import {
   waiveStorageAction,
 } from "../../actions";
 import { currentShowroom } from "@/lib/current-showroom";
+import { ContactFlag } from "@/components/contact-flag";
+import { normalizePhone } from "@/lib/phone";
 
 export const metadata = { title: "Bike" };
 
@@ -67,7 +69,7 @@ export default async function UnitPage({ params, searchParams }: { params: Promi
         subtitle={
           order ? (
             <>
-              <Link className="font-medium text-fg underline" href={`/app/customers/${encodeURIComponent(customerKey(order))}`}>{order.customerName}</Link>
+              <Link className="font-medium text-fg underline" href={`/app/customers/${encodeURIComponent(customerKey(order))}`}>{order.customerName}</Link><ContactFlag order={order} />
               {order.customerPhone && <> · {order.customerPhone}</>}
               {" · "}
               <Link className="underline" href={`/app/orders/${order.id}`}>{order.source} {order.orderRef}</Link>
@@ -209,7 +211,7 @@ export default async function UnitPage({ params, searchParams }: { params: Promi
         <div className="space-y-6 lg:col-span-2">
           {order && (
             <Card title="Customer" action={<Link href={`/app/customers/${encodeURIComponent(customerKey(order))}`} className="btn btn-sm">View customer</Link>}>
-              <Dl items={[["Name", order.customerName], ["Phone", order.customerPhone ?? "—"], ["Email", order.customerEmail ?? "—"], ["Text reminders", order.smsConsent ? "yes" : "no"], ["Payment", order.paymentStatus === "deposit" ? `deposit · ${formatMoney(order.balanceCents)} due` : "paid"], ["Notes", order.notes ?? "—"], ...(order.lsNote ? [["Lightspeed note", order.lsNote] as [string, string]] : [])]} />
+              <Dl items={[["Name", order.customerName], ["Phone", order.customerPhone ? (normalizePhone(order.customerPhone) ? order.customerPhone : <span className="text-danger">{order.customerPhone} — can&apos;t be texted, fix it in Edit order</span>) : <span className="text-danger">missing — no texts. Add it in Edit order</span>], ["Email", order.customerEmail ?? <span className="text-danger">missing — no emails. Add it in Edit order</span>], ["Text reminders", order.smsConsent ? "yes" : "no"], ["Payment", order.paymentStatus === "deposit" ? `deposit · ${formatMoney(order.balanceCents)} due` : "paid"], ["Notes", order.notes ?? "—"], ...(order.lsNote ? [["Lightspeed note", order.lsNote] as [string, string]] : [])]} />
               <div className="mt-3 flex gap-4 text-sm">
                 <Link href={`/app/orders/${order.id}`} className="text-accent underline">Edit order</Link>
                 {urls && unit.status !== "unassigned" && <a className="text-accent underline" href={urls.landing_url} target="_blank" rel="noreferrer">Open customer&apos;s page</a>}
