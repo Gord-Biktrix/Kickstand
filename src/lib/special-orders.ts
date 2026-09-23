@@ -21,6 +21,7 @@ import { getConnection, LightspeedClient, type SaleLineInfo } from "./lightspeed
 import { logger } from "./logger";
 import type { ShowroomCtx } from "./showroom";
 import { normalizeEmail, normalizePhone } from "./customers";
+import { normalizePhone as toE164 } from "./phone";
 import { toLocalDate } from "./time";
 
 export type SpecialOrderLine = {
@@ -245,7 +246,7 @@ export async function syncSpecialOrders(
         const fields = {
           customerName: cust.name || `Lightspeed customer ${line.customerID}`,
           customerEmail: cust.email,
-          customerPhone: cust.phone,
+          customerPhone: toE164(cust.phone) ?? cust.phone,
           // A known line skipped the item lookup: its stored model/size/colour are better than a text-only guess.
           ...(prev && line.described === false ? { model: prev.model, size: prev.size, colour: prev.colour } : { model: line.bike.model, size: line.bike.size, colour: line.bike.colour }),
           lsCustomerId: line.customerID,
@@ -352,7 +353,7 @@ export async function syncPartsOrders(
     const fields = {
       customerName: cust.name || `Lightspeed customer ${line.customerID}`,
       customerEmail: cust.email,
-      customerPhone: cust.phone,
+      customerPhone: toE164(cust.phone) ?? cust.phone,
       model: line.qty > 1 ? `${line.bike.description} ×${line.qty}` : line.bike.description,
       lsCustomerId: line.customerID,
       lsNote: line.note ?? null,

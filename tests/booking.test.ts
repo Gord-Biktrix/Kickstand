@@ -45,6 +45,17 @@ describe("invite (R7)", () => {
     expect(String(notifier.sent[0].properties.booking_url)).toMatch(/\/b\/.+\/book$/);
   });
 
+  it("texts an E.164 number however the stored phone is written", async () => {
+    for (const raw of ["604-715-8599", "1-604-715-8599", "1 604 715 8599", "(604) 715 8599", "16047158599", "6047158599", "+1 604.715.8599"]) {
+      const order = await makeOrder(db, showroom, {});
+      await db.update(orders).set({ customerPhone: raw }).where(eq(orders.id, order.id));
+      const unit = await makeUnit(db, showroom, order.id);
+      notifier.sent = [];
+      await inviteUnit(db, { showroom, unitId: unit.id, actor: "s", now: NOW });
+      expect(notifier.sent[0]?.profile.phone, raw).toBe("+16047158599");
+    }
+  });
+
   it("refuses to invite an order with no contact details", async () => {
     const order = await makeOrder(db, showroom, { customerEmail: null, customerPhone: null });
     const unit = await makeUnit(db, showroom, order.id);

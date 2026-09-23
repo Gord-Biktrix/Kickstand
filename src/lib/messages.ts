@@ -6,6 +6,7 @@ import { logEvent } from "./events";
 import { lightspeedEnabled, syncUnitToLightspeed } from "./lightspeed";
 import { logger } from "./logger";
 import { getNotifier, type Profile } from "./notifier";
+import { normalizePhone } from "./phone";
 import type { ShowroomCtx } from "./showroom";
 import { daysBetween, formatLongDate, toLocalDate } from "./time";
 import { decryptToken } from "./tokens";
@@ -190,7 +191,8 @@ export async function sendUnitMessage(dbx: Db, args: MessageArgs): Promise<Messa
 
   const profile: Profile = {
     email: order?.customerEmail ?? null,
-    phone: order?.customerPhone ?? null,
+    // Klaviyo only accepts E.164; stored numbers can carry dashes, spaces or a leading 1 (Lightspeed sync, older rows).
+    phone: normalizePhone(order?.customerPhone),
     name: order?.customerName ?? null,
     smsConsent: order?.smsConsent ?? false,
   };
