@@ -1,0 +1,1 @@
+ALTER TABLE "units" ADD COLUMN "link_opened_at" timestamp with time zone;

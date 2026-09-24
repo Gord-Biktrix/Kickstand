@@ -22,6 +22,8 @@ export const METRIC = {
   holdEnding: "Pickup: Hold Ending",
   storageStarted: "Pickup: Storage Started",
   missed: "Pickup: Missed",
+  missedFollowUp: "Pickup: Missed Follow-up",
+  storageReminder: "Pickup: Storage Reminder",
   deferred: "Pickup: Deferred",
   completed: "Pickup: Completed",
 } as const;

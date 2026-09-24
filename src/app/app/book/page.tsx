@@ -8,7 +8,7 @@ import { Alert, Card, Field, Flash, PageHeader } from "@/components/ui";
 import { requireUser } from "@/lib/auth";
 import { getAvailability } from "@/lib/availability";
 import { describeUnits, groupUnitIds } from "@/lib/booking";
-import { bookableSiblings, canJoinVisit, futureVisitFor } from "@/lib/units";
+import { bookableCompanions, bookableSiblings, canJoinVisit, futureVisitFor } from "@/lib/units";
 import type { DaySummary } from "@/lib/capacity";
 import { sp, type SearchParams } from "@/lib/flash";
 import { formatMoney } from "@/lib/format";
@@ -17,7 +17,7 @@ import { getConnection, LightspeedClient, type SaleLineInfo } from "@/lib/lights
 import { logger } from "@/lib/logger";
 import { getUnitView } from "@/lib/queries";
 import { formatLongDateFromLocal, formatShortDateFromLocal, formatTime, toLocalDate } from "@/lib/time";
-import { joinVisitAction, staffBookAction, staffPrepareUnitAction, staffRescheduleAction } from "../actions";
+import { joinVisitAction, splitPickupAction, staffBookAction, staffPrepareUnitAction, staffRescheduleAction } from "../actions";
 import { currentShowroom, showroomForLightspeedShop } from "@/lib/current-showroom";
 import { listShowrooms } from "@/lib/showroom";
 
@@ -59,15 +59,18 @@ export default async function StaffBookPage({ searchParams }: { searchParams: Pr
       if (home) redirect(`/app/switch?showroom=${encodeURIComponent(home.slug)}&next=${encodeURIComponent(`/app/book?${here.toString()}`)}`);
     }
     const reschedule = sp(q.reschedule) === "1" && !!appointment;
+    // Split: give this bike its own time, out of a shared pickup (the rest of the visit stays put).
+    const split = sp(q.split) === "1" && !!appointment && (await groupUnitIds(db, appointment)).length > 1;
+    const moving = reschedule || split;
     // The customer's other pickup, if they have one: the usual answer to "their second bike came in".
     const otherVisit = order && ["received", "invited", "booked", "building", "ready"].includes(unit.status) ? await futureVisitFor(db, showroom, order, now, { excludeUnitId: unit.id }) : null;
     const joinOffer =
-      otherVisit && (!appointment?.groupId || appointment.groupId !== otherVisit.groupId) ? (
+      !split && otherVisit && (!appointment?.groupId || appointment.groupId !== otherVisit.groupId) ? (
         <JoinVisitOffer unitId={unit.id} customerName={order!.customerName} visit={otherVisit} moving={!!appointment} tz={tz}
           bikes={(await describeUnits(db, await groupUnitIds(db, otherVisit))).bikes}
           shortNotice={unit.kind !== "parts" && !(await canJoinVisit(db, showroom, otherVisit, now))} minLeadHours={showroom.settings.min_lead_hours} />
       ) : null;
-    if (appointment && !reschedule) {
+    if (appointment && !moving) {
       return (
         <div>
           <PageHeader title="Book pickup" subtitle={`${order?.customerName ?? "—"} · ${unit.model} · box ${unit.boxTag}`} />
@@ -79,24 +82,29 @@ export default async function StaffBookPage({ searchParams }: { searchParams: Pr
         </div>
       );
     }
-    if (!["invited", "building", "ready", ...(reschedule ? ["booked"] : [])].includes(unit.status)) {
+    if (!["invited", "building", "ready", ...(moving ? ["booked"] : [])].includes(unit.status)) {
       return <div><PageHeader title="Book pickup" />{flash}<Alert tone="warn">This unit is {unit.status} and can&apos;t be booked. <Link className="underline" href={`/app/units/${unit.id}`}>Open the unit</Link>.</Alert></div>;
     }
-    const siblings = reschedule ? [] : await bookableSiblings(db, showroom, unit, order);
-    const visitSize = reschedule && appointment ? (await groupUnitIds(db, appointment)).length : 1 + siblings.length;
+    // Other customers' bikes picked on the Combine page ("Book together").
+    const withIds = moving ? [] : (sp(q.with) ?? "").split(",").filter((x) => /^[0-9a-f-]{36}$/i.test(x) && x !== unit.id);
+    const companions = await bookableCompanions(db, showroom, withIds);
+    const companionOrders = companions.length ? await db.select().from(orders).where(inArray(orders.id, companions.map((c) => c.orderId).filter((x): x is string => !!x))) : [];
+    const own = moving ? [] : await bookableSiblings(db, showroom, unit, order);
+    const siblings = [...own, ...companions.filter((c) => !own.some((o) => o.unit.id === c.id)).map((c) => ({ unit: c, order: companionOrders.find((o) => o.id === c.orderId)!, companion: true }))];
+    const visitSize = reschedule && appointment ? (await groupUnitIds(db, appointment)).length : split ? 1 : 1 + siblings.length;
     const days = (await getAvailability(db, { showroom, unit, order, now, count: visitSize })).filter((d) => !d.day.closed && !d.beyondHorizon);
     const selectedDate = sp(q.date);
     const selectedTime = sp(q.time);
     const shortNotice = sp(q.short) === "1";
     const selected: DaySummary | undefined = selectedDate ? days.find((d) => d.date === selectedDate) : undefined;
     const slot = selected && selectedTime ? selected.slots.find((sl) => sl.startLocal === selectedTime) : undefined;
-    const base = `/app/book?unit=${unit.id}&${reschedule ? "reschedule=1&" : ""}${shortNotice ? "short=1&" : ""}`;
+    const base = `/app/book?unit=${unit.id}&${reschedule ? "reschedule=1&" : ""}${split ? "split=1&" : ""}${withIds.length ? `with=${withIds.join(",")}&` : ""}${shortNotice ? "short=1&" : ""}`;
     const today = toLocalDate(now, tz);
 
     return (
       <div>
         <PageHeader
-          title={reschedule ? "Reschedule pickup" : "Book pickup"}
+          title={split ? "Split into its own pickup" : reschedule ? "Reschedule pickup" : "Book pickup"}
           subtitle={<>{order?.customerName ?? "—"} · {unit.model} · {[unit.size, unit.colour].filter(Boolean).join(" · ")} · box {unit.boxTag} · <StatusBadge status={unit.status} />{visitSize > 1 && <> · {visitSize} bikes in this visit</>}</>}
           action={<Link href={`/app/units/${unit.id}`} className="btn btn-sm">Back to bike</Link>}
         />
@@ -107,11 +115,17 @@ export default async function StaffBookPage({ searchParams }: { searchParams: Pr
             {appointment.startsAt.getTime() - now.getTime() < showroom.settings.reschedule_cutoff_hours * 3600_000 && <> The slot is inside the {showroom.settings.reschedule_cutoff_hours}-hour cutoff, so moving it counts as a missed pickup.</>}
           </Alert>
         )}
+        {split && appointment && (
+          <Alert tone="neutral">
+            Now in a shared pickup on {formatLongDateFromLocal(appointment.onDate)} at {formatTime(appointment.startsAt, tz)}. Pick this bike&apos;s own time below — the same time works if the day has room. The other bikes keep their booking.
+          </Alert>
+        )}
         {joinOffer && <div className="mb-6">{joinOffer}</div>}
         <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
           <Card title={slot ? "Confirm" : selected ? formatLongDateFromLocal(selected.date) : "Pick a day"}>
             {slot ? (
-              <form action={(reschedule ? staffRescheduleAction : staffBookAction).bind(null, unit.id)} className="space-y-4">
+              <form action={(split ? splitPickupAction : reschedule ? staffRescheduleAction : staffBookAction).bind(null, unit.id)} className="space-y-4">
+                {companions.map((c) => <input key={c.id} type="hidden" name="with" value={c.id} />)}
                 <input type="hidden" name="starts_at" value={slot.startsAt.toISOString()} />
                 {shortNotice && <input type="hidden" name="short_notice" value="1" />}
                 <p className="text-xl font-semibold">{formatLongDateFromLocal(selected!.date)}</p>
@@ -122,22 +136,28 @@ export default async function StaffBookPage({ searchParams }: { searchParams: Pr
                 {siblings.length > 0 && (
                   <fieldset className="rounded-lg border border-border p-3">
                     <legend className="px-1 text-sm font-medium">Collect together</legend>
-                    <p className="mb-2 text-xs text-muted">This customer has other bikes in the building. Ticked bikes are booked into the same visit (each counts against capacity).</p>
+                    <p className="mb-2 text-xs text-muted">Ticked bikes are booked into the same visit (each counts against capacity).{companions.length > 0 && " Each customer gets the booking text."}</p>
                     {siblings.map((sib) => (
                       <label key={sib.unit.id} className="flex items-start gap-3 py-1 text-sm">
                         <input type="checkbox" name="unit_ids" value={sib.unit.id} defaultChecked className="mt-1 h-4 w-4" />
-                        <span>{sib.unit.model} <span className="text-muted">· {[sib.unit.size, sib.unit.colour].filter(Boolean).join(" · ")} · box {sib.unit.boxTag} · {sib.order.source} {sib.order.orderRef}</span></span>
+                        <span>{sib.unit.model} <span className="text-muted">· {[sib.unit.size, sib.unit.colour].filter(Boolean).join(" · ")} · box {sib.unit.boxTag} · {sib.order?.source} {sib.order?.orderRef}{"companion" in sib && sib.order && <> · <strong className="text-fg">{sib.order.customerName}</strong></>}</span></span>
                       </label>
                     ))}
                   </fieldset>
                 )}
-                <label className="flex items-start gap-3 text-sm">
+                {split && (
+                  <label className="flex items-start gap-3 text-sm">
+                    <input type="checkbox" name="notify" defaultChecked className="mt-1 h-4 w-4" />
+                    <span>Text the customer the new time (only sent if the time changes).</span>
+                  </label>
+                )}
+                <label className={`flex items-start gap-3 text-sm ${split ? "hidden" : ""}`}>
                   <input type="checkbox" name="sms_consent" defaultChecked={order?.smsConsent ?? false} className="mt-1 h-4 w-4" />
                   <span>Customer agrees to text reminders{order?.customerPhone ? ` at ${order.customerPhone}` : ""}.</span>
                 </label>
                 <div className="flex gap-2">
                   <Link href={`${base}date=${selected!.date}`} className="btn">Back</Link>
-                  <button type="submit" className="btn btn-primary">{reschedule ? "Move booking" : "Confirm booking"}</button>
+                  <button type="submit" className="btn btn-primary">{split ? "Split off at this time" : reschedule ? "Move booking" : "Confirm booking"}</button>
                 </div>
               </form>
             ) : selected ? (
@@ -181,7 +201,7 @@ export default async function StaffBookPage({ searchParams }: { searchParams: Pr
           <div className="space-y-4">
             <Card title="Short notice">
               <p className="text-sm text-muted">Customers need {showroom.settings.min_lead_hours} hours&apos; notice so the bike can be built. Staff can book sooner when the bike is already built or the customer is waiting.</p>
-              <Link href={`/app/book?unit=${unit.id}${reschedule ? "&reschedule=1" : ""}${shortNotice ? "" : "&short=1"}`} className={`btn btn-sm mt-3 ${shortNotice ? "btn-primary" : ""}`}>
+              <Link href={`/app/book?unit=${unit.id}${reschedule ? "&reschedule=1" : ""}${split ? "&split=1" : ""}${withIds.length ? `&with=${withIds.join(",")}` : ""}${shortNotice ? "" : "&short=1"}`} className={`btn btn-sm mt-3 ${shortNotice ? "btn-primary" : ""}`}>
                 {shortNotice ? "Short notice: ON" : "Allow short notice"}
               </Link>
             </Card>

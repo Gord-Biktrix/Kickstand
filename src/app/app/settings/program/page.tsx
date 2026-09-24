@@ -6,7 +6,7 @@ import { Alert, Card, Field, Flash, PageHeader } from "@/components/ui";
 import { hasRole, requireUser } from "@/lib/auth";
 import { sp, type SearchParams } from "@/lib/flash";
 import { FLAG_KEYS, type ProgramSettings } from "@/lib/settings";
-import { saveProgramSettingsAction } from "../../actions";
+import { saveProgramSettingsAction, saveSlackWebhookAction, testSlackAction } from "../../actions";
 import { currentShowroom } from "@/lib/current-showroom";
 
 export const metadata = { title: "Program settings" };
@@ -24,6 +24,15 @@ const NUMBER_FIELDS: { key: keyof ProgramSettings; label: string; hint?: string;
   { key: "early_bird_hours", label: "Early-bird window (hours after invite)" },
   { key: "reminder_send_hour_local", label: "Day-before reminder hour (0–23 local)" },
   { key: "clock_run_hour_local", label: "Daily clock hour (0–23 local)" },
+];
+
+const FOLLOWUP_FIELDS: { key: keyof ProgramSettings; label: string; hint?: string }[] = [
+  { key: "nudge_first_days", label: "First reminder (days after invite)", hint: "Not booked yet — “still time to book”. 0 = off." },
+  { key: "nudge_second_days", label: "Second reminder (days after invite)", hint: "0 = off." },
+  { key: "hold_ending_days", label: "Hold-ending notice (days after invite)", hint: "Usually the same as book-by. 0 = off." },
+  { key: "missed_followup_days", label: "After a no-show (days)", hint: "Only if they still haven't rebooked. 0 = off." },
+  { key: "storage_reminder_days", label: "Storage reminder (every N days)", hint: "While the bike sits in paid storage. 0 = off." },
+  { key: "staff_ping_days", label: "Ask the store to call (days after invite)", hint: "Slack message per customer, “Call due” badge and the Alerts list. 0 = off." },
 ];
 
 const FLAG_LABELS: Record<(typeof FLAG_KEYS)[number], string> = {
@@ -65,6 +74,16 @@ export default async function ProgramPage({ searchParams }: { searchParams: Prom
               </Field>
             </div>
           </Card>
+          <Card title="Customer follow-up">
+            <p className="mb-3 text-sm text-muted">What happens when a customer doesn&apos;t move to the next step. Each text only goes out if its Klaviyo flow is built (docs/klaviyo-flows.md).</p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {FOLLOWUP_FIELDS.map((f) => (
+                <Field key={f.key} label={f.label} htmlFor={f.key} hint={f.hint}>
+                  <input id={f.key} name={f.key} type="number" step="1" min={0} defaultValue={String(s[f.key] ?? "")} className="input" required />
+                </Field>
+              ))}
+            </div>
+          </Card>
           <Card title="Feature flags" action={!admin ? <span className="text-xs text-muted">admin only</span> : undefined}>
             {!admin && <div className="mb-3"><Alert tone="neutral">Flags are shown for reference; only an admin can change them.</Alert></div>}
             <ul className="space-y-2">
@@ -79,6 +98,23 @@ export default async function ProgramPage({ searchParams }: { searchParams: Prom
           </Card>
           <button type="submit" className="btn btn-primary">Save settings</button>
         </form>
+        <Card title="Slack" className="lg:col-span-2" action={!admin ? <span className="text-xs text-muted">admin only</span> : undefined}>
+          <p className="mb-3 text-sm text-muted">
+            {s.slack_webhook_url ? <>Connected — each customer still unbooked {s.staff_ping_days || "—"} days after their invite gets one message in this store&apos;s channel.</> : <>Not connected. In Slack: Apps → Incoming Webhooks → Add to the store&apos;s channel, then paste the webhook URL here.</>}
+          </p>
+          {admin && (
+            <div className="flex flex-wrap items-end gap-2">
+              <form action={saveSlackWebhookAction} className="flex flex-1 flex-wrap items-end gap-2">
+                <Field label="Webhook URL" htmlFor="slack_webhook_url" hint={s.slack_webhook_url ? `Saved: …${s.slack_webhook_url.slice(-6)} — paste a new one to replace it` : undefined}>
+                  <input id="slack_webhook_url" name="slack_webhook_url" type="url" placeholder="https://hooks.slack.com/services/…" className="input w-96 max-w-full" autoComplete="off" />
+                </Field>
+                <button type="submit" className="btn">Save</button>
+                {s.slack_webhook_url && <button type="submit" name="clear" value="1" className="btn btn-danger" formNoValidate>Disconnect</button>}
+              </form>
+              {s.slack_webhook_url && <form action={testSlackAction}><button type="submit" className="btn">Send a test message</button></form>}
+            </div>
+          )}
+        </Card>
         <Card title="Change log">
           <Timeline events={log} tz={showroom.timezone} />
           {log.length > 0 && (

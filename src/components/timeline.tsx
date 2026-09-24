@@ -1,5 +1,6 @@
 import type { Event } from "@/db/schema";
 import { titleCase } from "@/lib/format";
+import type { Delivery } from "@/lib/invite-status";
 import { formatDateTime } from "@/lib/time";
 import { Badge } from "./ui";
 
@@ -26,12 +27,26 @@ function describe(e: Event): string {
       return `Special order deleted in Lightspeed but ${(p.boxes as string[] | undefined)?.length === 1 ? "a box is" : "boxes are"} already here — check with the customer, then cancel or keep by hand`;
     case "order_reopened":
       return p.source === "lightspeed_special_order" ? `Back on Lightspeed's open special orders (was ${p.from})` : `Reopened (was ${p.from})`;
+    case "link_opened":
+      return "Customer opened their booking link";
+    case "staff_pinged":
+      return `Slack: asked the store to call — not booked ${p.days} days after the invite`;
     case "settings_changed":
       return `Settings: ${Object.keys((p.changes as Record<string, unknown>) ?? {}).join(", ")}`;
     default:
       if (e.type.startsWith("msg_")) return String(p.metric ?? e.type);
       return "";
   }
+}
+
+/** Carrier result from Klaviyo's delivery reports (src/lib/delivery.ts), once known. */
+function DeliveryBadge({ payload }: { payload: unknown }) {
+  const d = (payload as { delivery?: Delivery }).delivery;
+  if (!d || d.summary === "pending") return null;
+  const reason = [d.sms?.status === "failed" && `text: ${d.sms.reason ?? "failed"}`, d.email?.status === "bounced" && `email: ${d.email.reason ?? "bounced"}`].filter(Boolean).join(" · ");
+  return d.summary === "delivered"
+    ? <Badge tone="ok">delivered{d.sms?.status === "delivered" ? " (text)" : " (email)"}</Badge>
+    : <span title={reason}><Badge tone="danger">not delivered{reason ? ` — ${reason}` : ""}</Badge></span>;
 }
 
 export function Timeline({ events, tz }: { events: Event[]; tz: string }) {
@@ -45,6 +60,7 @@ export function Timeline({ events, tz }: { events: Event[]; tz: string }) {
             <time className="w-52 shrink-0 text-xs text-muted">{formatDateTime(e.createdAt, tz)}</time>
             <span className="font-medium">{isMsg ? "Message" : titleCase(e.type)}</span>
             {isMsg && e.klaviyoStatus && <Badge tone={e.klaviyoStatus === "sent" ? "ok" : "danger"}>{e.klaviyoStatus}</Badge>}
+            {isMsg && <DeliveryBadge payload={e.payload} />}
             <span className="text-muted">{describe(e)}</span>
             <span className="ml-auto text-xs text-muted">{e.actor === "system" || e.actor === "customer" ? e.actor : "staff"}</span>
           </li>

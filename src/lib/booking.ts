@@ -4,6 +4,7 @@ import type { Db, Tx } from "@/db/client";
 import { appointments, dayCounters, orders, units, type Appointment, type Order, type Unit } from "@/db/schema";
 import { buildFeasibleAt } from "./build-schedule";
 import { effectiveCapacity, slotStarts } from "./capacity";
+import { customerKey } from "./customers";
 import { logEvent } from "./events";
 import { baseUrl, flushOutbox, METRIC, type Outbox } from "./messages";
 import { getCapacityConfig, type ShowroomCtx } from "./showroom";
@@ -65,7 +66,7 @@ async function loadUnitForUpdate(tx: Tx, unitId: string): Promise<{ unit: Unit; 
   return { unit, order };
 }
 
-async function activeAppointment(tx: Tx, unitId: string): Promise<Appointment | null> {
+export async function activeAppointment(tx: Tx | Db, unitId: string): Promise<Appointment | null> {
   const [a] = await tx
     .select()
     .from(appointments)
@@ -122,6 +123,27 @@ export async function groupUnitIds(tx: Tx | Db, appointment: Pick<Appointment, "
     .where(and(eq(appointments.groupId, appointment.groupId), eq(appointments.status, "booked")));
   const ids = rows.map((r) => r.unitId);
   return [appointment.unitId, ...ids.filter((id) => id !== appointment.unitId)];
+}
+
+/**
+ * Staff can combine pickups across customers (a couple ordering under two names). The visit's texts
+ * go to every customer in it: this returns, after the first bike, the first bike of each customer not
+ * seen yet. Same customer throughout → empty.
+ */
+export async function otherCustomersFirstBikes(tx: Tx | Db, unitIds: string[]): Promise<string[]> {
+  if (unitIds.length < 2) return [];
+  const rows = await tx.select({ id: units.id, order: orders }).from(units).leftJoin(orders, eq(orders.id, units.orderId)).where(inArray(units.id, unitIds));
+  const keyOf = new Map(rows.map((r) => [r.id, r.order ? customerKey(r.order) : `unit:${r.id}`]));
+  const seen = new Set([keyOf.get(unitIds[0])]);
+  const out: string[] = [];
+  for (const id of unitIds.slice(1)) {
+    const k = keyOf.get(id);
+    if (k && !seen.has(k)) {
+      seen.add(k);
+      out.push(id);
+    }
+  }
+  return out;
 }
 
 /** "Model · colour" per bike, for the bikes/bike_count message properties. */
@@ -293,7 +315,7 @@ export async function bookSlot(dbx: Db, args: BookArgs) {
 }
 
 export type GroupBookArgs = Omit<BookArgs, "unitId" | "groupId" | "silent" | "extra" | "replacingAppointmentId"> & {
-  /** Primary bike first — its customer gets the one message. All must belong to the same customer (caller checks). */
+  /** Primary bike first. One Booked message per customer in the visit (usually one; a couple's combined pickup gets two). */
   unitIds: string[];
 };
 
@@ -309,9 +331,11 @@ export async function bookGroup(dbx: Db, args: GroupBookArgs) {
   const result = await dbx.transaction(async (tx) => {
     const groupId = ids.length > 1 ? randomUUID() : undefined;
     const summary = await describeUnits(tx, ids);
+    const announce = new Set([ids[0], ...(await otherCustomersFirstBikes(tx, ids))]);
     const booked = [];
-    for (const [i, unitId] of ids.entries()) {
-      booked.push(await bookSlotTx(tx, outbox, { ...args, unitId, groupId, silent: i > 0, extra: i === 0 ? summary : undefined }));
+    for (const unitId of ids) {
+      const loud = announce.has(unitId);
+      booked.push(await bookSlotTx(tx, outbox, { ...args, unitId, groupId, silent: !loud, extra: loud ? summary : undefined }));
     }
     return { groupId: groupId ?? null, primary: booked[0], all: booked };
   });
@@ -352,6 +376,7 @@ export async function cancelBookingTx(
 
   // A visit is cancelled as a whole: the other bikes in the group go too, silently (one message covers it).
   const visit = await groupUnitIds(tx, active);
+  const otherCustomers = args._inGroup ? [] : await otherCustomersFirstBikes(tx, visit);
   if (!args._inGroup) {
     for (const sibling of visit.slice(1)) await cancelBookingTx(tx, outbox, { ...args, unitId: sibling, silent: true, _inGroup: true });
   }
@@ -404,14 +429,7 @@ export async function cancelBookingTx(
     outbox.push({ showroom, unit: updatedUnit, order, metric: METRIC.cancelled, dedupeKey: active.id, actor, lightspeedOnly: true });
   }
   if (announce) {
-    outbox.push({
-      showroom,
-      unit: updatedUnit,
-      order,
-      metric: METRIC.cancelled,
-      dedupeKey: active.id,
-      actor,
-      extra: {
+    const extra = {
         // Klaviyo branches on this: "you cancelled" vs "sorry, we had to cancel — please pick a new time".
         cancelled_by: reason,
         ...groupSummary,
@@ -420,8 +438,12 @@ export async function cancelBookingTx(
           ? `${Math.max(0, Math.ceil(hoursBetween(now, unit.pickupBy) / 24))} days`
           : "",
         late_change: lateChange,
-      },
-    });
+    };
+    outbox.push({ showroom, unit: updatedUnit, order, metric: METRIC.cancelled, dedupeKey: active.id, actor, extra });
+    for (const otherId of otherCustomers) {
+      const [other] = await tx.select({ unit: units, order: orders }).from(units).leftJoin(orders, eq(orders.id, units.orderId)).where(eq(units.id, otherId));
+      if (other?.order) outbox.push({ showroom, unit: other.unit, order: other.order, metric: METRIC.cancelled, dedupeKey: active.id, actor, extra });
+    }
   }
   return { appointment, unit: updatedUnit, order, lateChange };
 }
@@ -467,6 +489,7 @@ export async function rescheduleBooking(dbx: Db, args: RescheduleArgs) {
       _rescheduling: true,
     });
     let booked!: Awaited<ReturnType<typeof bookSlotTx>>;
+    const rebooked = new Map<string, Awaited<ReturnType<typeof bookSlotTx>>>();
     for (const [i, unitId] of visit.entries()) {
       const [old] = await tx
         .select()
@@ -486,25 +509,29 @@ export async function rescheduleBooking(dbx: Db, args: RescheduleArgs) {
         silent: true,
       });
       if (old) await tx.update(appointments).set({ replacedBy: b.appointment.id }).where(eq(appointments.id, old.id));
+      rebooked.set(unitId, b);
       if (i === 0) booked = b;
     }
     const tz = args.showroom.timezone;
-    outbox.push({
-      showroom: args.showroom,
-      unit: booked.unit,
-      order: booked.order,
-      metric: METRIC.rescheduled,
-      dedupeKey: booked.appointment.id,
-      actor: args.actor,
-      extra: {
-        ...summary,
-        old_slot_start_local: formatDateTime(cancelled.appointment.startsAt, tz),
-        slot_start_local: formatDateTime(booked.appointment.startsAt, tz),
-        slot_end_local: formatDateTime(booked.appointment.endsAt, tz),
-        late_change: cancelled.lateChange,
-        calendar_ics_url: `${baseUrl()}/api/ics/${booked.appointment.id}`,
-      },
-    });
+    const extra = {
+      ...summary,
+      old_slot_start_local: formatDateTime(cancelled.appointment.startsAt, tz),
+      slot_start_local: formatDateTime(booked.appointment.startsAt, tz),
+      slot_end_local: formatDateTime(booked.appointment.endsAt, tz),
+      late_change: cancelled.lateChange,
+    };
+    for (const unitId of [visit[0], ...(await otherCustomersFirstBikes(tx, visit))]) {
+      const b = rebooked.get(unitId)!;
+      outbox.push({
+        showroom: args.showroom,
+        unit: b.unit,
+        order: b.order,
+        metric: METRIC.rescheduled,
+        dedupeKey: b.appointment.id,
+        actor: args.actor,
+        extra: { ...extra, calendar_ics_url: `${baseUrl()}/api/ics/${b.appointment.id}` },
+      });
+    }
     return { ...booked, previous: cancelled.appointment, lateChange: cancelled.lateChange, unchanged: false as const };
   });
   await flushOutbox(dbx, outbox);

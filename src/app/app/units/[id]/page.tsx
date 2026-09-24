@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { inArray } from "drizzle-orm";
 import { db } from "@/db/client";
+import { orders } from "@/db/schema";
 import { ConfirmButton } from "@/components/confirm-button";
 import { CopyButton } from "@/components/copy-button";
 import { StatusBadge } from "@/components/status-badge";
@@ -36,6 +38,8 @@ import {
 } from "../../actions";
 import { currentShowroom } from "@/lib/current-showroom";
 import { ContactFlag } from "@/components/contact-flag";
+import { InviteBadge } from "@/components/invite-badge";
+import { inviteStatus, readMessage } from "@/lib/invite-status";
 import { normalizePhone } from "@/lib/phone";
 
 export const metadata = { title: "Bike" };
@@ -53,6 +57,8 @@ export default async function UnitPage({ params, searchParams }: { params: Promi
   const s = showroom.settings;
   const now = new Date();
   const [events, history, mates] = await Promise.all([unitTimeline(db, unit.id), appointmentHistory(db, unit.id), appointment ? visitMates(db, appointment) : Promise.resolve([])]);
+  const mateOrderIds = mates.map((m) => m.orderId).filter((x): x is string => !!x);
+  const mateOrders = mateOrderIds.length ? await db.select().from(orders).where(inArray(orders.id, mateOrderIds)) : [];
   const urls = customerUrls(unit);
   const termsVersion = order?.termsVersion ?? 1;
   const due = storageDueCents(unit, termsVersion, s, now, tz);
@@ -61,6 +67,7 @@ export default async function UnitPage({ params, searchParams }: { params: Promi
   const releasable = isReleasable(unit, s, now) && !appointment;
   const matches = unit.status === "unassigned" || releasable ? await waitlistFor(db, showroom.id, unit) : [];
   const age = unitAgeDays(unit, now, tz);
+  const invite = inviteStatus(unit, events.filter((e) => e.type.startsWith("msg_") && e.klaviyoStatus).map(readMessage));
 
   return (
     <div>
@@ -138,7 +145,11 @@ export default async function UnitPage({ params, searchParams }: { params: Promi
               </p>
               {mates.length > 0 && (
                 <p className="mt-1 text-sm">
-                  Same visit: {mates.map((m, i) => <span key={m.id}>{i > 0 && ", "}<Link className="underline" href={`/app/units/${m.id}`}>{m.model} (box {m.boxTag})</Link></span>)}. Reschedule or cancel moves all of them.
+                  Same visit: {mates.map((m, i) => {
+                    const who = mateOrders.find((o) => o.id === m.orderId);
+                    return <span key={m.id}>{i > 0 && ", "}<Link className="underline" href={`/app/units/${m.id}`}>{m.model} (box {m.boxTag})</Link>{who && order && who.customerName !== order.customerName && <> for {who.customerName}</>}</span>;
+                  })}. Reschedule or cancel moves all of them.{" "}
+                  {appointment.startsAt > now && <Link className="text-accent underline" href={`/app/book?unit=${unit.id}&split=1`}>Split this bike off</Link>}
                 </p>
               )}
             </div>
@@ -148,6 +159,7 @@ export default async function UnitPage({ params, searchParams }: { params: Promi
               {unit.kind !== "parts" && unit.status === "building" && <form action={markReadyAction.bind(null, unit.id, RETURN)}><button type="submit" className="btn btn-primary">Ready</button></form>}
               {unit.kind !== "parts" && ["booked", "building", "ready"].includes(unit.status) && !handover && <Link href={`${RETURN}?handover=1`} className={`btn ${unit.status === "ready" ? "btn-primary" : ""}`}>Start handover</Link>}
               <Link href={`/app/book?unit=${unit.id}&reschedule=1`} className="btn">Reschedule</Link>
+              {appointment.startsAt > now && <Link href={`/app/units/${unit.id}/combine`} className="btn" title="Put this pickup together with another bike's — same customer or someone else (e.g. a partner)">Combine pickups</Link>}
               <details className="relative">
                 <summary className="btn cursor-pointer list-none">Cancel booking</summary>
                 <form action={staffCancelBookingAction.bind(null, unit.id, RETURN)} className="card absolute right-0 z-10 mt-2 w-80 space-y-3 shadow-lg">
@@ -180,10 +192,16 @@ export default async function UnitPage({ params, searchParams }: { params: Promi
                     {unit.bookBy && <> · book by {formatLongDate(unit.bookBy, tz)}</>}
                     {unit.pickupBy && <> · pick up by {formatLongDate(unit.pickupBy, tz)}</>}
                     {unit.noShowCount > 0 && <> · {unit.noShowCount} no-show</>}
-                    {callDue(unit, now, tz) && <> · <span className="text-danger">call due</span></>}
+                    {callDue(unit, now, tz, s.staff_ping_days) && <> · <span className="text-danger">call due</span></>}
                   </>
                 )}
               </p>
+              {unit.status === "invited" && invite && (
+                <p className="mt-2 flex flex-wrap items-center gap-2 text-sm">
+                  <InviteBadge status={invite} tz={tz} />
+                  <span className={invite.tone === "danger" ? "text-danger" : "text-muted"}>{invite.detail}{invite.at && <> · {formatDateTime(invite.at, tz)}</>}</span>
+                </p>
+              )}
             </div>
             <div className="flex flex-wrap items-start gap-2">
               {unit.status === "received" && (
@@ -193,6 +211,7 @@ export default async function UnitPage({ params, searchParams }: { params: Promi
                 <form action={staffBookReceivedAction.bind(null, unit.id)}><button type="submit" className="btn" title="No invite text — the customer's link is minted silently and you pick the time">Book for customer</button></form>
               )}
               {["invited", "building", "ready"].includes(unit.status) && <Link href={`/app/book?unit=${unit.id}`} className="btn btn-primary">Book for customer</Link>}
+              {["received", "invited", "building", "ready"].includes(unit.status) && unit.orderId && <Link href={`/app/units/${unit.id}/combine`} className="btn" title="Collect with another bike's pickup — same customer or someone else (e.g. a partner)">Combine pickups</Link>}
               {unit.kind === "parts" && unit.status !== "received" && <form action={collectPartsAction.bind(null, unit.id, RETURN)}><button type="submit" className="btn">Collected</button></form>}
               {unit.status === "invited" && <form action={resendInviteAction.bind(null, unit.id, RETURN)}><button type="submit" className="btn">Send invite again</button></form>}
               {["received", "invited"].includes(unit.status) && (
@@ -233,7 +252,7 @@ export default async function UnitPage({ params, searchParams }: { params: Promi
                 ["Picked up", unit.pickedUpAt ? formatDateTime(unit.pickedUpAt, tz) : "—"],
               ]}
             />
-            <div className="mt-3 flex flex-wrap gap-1.5">{callDue(unit, now, tz) && <Badge tone="danger">Call due</Badge>}{unit.earlyBird && <Badge tone="accent">Early bird</Badge>}{releasable && <Badge tone="warn">Releasable</Badge>}</div>
+            <div className="mt-3 flex flex-wrap gap-1.5">{callDue(unit, now, tz, s.staff_ping_days) && <Badge tone="danger">Call due</Badge>}{unit.earlyBird && <Badge tone="accent">Early bird</Badge>}{releasable && <Badge tone="warn">Releasable</Badge>}</div>
             </div>
           </details>
 

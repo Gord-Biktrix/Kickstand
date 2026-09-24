@@ -168,6 +168,8 @@ export const units = pgTable(
     tokenHash: text("token_hash").unique(),
     tokenEnc: text("token_enc"),
     pickedUpAt: timestamp("picked_up_at", { withTimezone: true }),
+    /** First time the customer opened their pickup link in a real browser (not a link preview, not staff). */
+    linkOpenedAt: timestamp("link_opened_at", { withTimezone: true }),
     /** Lightspeed work order mirroring this unit, and its Customer Item (Serialized) record. */
     lsWorkorderId: text("ls_workorder_id"),
     lsSerializedId: text("ls_serialized_id"),

@@ -1,15 +1,19 @@
-import { and, eq, isNotNull, notInArray } from "drizzle-orm";
+import { and, eq, gte, isNotNull, lte, notInArray, sql } from "drizzle-orm";
 import type { Db } from "@/db/client";
-import { appointments, dayCounters, events, orders, units, type Unit } from "@/db/schema";
+import { appointments, dayCounters, events, orders, units, type Order, type Unit } from "@/db/schema";
 import { effectiveCapacity } from "./capacity";
+import { customerKey } from "./customers";
+import { syncDeliveryReports } from "./delivery";
+import { inviteStatus, readMessage } from "./invite-status";
 import { formatMoney } from "./format";
 import { logger } from "./logger";
-import { METRIC, sendUnitMessage, type MessageOutcome } from "./messages";
+import { baseUrl, METRIC, sendUnitMessage, type MessageOutcome } from "./messages";
+import { postSlack, unbookedPingMessage } from "./slack";
 import { getCapacityConfig, listShowrooms, patchShowroomSettings, type ShowroomCtx } from "./showroom";
 import { syncSpecialOrders } from "./special-orders";
 import { syncWorkorders } from "./workorders";
 import { storageDueCents, storageEnabledFor } from "./storage";
-import { addLocalDays, daysBetween, formatDateTime, localHour, startOfLocalDay, toLocalDate, weekdayOf } from "./time";
+import { addLocalDays, daysBetween, formatDateTime, formatLongDate, localHour, startOfLocalDay, toLocalDate, weekdayOf } from "./time";
 
 export type ClockSummary = {
   showroom: string;
@@ -25,6 +29,8 @@ export type ClockSummary = {
     messagesSent: number;
     messagesFailed: number;
     messagesSkipped: number;
+    staffPinged: number;
+    staffPingFailed: number;
   };
 };
 
@@ -42,6 +48,8 @@ export type ClockOptions = {
   forceDaily?: boolean;
   /** Run the day-before reminders regardless of local hour. */
   forceReminders?: boolean;
+  /** Tests: the Klaviyo delivery-report source (null skips the check). */
+  deliveryFeed?: import("./delivery").DeliveryFeed | null;
 };
 
 async function nextSaturdayRemaining(dbx: Db, showroom: ShowroomCtx, today: string): Promise<string> {
@@ -72,6 +80,14 @@ export async function runClock(dbx: Db, opts: ClockOptions = {}): Promise<ClockS
   const showrooms = await listShowrooms(dbx);
   const summaries: ClockSummary[] = [];
   for (const showroom of showrooms) summaries.push(await runClockForShowroom(dbx, showroom, now, opts));
+
+  // Carrier delivery reports for recent messages (best-effort, bounded; see src/lib/delivery.ts).
+  try {
+    const d = await syncDeliveryReports(dbx, { now, feed: opts.deliveryFeed });
+    if (d.customers > 0) logger.info(d, "clock: delivery reports checked");
+  } catch (err) {
+    logger.warn({ err: err instanceof Error ? err.message : String(err) }, "clock: delivery report check skipped");
+  }
 
   // Pull new special orders and mirror open work orders from Lightspeed (best-effort; the tick must not fail on it).
   if (!opts.skipSpecialOrders) {
@@ -115,6 +131,8 @@ export async function runClockForShowroom(
     messagesSent: 0,
     messagesFailed: 0,
     messagesSkipped: 0,
+    staffPinged: 0,
+    staffPingFailed: 0,
   };
   const tally = (o: MessageOutcome) => {
     if (o === "sent") counts.messagesSent++;
@@ -143,6 +161,7 @@ export async function runClockForShowroom(
       );
 
     let saturdayDisplay: string | null = null;
+    const toPing: { unit: Unit; order: Order | null; age: number }[] = [];
     for (const { unit, order } of rows) {
       const age = daysBetween(toLocalDate(unit.invitedAt!, tz), today);
       if (unit.status === "invited") counts.invited++;
@@ -152,13 +171,30 @@ export async function runClockForShowroom(
 
       const base = { showroom, unit, order, dedupeKey: today, actor: "system" as const };
       if (unit.status === "invited") {
-        if (age === 3) {
+        // Exact days, deduped per date (as before the days became settings), so changing a setting never re-sends.
+        if (s.nudge_first_days > 0 && age === s.nudge_first_days) {
           saturdayDisplay ??= await nextSaturdayRemaining(dbx, showroom, today);
-          tally(await sendUnitMessage(dbx, { ...base, metric: METRIC.nudge3, extra: { remaining_saturday_display: saturdayDisplay } }));
-        } else if (age === 7) {
-          tally(await sendUnitMessage(dbx, { ...base, metric: METRIC.nudge7 }));
-        } else if (age === 14) {
-          tally(await sendUnitMessage(dbx, { ...base, metric: METRIC.holdEnding }));
+          tally(await sendUnitMessage(dbx, { ...base, metric: METRIC.nudge3, extra: { remaining_saturday_display: saturdayDisplay, days_since_invite: age } }));
+        } else if (s.nudge_second_days > 0 && age === s.nudge_second_days) {
+          tally(await sendUnitMessage(dbx, { ...base, metric: METRIC.nudge7, extra: { days_since_invite: age } }));
+        } else if (s.hold_ending_days > 0 && age === s.hold_ending_days) {
+          tally(await sendUnitMessage(dbx, { ...base, metric: METRIC.holdEnding, extra: { days_since_invite: age } }));
+        }
+        if (s.staff_ping_days > 0 && age >= s.staff_ping_days && s.slack_webhook_url) toPing.push({ unit, order, age });
+      }
+
+      // Storage reminder every N days while the bike sits in storage (period number is the dedupe key, so a missed run catches up once).
+      if (unit.storageFrom && s.storage_reminder_days > 0) {
+        const period = Math.floor(daysBetween(toLocalDate(unit.storageFrom, tz), today) / s.storage_reminder_days);
+        if (period >= 1) {
+          tally(
+            await sendUnitMessage(dbx, {
+              ...base,
+              dedupeKey: `storage:${period}`,
+              metric: METRIC.storageReminder,
+              extra: { storage_due_display: formatMoney(storageDueCents(unit, order?.termsVersion ?? 1, s, now, tz)), storage_days: period * s.storage_reminder_days },
+            }),
+          );
         }
       }
 
@@ -180,6 +216,46 @@ export async function runClockForShowroom(
           );
         }
       }
+    }
+
+    // Missed follow-up: N days after a no-show, if the bike is still waiting for a new booking.
+    if (s.missed_followup_days > 0) {
+      const missed = await dbx
+        .select({ appointment: appointments, unit: units, order: orders })
+        .from(appointments)
+        .innerJoin(units, eq(units.id, appointments.unitId))
+        .leftJoin(orders, eq(orders.id, units.orderId))
+        .where(
+          and(
+            eq(appointments.showroomId, showroom.id),
+            eq(appointments.status, "no_show"),
+            eq(units.status, "invited"),
+            // A short catch-up window, so a missed run still sends but switching the feature on doesn't text old no-shows.
+            gte(appointments.onDate, addLocalDays(today, -(s.missed_followup_days + 2))),
+            lte(appointments.onDate, addLocalDays(today, -s.missed_followup_days)),
+          ),
+        );
+      const seen = new Set<string>();
+      for (const { appointment, unit, order } of missed) {
+        if (seen.has(unit.id)) continue;
+        seen.add(unit.id);
+        tally(
+          await sendUnitMessage(dbx, {
+            showroom,
+            unit,
+            order,
+            metric: METRIC.missedFollowUp,
+            dedupeKey: appointment.id,
+            extra: { slot_start_local: formatDateTime(appointment.startsAt, tz), no_show_count: unit.noShowCount },
+          }),
+        );
+      }
+    }
+
+    for (const p of toPing) {
+      const r = await pingUnbooked(dbx, showroom, p.unit, p.order, p.age);
+      if (r === "sent") counts.staffPinged++;
+      else if (r === "failed") counts.staffPingFailed++;
     }
 
     await patchShowroomSettings(dbx, showroom.id, { clock_last_run_date: today });
@@ -209,10 +285,11 @@ export async function runClockForShowroom(
       );
     const remindedGroups = new Set<string>();
     for (const { appointment, unit, order } of rows) {
-      // One reminder per visit, not per bike.
+      // One reminder per visit and customer, not per bike (a combined pickup for a couple reminds both).
       if (appointment.groupId) {
-        if (remindedGroups.has(appointment.groupId)) continue;
-        remindedGroups.add(appointment.groupId);
+        const key = `${appointment.groupId}:${order ? customerKey(order) : unit.id}`;
+        if (remindedGroups.has(key)) continue;
+        remindedGroups.add(key);
       }
       const visit = rows.filter((r) => (appointment.groupId ? r.appointment.groupId === appointment.groupId : r.appointment.id === appointment.id));
       tally(
@@ -237,10 +314,50 @@ export async function runClockForShowroom(
   return { showroom: showroom.slug, date: today, ranDaily: runDaily, ranReminders: runReminders, counts };
 }
 
-/** Units flagged for the day-10 phone call: invited, age ≥ 10, not yet booked. */
-export function callDue(unit: Pick<Unit, "status" | "invitedAt">, now: Date, tz: string): boolean {
-  if (unit.status !== "invited" || !unit.invitedAt) return false;
-  return daysBetween(toLocalDate(unit.invitedAt, tz), toLocalDate(now, tz)) >= 10;
+/**
+ * One Slack message per customer, once per invite: they were invited `staff_ping_days` ago and still
+ * haven't booked. The event row is the lock; a failed post removes it so the next run tries again.
+ */
+export async function pingUnbooked(dbx: Db, showroom: ShowroomCtx, unit: Unit, order: Order | null, age: number): Promise<"sent" | "failed" | "skipped"> {
+  const webhook = showroom.settings.slack_webhook_url;
+  if (!webhook || !unit.invitedAt) return "skipped";
+  const tz = showroom.timezone;
+  const dedupeKey = `invite:${unit.invitedAt.toISOString()}`;
+  const [lock] = await dbx
+    .insert(events)
+    .values({ showroomId: showroom.id, unitId: unit.id, orderId: order?.id ?? null, type: "staff_pinged", actor: "system", payload: { dedupe_key: dedupeKey, channel: "slack", days: age } })
+    .onConflictDoNothing()
+    .returning({ id: events.id });
+  if (!lock) return "skipped";
+
+  const msgs = await dbx.select().from(events).where(and(eq(events.unitId, unit.id), sql`${events.type} like 'msg_%'`, isNotNull(events.klaviyoStatus)));
+  const status = inviteStatus(unit, msgs.map(readMessage));
+  const error = await postSlack(
+    webhook,
+    unbookedPingMessage({
+      store: showroom.name,
+      customer: order?.customerName ?? "Unknown customer",
+      phone: order?.customerPhone ?? null,
+      email: order?.customerEmail ?? null,
+      bike: [unit.model, unit.colour, unit.size].filter(Boolean).join(" · "),
+      boxTag: unit.boxTag,
+      days: age,
+      invitedOn: formatLongDate(unit.invitedAt, tz),
+      inviteStatus: status ? `${status.label} — ${status.detail}` : "unknown",
+      url: `${baseUrl()}/app/switch?showroom=${encodeURIComponent(showroom.slug)}&next=${encodeURIComponent(`/app/units/${unit.id}`)}`,
+    }),
+  );
+  if (error) {
+    await dbx.delete(events).where(eq(events.id, lock.id));
+    return "failed";
+  }
+  return "sent";
+}
+
+/** Units staff should phone: invited `days` or more ago (settings.staff_ping_days; 0 = off), not yet booked. */
+export function callDue(unit: Pick<Unit, "status" | "invitedAt">, now: Date, tz: string, days: number): boolean {
+  if (days <= 0 || unit.status !== "invited" || !unit.invitedAt) return false;
+  return daysBetween(toLocalDate(unit.invitedAt, tz), toLocalDate(now, tz)) >= days;
 }
 
 export function unitAgeDays(unit: Pick<Unit, "invitedAt">, now: Date, tz: string): number | null {

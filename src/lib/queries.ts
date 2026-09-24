@@ -7,6 +7,7 @@ import { callDue, isOverdue, isReleasable, unitAgeDays } from "./clock";
 import { getCapacityConfig, type ShowroomCtx } from "./showroom";
 import { storageDueCents } from "./storage";
 import { addLocalDays, dateRange, toLocalDate, type LocalDate } from "./time";
+import { inviteStatus, readMessage, type InviteStatus, type MessageInfo } from "./invite-status";
 import { hashToken } from "./tokens";
 import { waitlistFor } from "./units";
 
@@ -42,6 +43,31 @@ async function hydrate(dbx: Db, unit: Unit): Promise<UnitView> {
       .then((r) => r[0] ?? null),
   ]);
   return { unit, order, appointment };
+}
+
+/** Customer messages (msg_* events) per unit, oldest first — the input to inviteStatus(). */
+export async function messagesByUnit(dbx: Db, unitIds: string[]): Promise<Map<string, MessageInfo[]>> {
+  const out = new Map<string, MessageInfo[]>();
+  if (unitIds.length === 0) return out;
+  const rows = await dbx
+    .select({ unitId: events.unitId, type: events.type, payload: events.payload, klaviyoStatus: events.klaviyoStatus, createdAt: events.createdAt })
+    .from(events)
+    .where(and(inArray(events.unitId, unitIds), sql`${events.type} like 'msg_%'`, sql`${events.klaviyoStatus} is not null`))
+    .orderBy(asc(events.createdAt));
+  for (const r of rows) out.set(r.unitId!, [...(out.get(r.unitId!) ?? []), readMessage(r)]);
+  return out;
+}
+
+/** Invite status for each invited unit in `rows` (units never invited are left out). */
+export async function inviteStatuses(dbx: Db, list: Unit[]): Promise<Map<string, InviteStatus>> {
+  const invited = list.filter((u) => u.invitedAt);
+  const msgs = await messagesByUnit(dbx, invited.map((u) => u.id));
+  const out = new Map<string, InviteStatus>();
+  for (const u of invited) {
+    const st = inviteStatus(u, msgs.get(u.id) ?? []);
+    if (st) out.set(u.id, st);
+  }
+  return out;
 }
 
 export type TodayRow = UnitView & { appointment: Appointment; storageDueCents: number };
@@ -178,7 +204,7 @@ export async function allBikes(dbx: Db, showroom: ShowroomCtx, now = new Date())
     const appointment = apptByUnit.get(unit.id) ?? null;
     const deadline = appointment ? buildDeadline(showroom, appointment, rules, overrides) : null;
     const overdue = isOverdue(unit, now);
-    const due = callDue(unit, now, tz);
+    const due = callDue(unit, now, tz, s.staff_ping_days);
     const releasable = isReleasable(unit, s, now) && !appointment;
     const needsRebooking = ["building", "ready"].includes(unit.status) && !appointment;
     const unrecorded = !!appointment && appointment.startsAt < now;
@@ -253,7 +279,7 @@ export async function watchlist(dbx: Db, showroom: ShowroomCtx, now = new Date()
       order,
       appointment,
       age: unitAgeDays(unit, now, tz),
-      callDue: callDue(unit, now, tz),
+      callDue: callDue(unit, now, tz, s.staff_ping_days),
       overdue: isOverdue(unit, now),
       storageDueCents: storageDueCents(unit, order?.termsVersion ?? 1, s, now, tz),
       releasable,
@@ -261,7 +287,8 @@ export async function watchlist(dbx: Db, showroom: ShowroomCtx, now = new Date()
     };
   });
 
-  const unbooked7 = rows.filter((r) => r.unit.status === "invited" && (r.age ?? 0) >= 7 && !r.overdue);
+  const unbookedDays = s.staff_ping_days || 7;
+  const unbooked7 = rows.filter((r) => r.unit.status === "invited" && (r.age ?? 0) >= unbookedDays && !r.overdue);
   const holdEnding = rows.filter(
     (r) => r.unit.status === "invited" && r.unit.pickupBy && toLocalDate(r.unit.pickupBy, tz) >= today && toLocalDate(r.unit.pickupBy, tz) <= weekAhead,
   );
@@ -301,7 +328,7 @@ export async function watchlist(dbx: Db, showroom: ShowroomCtx, now = new Date()
   }
   dayConflicts.sort((a, b) => (a.date < b.date ? -1 : 1));
 
-  return { unbooked7, holdEnding, overdue, releasable, unrecorded, failures, dayConflicts };
+  return { unbookedDays, unbooked7, holdEnding, overdue, releasable, unrecorded, failures, dayConflicts };
 }
 
 export async function unitTimeline(dbx: Db, unitId: string) {
@@ -396,8 +423,10 @@ export async function pilotMetrics(dbx: Db, showroom: ShowroomCtx, from: LocalDa
     from appointments where showroom_id = ${sid} and status in ('booked','completed','no_show') and on_date between ${from} and ${to}
     group by 1 order by 1
   `);
-  const [messages] = await dbx.execute<{ sent: number; failed: number }>(sql`
-    select count(*) filter (where klaviyo_status = 'sent')::int as sent, count(*) filter (where klaviyo_status = 'failed')::int as failed
+  const [messages] = await dbx.execute<{ sent: number; failed: number; undelivered: number; delivered: number }>(sql`
+    select count(*) filter (where klaviyo_status = 'sent')::int as sent, count(*) filter (where klaviyo_status = 'failed')::int as failed,
+           count(*) filter (where klaviyo_status = 'sent' and payload #>> '{delivery,summary}' = 'undelivered')::int as undelivered,
+           count(*) filter (where klaviyo_status = 'sent' and payload #>> '{delivery,summary}' = 'delivered')::int as delivered
     from events where showroom_id = ${sid} and type like 'msg_%' and (created_at at time zone ${tz})::date between ${from} and ${to}
   `);
   const [invites] = await dbx.execute<{ invites: number }>(sql`
@@ -405,6 +434,33 @@ export async function pilotMetrics(dbx: Db, showroom: ShowroomCtx, from: LocalDa
       and (created_at at time zone ${tz})::date between ${from} and ${to}
   `);
   return { floor, boxDays, early, noShow, storage, detaches: [...detaches], saturdays: [...saturdays], utilisation: [...utilisation], messages, invites };
+}
+
+export type MessageLogRow = { event: typeof events.$inferSelect; unit: Unit | null; order: Order | null };
+
+/**
+ * Reports → Messages: every customer message in [from, to], newest first. "problems" keeps the ones that
+ * never reached the customer: refused by Klaviyo, or rejected by the carrier / bounced.
+ */
+export async function messageLog(dbx: Db, showroom: ShowroomCtx, from: LocalDate, to: LocalDate, show: "problems" | "all", limit = 300): Promise<MessageLogRow[]> {
+  const tz = showroom.timezone;
+  const problem = sql`(${events.klaviyoStatus} = 'failed' or ${events.payload} #>> '{delivery,summary}' = 'undelivered')`;
+  return dbx
+    .select({ event: events, unit: units, order: orders })
+    .from(events)
+    .leftJoin(units, eq(units.id, events.unitId))
+    .leftJoin(orders, eq(orders.id, events.orderId))
+    .where(
+      and(
+        eq(events.showroomId, showroom.id),
+        sql`${events.type} like 'msg_%'`,
+        sql`${events.klaviyoStatus} is not null`,
+        sql`(${events.createdAt} at time zone ${tz})::date between ${from} and ${to}`,
+        show === "problems" ? problem : undefined,
+      ),
+    )
+    .orderBy(desc(events.createdAt))
+    .limit(limit);
 }
 
 export async function exportRows(dbx: Db, showroom: ShowroomCtx) {

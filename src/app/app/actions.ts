@@ -4,18 +4,19 @@ import { and, eq, inArray, ne } from "drizzle-orm";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { db } from "@/db/client";
-import { capacityOverrides, capacityRules, lsWorkorderStatuses, orders, staffSessions, staffUsers, units } from "@/db/schema";
+import { appointments, capacityOverrides, capacityRules, lsWorkorderStatuses, orders, staffSessions, staffUsers, units } from "@/db/schema";
 import { assignableRoles, canManage, clearPassword, deleteStaff, hasRole, inviteStaff, isRole, requireActor, roleLabel, SESSION_COOKIE, setPassword, setStaffActive, signOut, updateStaff } from "@/lib/auth";
 import { BOOKING_ERROR_TEXT, BookingError, bookGroup, cancelBooking, recordNoShow, rescheduleBooking } from "@/lib/booking";
 import { validateImport } from "@/lib/csv";
 import { logEvent } from "@/lib/events";
 import { bool, dollarsToCents, errorMessage, num, str, withFlash } from "@/lib/flash";
 import { normalizePhone } from "@/lib/phone";
+import { isSlackWebhookUrl, postSlack } from "@/lib/slack";
 import { FLAG_KEYS, PROGRAM_KEYS, settingsSchema, validateSettings, type ProgramSettings } from "@/lib/settings";
 import { getCapacityConfig, patchShowroomSettings } from "@/lib/showroom";
 import { formatDateTime, normalizeTime } from "@/lib/time";
 import { hashToken } from "@/lib/tokens";
-import { attachUnit, bookableSiblings, collectParts, completeHandover, createOrder, deleteUnit, detachUnit, futureVisitFor, grantExtension, inviteAllReceived, inviteOrders, inviteUnit, inviteUnits, joinVisit, markReady, receiveUnit, resendInvite, retagUnit, startBuild, unreceiveUnit, waiveStorage } from "@/lib/units";
+import { attachUnit, bookableCompanions, bookableSiblings, mergeIntoVisit, splitFromVisit, collectParts, completeHandover, createOrder, deleteUnit, detachUnit, futureVisitFor, grantExtension, inviteAllReceived, inviteOrders, inviteUnit, inviteUnits, joinVisit, markReady, receiveUnit, resendInvite, retagUnit, startBuild, unreceiveUnit, waiveStorage } from "@/lib/units";
 import { currentShowroom } from "@/lib/current-showroom";
 import { createShowroom, importShowroomsFromLightspeed, setLightspeedLink, updateShowroomDetails } from "@/lib/showroom-admin";
 import { LightspeedClient } from "@/lib/lightspeed";
@@ -696,6 +697,50 @@ export async function joinVisitAction(unitId: string, formData: FormData) {
   redirect(withFlash(`/app/units/${unitId}`, { ok }));
 }
 
+/**
+ * Combine pickups: move one bike (and everything booked with it) into another pickup.
+ * The page decides the direction — whose time is kept — and the bikes may belong to different customers.
+ */
+export async function combinePickupsAction(pageUnitId: string, formData: FormData) {
+  const back = `/app/units/${pageUnitId}/combine`;
+  let ok: string | null = null;
+  let error: string | null = null;
+  try {
+    const user = await requireActor("staff");
+    const showroom = await currentShowroom();
+    // Each button carries "<bike to move>:<pickup to move it into>".
+    const [moveUnitId, intoId] = str(formData, "choice").split(":");
+    if (!moveUnitId || !intoId) throw new Error("Pick which pickup to keep.");
+    const [into] = await db.select().from(appointments).where(and(eq(appointments.id, intoId), eq(appointments.showroomId, showroom.id), eq(appointments.status, "booked")));
+    if (!into) throw new Error("That pickup has changed since the page loaded — check the bookings and try again.");
+    const notify = bool(formData, "notify");
+    const r = await mergeIntoVisit(db, { showroom, unitId: moveUnitId, into, actor: user.id, notify });
+    ok = `Combined — ${r.moved.length} bike${r.moved.length === 1 ? "" : "s"} moved to ${formatDateTime(r.startsAt, showroom.timezone)}. ${notify ? "Customers whose time changed have been texted." : "No message was sent."}`;
+  } catch (err) {
+    error = err instanceof BookingError ? BOOKING_ERROR_TEXT[err.code] : errorMessage(err);
+  }
+  if (error || !ok) redirect(withFlash(back, { error: error ?? "Could not combine the pickups" }));
+  redirect(withFlash(`/app/units/${pageUnitId}`, { ok }));
+}
+
+/** Split one bike out of a shared pickup into its own booking at the chosen time. */
+export async function splitPickupAction(unitId: string, formData: FormData) {
+  const startsAt = new Date(str(formData, "starts_at"));
+  const back = `/app/book?unit=${unitId}&split=1`;
+  if (Number.isNaN(startsAt.getTime())) redirect(withFlash(back, { error: "Pick a time first." }));
+  let error: string | null = null;
+  const notify = bool(formData, "notify");
+  try {
+    const user = await requireActor("staff");
+    const showroom = await currentShowroom();
+    await splitFromVisit(db, { showroom, unitId, startsAt, actor: user.id, notify });
+  } catch (err) {
+    error = err instanceof BookingError ? BOOKING_ERROR_TEXT[err.code] : errorMessage(err);
+  }
+  if (error) redirect(withFlash(back, { error }));
+  redirect(withFlash(`/app/units/${unitId}`, { ok: `Split into its own pickup. ${notify ? "The customer was texted if the time changed." : "No message was sent."}` }));
+}
+
 /** Staff moves an existing booking to a new slot (customer-requested; the late-change rule applies). */
 export async function staffRescheduleAction(unitId: string, formData: FormData) {
   const startsAt = new Date(str(formData, "starts_at"));
@@ -726,7 +771,10 @@ export async function staffBookAction(unitId: string, formData: FormData) {
     const [primary] = await db.select().from(units).where(eq(units.id, unitId));
     const [primaryOrder] = primary?.orderId ? await db.select().from(orders).where(eq(orders.id, primary.orderId)) : [];
     const wanted = new Set(formData.getAll("unit_ids").map(String));
-    const siblings = primary ? (await bookableSiblings(db, showroom, primary, primaryOrder ?? null)).map((sib) => sib.unit.id).filter((id) => wanted.has(id)) : [];
+    const own = primary ? (await bookableSiblings(db, showroom, primary, primaryOrder ?? null)).map((sib) => sib.unit.id) : [];
+    // Bikes of other customers picked on the Combine page ("Book together"), re-checked as bookable.
+    const companions = (await bookableCompanions(db, showroom, formData.getAll("with").map(String))).map((u) => u.id);
+    const siblings = [...new Set([...own, ...companions])].filter((id) => id !== unitId && wanted.has(id));
     await bookGroup(db, {
       showroom,
       unitIds: [unitId, ...siblings],
@@ -841,6 +889,32 @@ export async function saveProgramSettingsAction(formData: FormData) {
     await patchShowroomSettings(db, showroom.id, patch);
     await logEvent(db, { showroomId: showroom.id, type: "settings_changed", actor: user.id, payload: { area: "program", changes } });
     return `Saved ${Object.keys(changes).length} change${Object.keys(changes).length === 1 ? "" : "s"}.`;
+  });
+}
+
+export async function saveSlackWebhookAction(formData: FormData) {
+  return run("/app/settings/program", async () => {
+    const user = await requireActor("admin");
+    const showroom = await currentShowroom();
+    const url = bool(formData, "clear") ? null : str(formData, "slack_webhook_url").trim();
+    if (url === "") throw new Error("Paste the webhook URL from Slack.");
+    if (url && !isSlackWebhookUrl(url)) throw new Error("That isn't a Slack incoming-webhook URL (https://hooks.slack.com/services/…).");
+    await patchShowroomSettings(db, showroom.id, { slack_webhook_url: url });
+    // Log that it changed, never the URL itself (it lets anyone post to the channel).
+    await logEvent(db, { showroomId: showroom.id, type: "settings_changed", actor: user.id, payload: { area: "program", changes: { slack_webhook_url: { from: showroom.settings.slack_webhook_url ? "set" : null, to: url ? "set" : null } } } });
+    return url ? "Slack connected. Send a test message to check the channel." : "Slack disconnected.";
+  });
+}
+
+export async function testSlackAction() {
+  return run("/app/settings/program", async () => {
+    await requireActor("admin");
+    const showroom = await currentShowroom();
+    const url = showroom.settings.slack_webhook_url;
+    if (!url) throw new Error("Connect Slack first.");
+    const error = await postSlack(url, { text: `Kickstand test: ${showroom.name} pickup follow-ups will post here.` });
+    if (error) throw new Error(`Slack didn't accept it (${error}). Check the webhook URL.`);
+    return "Test message sent — check the channel.";
   });
 }
 

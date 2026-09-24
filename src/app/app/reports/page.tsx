@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { db } from "@/db/client";
 import { Card, Field, PageHeader, Stat } from "@/components/ui";
 import { requireUser } from "@/lib/auth";
@@ -43,7 +44,13 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
         <Stat label="No-show + late-change rate" value={pct(m.noShow?.no_shows ?? 0, m.noShow?.reached ?? 0)} hint={`${m.noShow?.no_shows ?? 0} of ${m.noShow?.reached ?? 0} reaching their date · target < 5%`} />
         <Stat label="Storage assessed vs waived" value={`${formatMoney(m.storage?.collected ?? 0)} / ${formatMoney(m.storage?.waived ?? 0)}`} hint="collected / waived at handover" />
         <Stat label="Invites sent" value={m.invites?.invites ?? 0} hint="incl. re-assignments" />
-        <Stat label="Messages" value={`${m.messages?.sent ?? 0} sent`} hint={`${m.messages?.failed ?? 0} failed · ${pct(m.messages?.failed ?? 0, (m.messages?.sent ?? 0) + (m.messages?.failed ?? 0))} failure rate`} />
+        <Link href={`/app/reports/messages?from=${from}&to=${to}`} className="block rounded-lg transition hover:ring-2 hover:ring-accent/40 focus-visible:outline-2 focus-visible:outline-accent" title="See every message and which ones failed">
+          <Stat
+            label="Messages"
+            value={`${m.messages?.sent ?? 0} sent`}
+            hint={<>{m.messages?.failed ?? 0} failed · {m.messages?.undelivered ?? 0} not delivered · {pct((m.messages?.failed ?? 0) + (m.messages?.undelivered ?? 0), (m.messages?.sent ?? 0) + (m.messages?.failed ?? 0))} didn&apos;t reach the customer · <span className="text-accent underline">see which</span></>}
+          />
+        </Link>
         <Stat label="Releases and defers" value={m.detaches.reduce((a, d) => a + d.n, 0)} hint={m.detaches.map((d) => `${d.reason}: ${d.n}${d.avg_hours_to_reassign != null ? ` (${fixed(d.avg_hours_to_reassign / 24)} d to reassign)` : ""}`).join(" · ") || "none"} />
       </div>
 

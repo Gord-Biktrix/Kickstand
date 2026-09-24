@@ -1,7 +1,11 @@
 "use server";
 
+import { and, eq, isNull } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { db } from "@/db/client";
+import { units } from "@/db/schema";
+import { getCurrentUser } from "@/lib/auth";
+import { logEvent } from "@/lib/events";
 import { BookingError, bookGroup, cancelBooking, rescheduleBooking } from "@/lib/booking";
 import { bool, str } from "@/lib/flash";
 import { getUnitByToken } from "@/lib/queries";
@@ -68,4 +72,20 @@ export async function deferAction(token: string) {
   }
   if (error) redirect(`/b/${token}/manage?error=${encodeURIComponent(error)}`);
   redirect(`/b/${token}?ok=deferred`);
+}
+
+/**
+ * Called from the page once it has rendered in a real browser (see LinkOpened): link previews and
+ * crawlers don't run JavaScript, and staff looking at the customer's page don't count.
+ */
+export async function linkOpenedAction(token: string) {
+  if (await getCurrentUser()) return;
+  const view = await getUnitByToken(db, token);
+  if (!view || view.unit.linkOpenedAt) return;
+  const [first] = await db
+    .update(units)
+    .set({ linkOpenedAt: new Date() })
+    .where(and(eq(units.id, view.unit.id), isNull(units.linkOpenedAt)))
+    .returning({ id: units.id });
+  if (first) await logEvent(db, { showroomId: view.unit.showroomId, unitId: view.unit.id, orderId: view.unit.orderId ?? undefined, type: "link_opened", actor: "customer" });
 }

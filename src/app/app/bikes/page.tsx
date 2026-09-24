@@ -9,7 +9,8 @@ import { hasRole, requireUser } from "@/lib/auth";
 import { customerKey } from "@/lib/customers";
 import { formatMoney } from "@/lib/format";
 import { sp, type SearchParams } from "@/lib/flash";
-import { allBikes, type BikeRow } from "@/lib/queries";
+import { allBikes, inviteStatuses, type BikeRow } from "@/lib/queries";
+import { InviteBadge } from "@/components/invite-badge";
 import { ordersOnOrder } from "@/lib/special-orders";
 import { daysBetween, formatDateTime, formatLongDate, formatLongDateFromLocal, formatShortDateFromLocal, toLocalDate } from "@/lib/time";
 import { bulkBikesAction, inviteOrdersAction, inviteUnitAction, markReadyAction, startBuildAction, syncSpecialOrdersAction } from "../actions";
@@ -54,7 +55,10 @@ export default async function BikesPage({ searchParams }: { searchParams: Promis
   const filter = (FILTERS.some((f) => f.key === sp(q.filter)) ? sp(q.filter) : "all") as FilterKey;
   const text = (sp(q.q) ?? "").trim().toLowerCase();
   const date = /^\d{4}-\d{2}-\d{2}$/.test(sp(q.date) ?? "") ? sp(q.date)! : null;
-  const [all, onOrderAll] = await Promise.all([allBikes(db, showroom, now), ordersOnOrder(db, showroom)]);
+  const [bikes, onOrderAll] = await Promise.all([allBikes(db, showroom, now), ordersOnOrder(db, showroom)]);
+  // Invites that didn't land (or never went) need a person, so they count as "Needs attention".
+  const invites = await inviteStatuses(db, bikes.filter((r) => !r.appointment && r.unit.status === "invited").map((r) => r.unit));
+  const all = bikes.map((r) => (["undelivered", "failed", "none"].includes(invites.get(r.unit.id)?.key ?? "") ? { ...r, attention: true } : r));
   const canSync = !!showroom.settings.lightspeed.shop_id;
   // "On order" filter: exact model from the dropdown, or free text across model / customer / ref / colour / size.
   const modelFilter = sp(q.model) ?? "";
@@ -86,6 +90,7 @@ export default async function BikesPage({ searchParams }: { searchParams: Promis
     return (
       <>
         <p className="text-muted">Waiting on the customer{r.age !== null && <> · day {r.age}</>}</p>
+        <p className="mt-0.5"><InviteBadge status={invites.get(unit.id)} tz={tz} /></p>
         {unit.pickupBy && <p className={`text-xs ${r.overdue ? "text-danger" : "text-muted"}`}>pick up by {formatLongDate(unit.pickupBy, tz)}</p>}
       </>
     );

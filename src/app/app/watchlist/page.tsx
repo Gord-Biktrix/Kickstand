@@ -5,7 +5,9 @@ import { Badge, Card, Empty, Field, Flash, PageHeader } from "@/components/ui";
 import { hasRole, requireUser } from "@/lib/auth";
 import { formatMoney } from "@/lib/format";
 import { sp, type SearchParams } from "@/lib/flash";
-import { watchlist, type WatchRow } from "@/lib/queries";
+import { inviteStatuses, watchlist, type WatchRow } from "@/lib/queries";
+import { InviteBadge } from "@/components/invite-badge";
+import type { InviteStatus } from "@/lib/invite-status";
 import { formatDateTime, formatLongDate, formatLongDateFromLocal } from "@/lib/time";
 import { grantExtensionAction, resendInviteAction, retagUnitAction, waiveStorageAction } from "../actions";
 import { currentShowroom } from "@/lib/current-showroom";
@@ -15,9 +17,10 @@ export const metadata = { title: "Alerts" };
 
 const RETURN = "/app/watchlist";
 
-type Ctx = { tz: string; manager: boolean; extensionDays: number };
+type Ctx = { tz: string; manager: boolean; extensionDays: number; callDays: number; invites: Map<string, InviteStatus> };
 
-function UnitLine({ r, tz }: { r: WatchRow; tz: string }) {
+function UnitLine({ r, ctx }: { r: WatchRow; ctx: Ctx }) {
+  const tz = ctx.tz;
   return (
     <div className="min-w-0">
       <p className="font-medium">
@@ -29,7 +32,8 @@ function UnitLine({ r, tz }: { r: WatchRow; tz: string }) {
       </p>
       <div className="mt-1 flex flex-wrap gap-1.5 text-xs">
         <StatusBadge status={r.unit.status} />
-        {r.callDue && <Badge tone="danger">Call due (day 10+)</Badge>}
+        {r.unit.status === "invited" && <InviteBadge status={ctx.invites.get(r.unit.id)} tz={tz} />}
+        {r.callDue && <Badge tone="danger">Call due (day {ctx.callDays}+)</Badge>}
         {r.order?.paymentStatus === "deposit" && <Badge tone="warn">balance {formatMoney(r.order.balanceCents)}</Badge>}
         {r.storageDueCents > 0 && <Badge tone="danger">storage {formatMoney(r.storageDueCents)}</Badge>}
         {r.unit.extensionCount > 0 && <Badge tone="neutral">{r.unit.extensionCount} extension{r.unit.extensionCount === 1 ? "" : "s"}</Badge>}
@@ -77,7 +81,7 @@ function Section({ title, rows, ctx, waive }: { title: string; rows: WatchRow[];
         <ul className="divide-y divide-border">
           {rows.map((r) => (
             <li key={r.unit.id} className="flex flex-wrap items-start justify-between gap-3 py-3">
-              <UnitLine r={r} tz={ctx.tz} />
+              <UnitLine r={r} ctx={ctx} />
               <RowActions r={r} ctx={ctx} waive={waive} />
             </li>
           ))}
@@ -95,14 +99,15 @@ export default async function WatchlistPage({ searchParams }: { searchParams: Pr
   const tz = showroom.timezone;
   const now = new Date();
   const w = await watchlist(db, showroom, now);
-  const ctx: Ctx = { tz, manager, extensionDays: showroom.settings.extension_days };
+  const invites = await inviteStatuses(db, [...w.unbooked7, ...w.holdEnding, ...w.overdue].map((r) => r.unit));
+  const ctx: Ctx = { tz, manager, extensionDays: showroom.settings.extension_days, callDays: w.unbookedDays, invites };
 
   return (
     <div>
       <PageHeader title="Alerts" subtitle={manager ? "Needs attention · manager view — actions require a reason and are logged." : "Needs attention · read-only — ask a manager for extensions, waivers and re-tags."} />
       <Flash ok={sp(q.ok)} error={sp(q.error)} />
       <div className="space-y-6">
-        <Section title="Unbooked 7+ days" rows={w.unbooked7} ctx={ctx} />
+        <Section title={`Unbooked ${w.unbookedDays}+ days — call them`} rows={w.unbooked7} ctx={ctx} />
         <Section title="Hold ending this week" rows={w.holdEnding} ctx={ctx} />
         <Section title="Overdue — storage running" rows={w.overdue} ctx={ctx} waive />
 
@@ -114,7 +119,7 @@ export default async function WatchlistPage({ searchParams }: { searchParams: Pr
               {w.releasable.map((r) => (
                 <li key={r.unit.id} className="py-3">
                   <div className="flex flex-wrap items-start justify-between gap-3">
-                    <UnitLine r={r} tz={tz} />
+                    <UnitLine r={r} ctx={ctx} />
                     {r.waitlistMatches.length === 0 ? (
                       <p className="text-xs text-muted">No waitlist order matches this model, size and colour.</p>
                     ) : manager ? (

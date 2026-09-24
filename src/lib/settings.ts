@@ -19,6 +19,19 @@ export const settingsSchema = z.object({
     .string()
     .default("free installation of accessories bought with your bike"),
   reminder_send_hour_local: z.number().int().min(0).max(23).default(17),
+  /**
+   * Follow-up when a customer doesn't move to the next stage. Days count from the invite (nudges, hold
+   * ending), the no-show date (missed follow-up) or the first storage day (storage reminder); 0 turns one off.
+   */
+  nudge_first_days: z.number().int().min(0).max(60).default(3),
+  nudge_second_days: z.number().int().min(0).max(60).default(7),
+  hold_ending_days: z.number().int().min(0).max(90).default(14),
+  missed_followup_days: z.number().int().min(0).max(30).default(3),
+  storage_reminder_days: z.number().int().min(0).max(30).default(7),
+  /** Days after the original invite with no booking before staff are asked to call: Slack ping, "Call due" badge, Alerts. 0 = off. */
+  staff_ping_days: z.number().int().min(0).max(60).default(7),
+  /** Slack incoming-webhook URL for this store's channel (admin only). Null = no Slack pings. */
+  slack_webhook_url: z.string().url().nullable().default(null),
   clock_run_hour_local: z.number().int().min(0).max(23).default(7),
   terms_v2_effective_date: z
     .string()
@@ -72,6 +85,12 @@ export const PROGRAM_KEYS = [
   "early_bird_hours",
   "early_bird_reward_text",
   "reminder_send_hour_local",
+  "nudge_first_days",
+  "nudge_second_days",
+  "hold_ending_days",
+  "missed_followup_days",
+  "storage_reminder_days",
+  "staff_ping_days",
   "clock_run_hour_local",
   "terms_v2_effective_date",
 ] as const satisfies readonly (keyof ProgramSettings)[];
@@ -108,6 +127,10 @@ export function validateSettings(s: ProgramSettings): string[] {
   }
   if (s.min_lead_hours < s.slot_minutes / 60) {
     errors.push("Minimum lead time must be at least one slot length.");
+  }
+  const nudges = [s.nudge_first_days, s.nudge_second_days, s.hold_ending_days].filter((d) => d > 0);
+  if (nudges.some((d, i) => i > 0 && d <= nudges[i - 1])) {
+    errors.push("Customer nudges must be in order: first nudge, then second nudge, then hold ending.");
   }
   if (s.storage_rate_cents < 0 || s.storage_cap_cents < 0) {
     errors.push("Storage rate and cap must be non-negative.");

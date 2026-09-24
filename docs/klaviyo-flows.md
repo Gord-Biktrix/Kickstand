@@ -125,10 +125,19 @@ Extra: `slot_start_local`, `no_show_count`.
 
 ---
 
-## Later (build once the six above are live)
-- **Pickup: Nudge Day 3 / Nudge Day 7** — "still time to book" with `remaining_saturday_display`.
+## Follow-up when the customer doesn't respond (build these next)
+As of 2026-09-24 only Bike Arrived, Booked and Parts have live flows, so a customer who ignores the invite
+hears nothing more. The days are store settings (Settings → Program → Customer follow-up); every event
+carries `days_since_invite` so copy never has to hard-code "3 days".
+- **Pickup: Nudge Day 3** — first reminder (default day 3): "still time to book" with `remaining_saturday_display`.
+- **Pickup: Nudge Day 7** — second reminder (default day 7). The store gets a Slack message the same morning.
 - **Pickup: Hold Ending** — the free hold ends `pickup_by_date`; storage `storage_rate_display` after that (terms v2 only — filter on `event.terms_version` = 2).
+- **Pickup: Missed Follow-up** — N days after a no-show (default 3) if they still haven't rebooked. Extra: `slot_start_local`, `no_show_count`.
+  > your {{ event.model }} is still waiting for you. Pick a new time: {{ event.rebook_url }}
 - **Pickup: Storage Started** — daily rate now applies; `storage_rate_display`, `storage_cap_display`.
+- **Pickup: Storage Reminder** — every N days in storage (default 7). Extra: `storage_due_display`, `storage_days`.
+
+## Later
 - **Pickup: Deferred** — confirmation that the order moved to the next shipment.
 - **Pickup: Completed** — thank-you after handover; a good place for the review ask.
 
@@ -138,7 +147,9 @@ Extra: `slot_start_local`, `no_show_count`.
    "Pickup: Booked" event under Activity.
 3. Klaviyo → Analytics → Metrics: "Pickup: …" metrics appear after the first event of each kind.
 4. Kickstand bike page → Timeline: each message row shows `sent` (Klaviyo accepted the event) or `failed`
-   (see Alerts → Message failures). "sent" means Klaviyo has it; whether a text went out is on the flow.
+   (see Alerts → Message failures). Within a few hours the clock adds `delivered` or `not delivered — <reason>`
+   from Klaviyo's "Received / Failed to Deliver Text Message" and "Received / Bounced Email" reports. No
+   delivery badge after a day usually means no live flow for that metric.
 
 ---
 

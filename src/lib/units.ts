@@ -3,7 +3,7 @@ import { and, asc, eq, gt, inArray, notExists, sql } from "drizzle-orm";
 import type { Db, Tx } from "@/db/client";
 import { appointments, events, orders, units, type Appointment, type NewOrder, type Order, type StaffUser, type Unit } from "@/db/schema";
 import { hasRole } from "./roles";
-import { bookSlotTx, cancelBookingTx, decrementCounter, groupUnitIds } from "./booking";
+import { activeAppointment, bookSlotTx, cancelBookingTx, decrementCounter, describeUnits, groupUnitIds, otherCustomersFirstBikes } from "./booking";
 import { buildDeadline } from "./build-schedule";
 import { customerKey, customerOrders, groupOrders } from "./customers";
 import { logEvent } from "./events";
@@ -402,6 +402,168 @@ export async function joinVisit(
     });
   }
   return booked;
+}
+
+/**
+ * Combine pickups (README "One visit, several bikes"): the bike `unitId` — and every bike already booked
+ * with it — moves into `into`'s time and visit. Unlike joinVisit this works across customers (a couple's
+ * two orders) and brings a whole multi-bike visit along. Old appointments are cancelled silently and
+ * replaced, so nobody is penalised; each bike still counts against the day's capacity. An unbooked bike
+ * simply joins. `notify` texts each customer whose pickup time changed (or who was added).
+ */
+export async function mergeIntoVisit(
+  dbx: Db,
+  args: { showroom: ShowroomCtx; unitId: string; into: Appointment; actor: string; now?: Date; notify: boolean },
+): Promise<{ moved: string[]; startsAt: Date }> {
+  const { showroom, into, actor } = args;
+  const now = args.now ?? new Date();
+  const tz = showroom.timezone;
+  if (into.status !== "booked" || into.startsAt.getTime() <= now.getTime()) throw new UnitError("That pickup is no longer booked");
+  if (into.showroomId !== showroom.id) throw new UnitError("That pickup is at another store");
+  const [current] = await dbx.select().from(units).where(and(eq(units.id, args.unitId), eq(units.showroomId, showroom.id)));
+  if (!current) throw new UnitError("Unit not found");
+  if (!["received", "invited", "booked", "building", "ready"].includes(current.status)) throw new UnitError(`This bike is ${current.status} and can't be added to a pickup`);
+  if (current.status === "received") await inviteUnit(dbx, { showroom, unitId: current.id, actor, now, silent: true });
+  const groupId = await ensureGroup(dbx, into);
+
+  const result = await withOutbox(dbx, async (tx, outbox) => {
+    const active = await activeAppointment(tx, current.id);
+    if (active && (active.id === into.id || active.groupId === groupId)) throw new UnitError("These bikes are already in the same pickup");
+    const moving = active ? await groupUnitIds(tx, active) : [current.id];
+    const oldIds = new Map<string, string>();
+    if (active) {
+      const ids = active.groupId
+        ? (await tx.select({ id: appointments.id, unitId: appointments.unitId }).from(appointments).where(and(eq(appointments.groupId, active.groupId), eq(appointments.status, "booked"))))
+        : [{ id: active.id, unitId: active.unitId }];
+      for (const r of ids) oldIds.set(r.unitId, r.id);
+      // Cancels the whole visit, silently (staff reason: no penalty, no cutoff).
+      await cancelBookingTx(tx, outbox, { showroom, unitId: current.id, reason: "staff", actor, now, silent: true, _rescheduling: true });
+    }
+    const booked: { unit: Unit; order: Order | null; appointment: Appointment }[] = [];
+    for (const unitId of moving) {
+      const old = oldIds.get(unitId);
+      const b = await bookSlotTx(tx, outbox, { showroom, unitId, startsAt: into.startsAt, createdBy: actor, now, allowShortNotice: true, groupId, silent: true, replacingAppointmentId: old });
+      if (old) await tx.update(appointments).set({ replacedBy: b.appointment.id }).where(eq(appointments.id, old));
+      booked.push(b);
+    }
+    await logEvent(tx, { showroomId: showroom.id, unitId: current.id, orderId: current.orderId ?? undefined, appointmentId: into.id, type: "pickups_combined", actor, payload: { into: into.id, bikes: moving.length, from_starts_at: active?.startsAt.toISOString() ?? null, starts_at: into.startsAt.toISOString() } });
+    return { booked, fromTime: active?.startsAt ?? null };
+  });
+
+  if (args.notify) {
+    const visit = await groupUnitIds(dbx, into);
+    const summary = await describeUnits(dbx, visit);
+    const moved = result.booked.map((b) => b.unit.id);
+    for (const unitId of [moved[0], ...(await otherCustomersFirstBikes(dbx, moved))]) {
+      const b = result.booked.find((x) => x.unit.id === unitId)!;
+      if (!b.order) continue;
+      const extra = { ...summary, combined: true, slot_start_local: formatDateTime(into.startsAt, tz), slot_end_local: formatDateTime(b.appointment.endsAt, tz) };
+      if (result.fromTime && result.fromTime.getTime() !== into.startsAt.getTime()) {
+        await sendUnitMessage(dbx, { showroom, unit: b.unit, order: b.order, metric: METRIC.rescheduled, dedupeKey: b.appointment.id, actor, extra: { ...extra, old_slot_start_local: formatDateTime(result.fromTime, tz), late_change: false } });
+      } else if (!result.fromTime) {
+        await sendUnitMessage(dbx, { showroom, unit: b.unit, order: b.order, metric: METRIC.bikeArrived, dedupeKey: `joined:${into.id}:${b.appointment.id}`, actor, extra: { ...extra, joined_existing_pickup: true } });
+      }
+    }
+  }
+  return { moved: result.booked.map((b) => b.unit.id), startsAt: into.startsAt };
+}
+
+/**
+ * Split one bike out of a shared pickup into its own booking at `startsAt` (which may be the same time,
+ * if the day allows another pickup then). The rest of the visit is untouched. From then on the two
+ * bookings reschedule, cancel and remind separately.
+ */
+export async function splitFromVisit(
+  dbx: Db,
+  args: { showroom: ShowroomCtx; unitId: string; startsAt: Date; actor: string; now?: Date; notify: boolean },
+): Promise<Appointment> {
+  const { showroom, actor } = args;
+  const now = args.now ?? new Date();
+  const tz = showroom.timezone;
+  const result = await withOutbox(dbx, async (tx, outbox) => {
+    const active = await activeAppointment(tx, args.unitId);
+    if (!active || active.showroomId !== showroom.id) throw new UnitError("This bike isn't booked");
+    if ((await groupUnitIds(tx, active)).length < 2) throw new UnitError("This bike already has its own pickup — use Reschedule");
+    const cancelled = await cancelBookingTx(tx, outbox, { showroom, unitId: args.unitId, reason: "staff", actor, now, silent: true, _inGroup: true, _rescheduling: true });
+    const b = await bookSlotTx(tx, outbox, { showroom, unitId: args.unitId, startsAt: args.startsAt, createdBy: actor, now, allowShortNotice: true, silent: true, replacingAppointmentId: cancelled.appointment.id });
+    await tx.update(appointments).set({ replacedBy: b.appointment.id }).where(eq(appointments.id, cancelled.appointment.id));
+    await logEvent(tx, { showroomId: showroom.id, unitId: args.unitId, orderId: b.unit.orderId ?? undefined, appointmentId: b.appointment.id, type: "pickup_split", actor, payload: { from_group: active.groupId, from_starts_at: active.startsAt.toISOString(), starts_at: args.startsAt.toISOString() } });
+    return { ...b, fromTime: active.startsAt };
+  });
+  if (args.notify && result.order && result.fromTime.getTime() !== args.startsAt.getTime()) {
+    await sendUnitMessage(dbx, {
+      showroom,
+      unit: result.unit,
+      order: result.order,
+      metric: METRIC.rescheduled,
+      dedupeKey: result.appointment.id,
+      actor,
+      extra: {
+        ...(await describeUnits(dbx, [result.unit.id])),
+        old_slot_start_local: formatDateTime(result.fromTime, tz),
+        slot_start_local: formatDateTime(result.appointment.startsAt, tz),
+        slot_end_local: formatDateTime(result.appointment.endsAt, tz),
+        late_change: false,
+      },
+    });
+  }
+  return result.appointment;
+}
+
+export type CombineCandidate = { unit: Unit; order: Order | null; appointment: Appointment | null; visitBikes: number; why: string | null };
+
+/**
+ * Bikes this one could share a pickup with, likely matches first: the same customer, then the same
+ * surname, phone or email (a couple ordering under two names). `q` searches everyone else in the store.
+ * Bikes already in this bike's visit are left out.
+ */
+export async function combineCandidates(dbx: Db, showroom: ShowroomCtx, unit: Unit, order: Order | null, q: string, now: Date): Promise<CombineCandidate[]> {
+  const rows = await dbx
+    .select({ unit: units, order: orders })
+    .from(units)
+    .leftJoin(orders, eq(orders.id, units.orderId))
+    .where(and(eq(units.showroomId, showroom.id), inArray(units.status, ["invited", "booked", "building", "ready"]), sql`${units.id} <> ${unit.id}`));
+  const booked = await dbx.select().from(appointments).where(and(eq(appointments.showroomId, showroom.id), eq(appointments.status, "booked"), gt(appointments.startsAt, now)));
+  const apptByUnit = new Map(booked.map((a) => [a.unitId, a]));
+  const groupSize = new Map<string, number>();
+  for (const a of booked) if (a.groupId) groupSize.set(a.groupId, (groupSize.get(a.groupId) ?? 0) + 1);
+  const mine = apptByUnit.get(unit.id);
+
+  const surname = (name: string | null | undefined) => (name ?? "").trim().split(/\s+/).pop()?.toLowerCase() ?? "";
+  const why = (o: Order | null): string | null => {
+    if (!order || !o) return null;
+    if (customerKey(o) === customerKey(order)) return "Same customer";
+    if (normalizePhone(o.customerPhone) && normalizePhone(o.customerPhone) === normalizePhone(order.customerPhone)) return "Same phone";
+    if (o.customerEmail && o.customerEmail.toLowerCase() === order.customerEmail?.toLowerCase()) return "Same email";
+    if (surname(o.customerName).length > 1 && surname(o.customerName) === surname(order.customerName)) return "Same surname";
+    return null;
+  };
+  const needle = q.trim().toLowerCase();
+  const out: CombineCandidate[] = [];
+  for (const r of rows) {
+    const appointment = apptByUnit.get(r.unit.id) ?? null;
+    if (mine && appointment && ((mine.groupId && appointment.groupId === mine.groupId) || appointment.id === mine.id)) continue;
+    // Unbooked bikes need a live invite (book-by window) to be bookable.
+    if (!appointment && (!r.unit.invitedAt || !r.unit.pickupBy)) continue;
+    const reason = why(r.order);
+    const hay = [r.order?.customerName, r.order?.customerPhone, r.order?.customerEmail, r.order?.orderRef, r.unit.model, r.unit.boxTag].filter(Boolean).join(" ").toLowerCase();
+    if (needle ? !hay.includes(needle) : !reason) continue;
+    out.push({ unit: r.unit, order: r.order, appointment, visitBikes: appointment?.groupId ? (groupSize.get(appointment.groupId) ?? 1) : 1, why: reason });
+  }
+  const rank = (c: CombineCandidate) => (c.why === "Same customer" ? 0 : c.why ? 1 : 2);
+  return out.sort((a, b) => rank(a) - rank(b) || (a.appointment?.startsAt.getTime() ?? Infinity) - (b.appointment?.startsAt.getTime() ?? Infinity)).slice(0, 30);
+}
+
+/** Unbooked, bookable bikes in this store by id — staff picked them to book together with another customer's bike. */
+export async function bookableCompanions(dbx: Db, showroom: ShowroomCtx, unitIds: string[]): Promise<Unit[]> {
+  if (unitIds.length === 0) return [];
+  const rows = await dbx.select().from(units).where(and(eq(units.showroomId, showroom.id), inArray(units.id, unitIds), inArray(units.status, ["invited", "building", "ready"])));
+  const out: Unit[] = [];
+  for (const u of rows) {
+    const [a] = await dbx.select({ id: appointments.id }).from(appointments).where(and(eq(appointments.unitId, u.id), eq(appointments.status, "booked"))).limit(1);
+    if (!a && u.invitedAt && u.pickupBy) out.push(u);
+  }
+  return out;
 }
 
 export async function inviteAllReceived(

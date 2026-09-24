@@ -64,6 +64,13 @@
       "when": 1788898281717,
       "tag": "0008_true_mentallo",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1790269908823,
+      "tag": "0009_smart_lilandra",
+      "breakpoints": true
     }
   ]
 }
