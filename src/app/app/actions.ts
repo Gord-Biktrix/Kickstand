@@ -16,7 +16,7 @@ import { FLAG_KEYS, PROGRAM_KEYS, settingsSchema, validateSettings, type Program
 import { getCapacityConfig, patchShowroomSettings } from "@/lib/showroom";
 import { formatDateTime, normalizeTime } from "@/lib/time";
 import { hashToken } from "@/lib/tokens";
-import { attachUnit, bookableCompanions, bookableSiblings, mergeIntoVisit, splitFromVisit, collectParts, completeHandover, createOrder, deleteUnit, detachUnit, futureVisitFor, grantExtension, inviteAllReceived, inviteOrders, inviteUnit, inviteUnits, joinVisit, markReady, receiveUnit, resendInvite, retagUnit, startBuild, unreceiveUnit, waiveStorage } from "@/lib/units";
+import { attachUnit, bookableCompanions, bookableSiblings, linkOrdersForPickup, mergeIntoVisit, splitFromVisit, unlinkOrderPickup, collectParts, completeHandover, createOrder, deleteUnit, detachUnit, futureVisitFor, grantExtension, inviteAllReceived, inviteOrders, inviteUnit, inviteUnits, joinVisit, markReady, receiveUnit, resendInvite, retagUnit, startBuild, unreceiveUnit, waiveStorage } from "@/lib/units";
 import { currentShowroom } from "@/lib/current-showroom";
 import { createShowroom, importShowroomsFromLightspeed, setLightspeedLink, updateShowroomDetails } from "@/lib/showroom-admin";
 import { LightspeedClient } from "@/lib/lightspeed";
@@ -123,7 +123,11 @@ export async function inviteUnitAction(unitId: string, returnTo: string) {
   return run(safeReturn(returnTo, "/app/arrivals"), async () => {
     const user = await requireActor("staff");
     const showroom = await currentShowroom();
-    await inviteUnit(db, { showroom, unitId, actor: user.id });
+    // Same path as the bulk invite, so a bike whose customer (or linked partner) already has a pickup joins it.
+    const r = await inviteUnits(db, { showroom, unitIds: [unitId], actor: user.id });
+    if (r.skipped.length) throw new Error(r.skipped.join("; "));
+    if (r.joined) return "Added to the pickup they already have booked — the customer has been texted.";
+    if (!r.invited) throw new Error("This bike has already been invited.");
     return "Invite sent. The clock has started.";
   });
 }
@@ -739,6 +743,25 @@ export async function splitPickupAction(unitId: string, formData: FormData) {
   }
   if (error) redirect(withFlash(back, { error }));
   redirect(withFlash(`/app/units/${unitId}`, { ok: `Split into its own pickup. ${notify ? "The customer was texted if the time changed." : "No message was sent."}` }));
+}
+
+/** On order → tick bikes → "Pick up together": link the orders so they're invited and booked as one visit. */
+export async function pickupTogetherAction(returnTo: string, formData: FormData) {
+  return run(safeReturn(returnTo, "/app/bikes#on-order"), async () => {
+    const user = await requireActor("staff");
+    const showroom = await currentShowroom();
+    const r = await linkOrdersForPickup(db, { showroom, orderIds: formData.getAll("order_ids").map(String), actor: user.id });
+    return `Linked ${r.linked} bikes for ${r.names.join(" & ")} — they'll be invited and booked as one pickup.`;
+  });
+}
+
+export async function unlinkPickupAction(orderId: string, returnTo: string) {
+  return run(safeReturn(returnTo, "/app/bikes#on-order"), async () => {
+    const user = await requireActor("staff");
+    const showroom = await currentShowroom();
+    await unlinkOrderPickup(db, { showroom, orderId, actor: user.id });
+    return "Unlinked — this bike gets its own pickup.";
+  });
 }
 
 /** Staff moves an existing booking to a new slot (customer-requested; the late-change rule applies). */

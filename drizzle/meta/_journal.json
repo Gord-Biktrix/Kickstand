@@ -71,6 +71,13 @@
       "when": 1790269908823,
       "tag": "0009_smart_lilandra",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1790272542540,
+      "tag": "0010_real_owl",
+      "breakpoints": true
     }
   ]
 }

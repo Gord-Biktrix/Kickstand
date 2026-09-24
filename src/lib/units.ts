@@ -1,11 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, eq, gt, inArray, notExists, sql } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, notExists, or, sql } from "drizzle-orm";
 import type { Db, Tx } from "@/db/client";
 import { appointments, events, orders, units, type Appointment, type NewOrder, type Order, type StaffUser, type Unit } from "@/db/schema";
 import { hasRole } from "./roles";
 import { activeAppointment, bookSlotTx, cancelBookingTx, decrementCounter, describeUnits, groupUnitIds, otherCustomersFirstBikes } from "./booking";
 import { buildDeadline } from "./build-schedule";
-import { customerKey, customerOrders, groupOrders } from "./customers";
+import { customerKey, groupOrders, pickupCircleOrders } from "./customers";
 import { logEvent } from "./events";
 import { formatMoney } from "./format";
 import { flushOutbox, METRIC, sendUnitMessage, type Outbox } from "./messages";
@@ -274,38 +274,52 @@ export async function inviteUnits(
     .leftJoin(orders, eq(orders.id, units.orderId))
     .where(and(eq(units.showroomId, showroom.id), inArray(units.id, ids)));
   type Row = Order & { _unit: Unit };
-  const groups = groupOrders<Row>(rows.filter((r) => r.order).map((r) => ({ ...(r.order as Order), _unit: r.unit })));
+  const byPerson = groupOrders<Row>(rows.filter((r) => r.order).map((r) => ({ ...(r.order as Order), _unit: r.unit })));
+  // Orders linked with "Pick up together" (different names) are one pickup too.
+  const groups: Row[][] = [];
+  for (const g of byPerson) {
+    const links = new Set(g.map((o) => o.pickupGroup).filter(Boolean));
+    const hit = links.size ? groups.find((x) => x.some((o) => o.pickupGroup && links.has(o.pickupGroup))) : undefined;
+    if (hit) hit.push(...g);
+    else groups.push([...g]);
+  }
   for (const group of groups) {
-    const ready = group.map((g) => g._unit).filter((u) => u.status === "received");
+    const readyRows = group.filter((g) => g._unit.status === "received");
+    const ready = readyRows.map((g) => g._unit);
     if (ready.length === 0) continue;
-    const primaryOrder = group[0];
+    const primaryOrder = readyRows.find((g) => g.customerEmail || g.customerPhone) ?? group[0];
     if (!primaryOrder.customerEmail && !primaryOrder.customerPhone) {
       result.skipped.push(`${primaryOrder.customerName}: no phone or email on the order`);
       continue;
     }
+    const orderOf = (u: Unit) => readyRows.find((g) => g._unit.id === u.id) ?? primaryOrder;
+    // One arrival text per person in the pickup (a linked couple each hear about both bikes).
+    const told = new Set<string>();
     const visit = await futureVisitFor(dbx, showroom, primaryOrder, now);
     const joinable = visit ? await canJoinVisit(dbx, showroom, visit, now) : false;
     const summary = { bike_count: ready.length, bikes: ready.map((u) => [u.model, u.colour, u.size].filter(Boolean).join(" · ")) };
-    let announced = false;
     for (const unit of ready) {
+      const person = customerKey(orderOf(unit));
+      const announced = told.has(person);
       try {
         if (visit && joinable) {
           try {
             await joinVisit(dbx, { showroom, unitId: unit.id, visit, actor: args.actor, now, notify: !announced, extra: summary, dedupeKey: `joined:${visit.id}:${now.toISOString()}` });
-            announced = true;
+            told.add(person);
             result.joined++;
             continue;
           } catch {
             // Could not join (day full, slot passed …): the bike is invited on its own below and the customer picks a time.
             let [fresh] = await dbx.select().from(units).where(eq(units.id, unit.id));
             if (fresh.status === "received") fresh = (await inviteUnit(dbx, { showroom, unitId: unit.id, actor: args.actor, now, silent: true })).unit;
-            await sendUnitMessage(dbx, { showroom, unit: fresh, order: primaryOrder, metric: METRIC.bikeArrived, dedupeKey: `invite:${unit.id}`, actor: args.actor, extra: summary });
+            if (!announced) await sendUnitMessage(dbx, { showroom, unit: fresh, order: orderOf(unit), metric: METRIC.bikeArrived, dedupeKey: `invite:${unit.id}`, actor: args.actor, extra: summary });
+            told.add(person);
             result.invited++;
             continue;
           }
         }
         await inviteUnit(dbx, { showroom, unitId: unit.id, actor: args.actor, now, silent: announced, extra: summary });
-        announced = true;
+        told.add(person);
         result.invited++;
       } catch (err) {
         result.skipped.push(`${primaryOrder.customerName} · ${unit.model}: ${err instanceof Error ? err.message : String(err)}`);
@@ -317,7 +331,7 @@ export async function inviteUnits(
 
 /** The customer's next booked appointment (any of their bikes, optionally not this one), or null. */
 export async function futureVisitFor(dbx: Db, showroom: ShowroomCtx, order: Order, now: Date, opts: { excludeUnitId?: string } = {}): Promise<Appointment | null> {
-  const theirs = await customerOrders(dbx, showroom, customerKey(order));
+  const theirs = await pickupCircleOrders(dbx, showroom, order);
   if (theirs.length === 0) return null;
   const [a] = await dbx
     .select({ appointment: appointments })
@@ -564,6 +578,37 @@ export async function bookableCompanions(dbx: Db, showroom: ShowroomCtx, unitIds
     if (!a && u.invitedAt && u.pickupBy) out.push(u);
   }
   return out;
+}
+
+/**
+ * "Pick up together" on the On order list: link orders (usually different names — a couple) so their bikes
+ * are invited and booked as one visit, whichever arrives first. Joins any group one of them is already in.
+ */
+export async function linkOrdersForPickup(dbx: Db, args: { showroom: ShowroomCtx; orderIds: string[]; actor: string }): Promise<{ linked: number; names: string[] }> {
+  const ids = [...new Set(args.orderIds)];
+  if (ids.length < 2) throw new UnitError("Tick at least two bikes to pick up together");
+  const picked = await dbx.select().from(orders).where(and(eq(orders.showroomId, args.showroom.id), inArray(orders.id, ids)));
+  if (picked.length !== ids.length) throw new UnitError("Some of those orders are not at this store");
+  if (picked.some((o) => !["open", "deferred"].includes(o.status))) throw new UnitError("Only open orders can be linked");
+  const existing = [...new Set(picked.map((o) => o.pickupGroup).filter((g): g is string => !!g))];
+  const group = existing[0] ?? randomUUID();
+  const members = await dbx
+    .update(orders)
+    .set({ pickupGroup: group })
+    .where(and(eq(orders.showroomId, args.showroom.id), existing.length ? or(inArray(orders.id, ids), inArray(orders.pickupGroup, existing)) : inArray(orders.id, ids)))
+    .returning();
+  for (const o of members) await logEvent(dbx, { showroomId: args.showroom.id, orderId: o.id, type: "pickup_linked", actor: args.actor, payload: { group, with: members.filter((m) => m.id !== o.id).map((m) => m.customerName) } });
+  return { linked: members.length, names: [...new Set(members.map((m) => m.customerName))] };
+}
+
+/** Undo "Pick up together" for one order; a group left with one order is dissolved. */
+export async function unlinkOrderPickup(dbx: Db, args: { showroom: ShowroomCtx; orderId: string; actor: string }): Promise<void> {
+  const [order] = await dbx.select().from(orders).where(and(eq(orders.id, args.orderId), eq(orders.showroomId, args.showroom.id)));
+  if (!order?.pickupGroup) return;
+  await dbx.update(orders).set({ pickupGroup: null }).where(eq(orders.id, order.id));
+  const rest = await dbx.select({ id: orders.id }).from(orders).where(eq(orders.pickupGroup, order.pickupGroup));
+  if (rest.length === 1) await dbx.update(orders).set({ pickupGroup: null }).where(eq(orders.id, rest[0].id));
+  await logEvent(dbx, { showroomId: args.showroom.id, orderId: order.id, type: "pickup_unlinked", actor: args.actor, payload: { group: order.pickupGroup } });
 }
 
 export async function inviteAllReceived(
@@ -1096,7 +1141,7 @@ export async function inviteOrders(
  */
 export async function bookableSiblings(dbx: Db, showroom: ShowroomCtx, unit: Unit, order: Order | null): Promise<{ unit: Unit; order: Order }[]> {
   if (!order) return [];
-  const theirs = await customerOrders(dbx, showroom, customerKey(order));
+  const theirs = await pickupCircleOrders(dbx, showroom, order);
   if (theirs.length === 0) return [];
   const rows = await dbx
     .select({ unit: units, order: orders })

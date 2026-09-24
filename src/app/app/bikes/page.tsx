@@ -13,7 +13,9 @@ import { allBikes, inviteStatuses, type BikeRow } from "@/lib/queries";
 import { InviteBadge } from "@/components/invite-badge";
 import { ordersOnOrder } from "@/lib/special-orders";
 import { daysBetween, formatDateTime, formatLongDate, formatLongDateFromLocal, formatShortDateFromLocal, toLocalDate } from "@/lib/time";
-import { bulkBikesAction, inviteOrdersAction, inviteUnitAction, markReadyAction, startBuildAction, syncSpecialOrdersAction } from "../actions";
+import { bulkBikesAction, inviteOrdersAction, inviteUnitAction, markReadyAction, pickupTogetherAction, startBuildAction, syncSpecialOrdersAction, unlinkPickupAction } from "../actions";
+import { inArray } from "drizzle-orm";
+import { orders, type Order } from "@/db/schema";
 import { currentShowroom } from "@/lib/current-showroom";
 import { ContactFlag } from "@/components/contact-flag";
 
@@ -65,6 +67,12 @@ export default async function BikesPage({ searchParams }: { searchParams: Promis
   const onOrderText = (sp(q.oq) ?? "").trim().toLowerCase();
   const models = [...new Set(onOrderAll.map((o) => o.model))].sort();
   const onOrder = onOrderAll.filter((o) => (!modelFilter || o.model === modelFilter) && (!onOrderText || [o.model, o.size, o.colour, o.customerName, o.orderRef, o.customerPhone, o.lsNote].filter(Boolean).join(" ").toLowerCase().includes(onOrderText)));
+  // "Pick up together" links (any name) and the same person's several bikes, shown on each On order row.
+  const groupIds = [...new Set(onOrderAll.map((o) => o.pickupGroup).filter((g): g is string => !!g))];
+  const linkedOrders = groupIds.length ? await db.select().from(orders).where(inArray(orders.pickupGroup, groupIds)) : [];
+  const partnersOf = (o: Order) => (o.pickupGroup ? [...new Set(linkedOrders.filter((l) => l.pickupGroup === o.pickupGroup && l.id !== o.id).map((l) => (l.customerName === o.customerName ? "their other bike" : l.customerName)))] : []);
+  const perPerson = new Map<string, number>();
+  for (const o of onOrderAll) perPerson.set(customerKey(o), (perPerson.get(customerKey(o)) ?? 0) + 1);
   const ON_ORDER_RETURN = `/app/bikes?filter=${filter}${modelFilter ? `&model=${encodeURIComponent(modelFilter)}` : ""}${onOrderText ? `&oq=${encodeURIComponent(onOrderText)}` : ""}#on-order`;
   const rows = all.filter((r) => matches(r, filter)).filter((r) => !date || r.appointment?.onDate === date).filter((r) => {
     if (!text) return true;
@@ -244,6 +252,7 @@ export default async function BikesPage({ searchParams }: { searchParams: Promis
               <BulkSelect total={onOrder.length} name="order_ids" label="Select bikes to invite" />
               <div className="ml-auto flex items-center gap-2">
                 <span className="text-xs text-muted">Inviting receives the bike under its sale # and texts the booking link.</span>
+                <button type="submit" formAction={pickupTogetherAction.bind(null, ON_ORDER_RETURN)} className="btn btn-sm" title="Link the ticked bikes — even under different names — so they're invited and booked as one pickup">Pick up together</button>
                 <button type="submit" className="btn btn-primary btn-sm">Send invites</button>
               </div>
             </form>
@@ -262,6 +271,14 @@ export default async function BikesPage({ searchParams }: { searchParams: Promis
                       <td>
                         <Link className="hover:text-accent" href={`/app/customers/${encodeURIComponent(customerKey(o))}`}>{o.customerName}</Link><ContactFlag order={o} />
                         <p className="text-xs text-muted">{o.customerPhone ?? o.customerEmail ?? <span className="text-danger">no contact</span>}</p>
+                        {partnersOf(o).length > 0 ? (
+                          <div className="mt-1 flex flex-wrap items-center gap-1">
+                            <Badge tone="accent">Picks up with {partnersOf(o).join(", ")}</Badge>
+                            <form action={unlinkPickupAction.bind(null, o.id, ON_ORDER_RETURN)}><button type="submit" className="text-xs text-muted underline hover:text-fg" title="Give this bike its own pickup">unlink</button></form>
+                          </div>
+                        ) : (perPerson.get(customerKey(o)) ?? 0) > 1 ? (
+                          <p className="mt-1 text-xs text-muted">{perPerson.get(customerKey(o))} bikes on order · invited and booked together</p>
+                        ) : null}
                       </td>
                       <td className="text-xs text-muted">{formatShortDateFromLocal(o.orderDate)} · {daysBetween(o.orderDate, today)}d · {o.source} {o.orderRef}</td>
                       <td className="text-right">

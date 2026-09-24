@@ -69,6 +69,20 @@ export function groupOrders<T extends Ident>(rows: T[]): T[][] {
   return groups;
 }
 
+/**
+ * Everyone who collects with this customer: their own orders (same person) plus any orders staff linked
+ * with "Pick up together" (orders.pickup_group). One level: a linked partner's other orders only join
+ * when they are linked too.
+ */
+export async function pickupCircleOrders(dbx: Db, showroom: ShowroomCtx, order: Order): Promise<Order[]> {
+  const theirs = await customerOrders(dbx, showroom, customerKey(order));
+  const own = theirs.some((o) => o.id === order.id) ? theirs : [order, ...theirs];
+  const groups = [...new Set(own.map((o) => o.pickupGroup).filter((g): g is string => !!g))];
+  if (groups.length === 0) return own;
+  const linked = await dbx.select().from(orders).where(and(eq(orders.showroomId, showroom.id), inArray(orders.pickupGroup, groups)));
+  return [...own, ...linked.filter((l) => own.every((o) => o.id !== l.id))];
+}
+
 /** SQL: the order's phone, digits only, contains these digits (formatting-insensitive). */
 function phoneDigits(digits: string) {
   return sql`regexp_replace(coalesce(${orders.customerPhone}, ''), '\\D', '', 'g') like ${`%${digits.slice(-10)}%`}`;

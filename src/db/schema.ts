@@ -131,9 +131,15 @@ export const orders = pgTable(
     lsSaleLineId: text("ls_sale_line_id").unique(),
     /** The note staff typed on that Lightspeed sale line ("wants the black rack", "call before build"). Synced, read-only here. */
     lsNote: text("ls_note"),
+    /**
+     * Orders staff linked with "Pick up together" (a couple buying under two names). Orders sharing it are
+     * invited and booked as one visit, whoever's bike arrives first. The same person's orders need no link.
+     */
+    pickupGroup: uuid("pickup_group"),
     ...timestamps,
   },
   (t) => [
+    index("orders_pickup_group").on(t.pickupGroup).where(sql`pickup_group is not null`),
     unique("orders_showroom_source_ref").on(t.showroomId, t.source, t.orderRef),
     check("orders_source_check", sql`${t.source} in ('lightspeed','shopify','manual')`),
     check("orders_payment_status_check", sql`${t.paymentStatus} in ('paid','deposit')`),
