@@ -19,6 +19,7 @@ import {
   type BookingLocation,
   type WeeklyHours,
 } from "@/lib/booking-types";
+import { baseUrl } from "@/lib/messages";
 import { addPresetBookingTypeAction, createBookingTypeAction, setBookingTypeActiveAction, updateBookingTypeAction } from "../../actions";
 
 export const metadata = { title: "Booking types" };
@@ -45,6 +46,10 @@ export default async function BookingTypesPage({ searchParams }: { searchParams:
           : "What customers can book at this store. Each type has its own length, hours and notice. Other stores and the online team keep their own lists."}
       />
       <Flash ok={sp(q.ok)} error={sp(q.error)} />
+      <p className="mb-4 text-sm">
+        Public booking page: <a href={`/book/${showroom.slug}`} target="_blank" rel="noreferrer" className="font-medium underline">{baseUrl()}/book/{showroom.slug}</a>
+        <span className="text-muted"> · lists every public type that&apos;s switched on. Each type also has its own link, shown on its card.</span>
+      </p>
       <div className="grid gap-6 lg:grid-cols-[340px_minmax(0,1fr)]">
         <div className="space-y-6">
           <Card title="Add a booking type">
@@ -74,7 +79,7 @@ export default async function BookingTypesPage({ searchParams }: { searchParams:
         <div className="min-w-0 space-y-4">
           {types.length === 0 && <Card><p className="text-sm text-muted">No booking types yet. Add one on the left.</p></Card>}
           {types.map((t) => (
-            <TypeCard key={t.id} t={t} online={online} />
+            <TypeCard key={t.id} t={t} online={online} profileSlug={showroom.slug} />
           ))}
         </div>
       </div>
@@ -82,7 +87,7 @@ export default async function BookingTypesPage({ searchParams }: { searchParams:
   );
 }
 
-function TypeCard({ t, online }: { t: BookingType; online: boolean }) {
+function TypeCard({ t, online, profileSlug }: { t: BookingType; online: boolean; profileSlug: string }) {
   const pickup = t.kind === "pickup";
   return (
     <Card
@@ -106,6 +111,7 @@ function TypeCard({ t, online }: { t: BookingType; online: boolean }) {
         </p>
       ) : (
         <p className="text-sm text-muted">
+          {t.access === "public" && t.active && <><a href={`/book/${profileSlug}/${t.slug}`} target="_blank" rel="noreferrer" className="underline">/book/{profileSlug}/{t.slug}</a> · </>}
           {LOCATION_LABEL[t.location as BookingLocation]} · {t.durationMin} min{t.bufferMin ? ` + ${t.bufferMin} min buffer` : ""} · {hoursSummary(t.hours as WeeklyHours)} · {t.capacityMode === "bench" ? `${t.benchCapacity} at a time` : "one per staff member"} · {t.noticeMin >= 60 ? `${+(t.noticeMin / 60).toFixed(1)} h` : `${t.noticeMin} min`} notice · up to {t.horizonDays} days ahead{t.createsWorkOrder ? " · creates a Lightspeed work order" : ""}
         </p>
       )}

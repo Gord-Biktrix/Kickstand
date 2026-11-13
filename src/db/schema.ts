@@ -367,6 +367,47 @@ export const bookingTypes = pgTable(
   ],
 );
 
+/**
+ * A customer's booking of a standard booking type (test ride, service, video call…). Bike pickups keep
+ * using `appointments` (tied to a unit, day counters, storage); everything else lands here. `ends_at` is the
+ * end of the appointment itself; the type's buffer is applied when checking overlaps. The manage link token
+ * is stored hashed (lookup) and encrypted (to put it in later messages), like units.
+ */
+export const bookings = pgTable(
+  "bookings",
+  {
+    id: id(),
+    showroomId: uuid("showroom_id")
+      .notNull()
+      .references(() => showrooms.id),
+    bookingTypeId: uuid("booking_type_id")
+      .notNull()
+      .references(() => bookingTypes.id),
+    onDate: date("on_date").notNull(),
+    startsAt: timestamp("starts_at", { withTimezone: true }).notNull(),
+    endsAt: timestamp("ends_at", { withTimezone: true }).notNull(),
+    status: text("status").notNull().default("booked"),
+    customerName: text("customer_name").notNull(),
+    customerEmail: text("customer_email"),
+    customerPhone: text("customer_phone"),
+    smsConsent: boolean("sms_consent").notNull().default(false),
+    customerNote: text("customer_note").notNull().default(""),
+    tokenHash: text("token_hash").notNull().unique(),
+    tokenEnc: text("token_enc").notNull(),
+    createdBy: text("created_by").notNull(),
+    cancelledReason: text("cancelled_reason"),
+    rescheduleCount: smallint("reschedule_count").notNull().default(0),
+    lsWorkorderId: text("ls_workorder_id"),
+    ...timestamps,
+  },
+  (t) => [
+    index("bookings_day_booked").on(t.showroomId, t.onDate).where(sql`status = 'booked'`),
+    index("bookings_type_booked").on(t.bookingTypeId, t.startsAt).where(sql`status = 'booked'`),
+    check("bookings_status_check", sql`${t.status} in ('booked','completed','no_show','cancelled')`),
+    check("bookings_contact_check", sql`${t.customerEmail} is not null or ${t.customerPhone} is not null`),
+  ],
+);
+
 /** A staff-defined view over the work-order mirror: a name plus the Lightspeed statuses it includes. */
 export const workorderViews = pgTable("workorder_views", {
   id: id(),
@@ -384,6 +425,7 @@ export type LsWorkorder = typeof lsWorkorders.$inferSelect;
 export type LsWorkorderStatus = typeof lsWorkorderStatuses.$inferSelect;
 export type WorkorderView = typeof workorderViews.$inferSelect;
 export type BookingType = typeof bookingTypes.$inferSelect;
+export type Booking = typeof bookings.$inferSelect;
 
 export type Order = typeof orders.$inferSelect;
 export type NewOrder = typeof orders.$inferInsert;
