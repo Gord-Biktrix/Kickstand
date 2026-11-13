@@ -2,6 +2,7 @@ import { config } from "dotenv";
 import { eq } from "drizzle-orm";
 import { createDb } from "../src/db/client";
 import { capacityRules, orders, showrooms, staffUsers } from "../src/db/schema";
+import { ensurePickupType } from "../src/lib/booking-types";
 import { DEFAULT_SETTINGS } from "../src/lib/settings";
 
 config({ path: process.env.ENV_FILE ?? ".env.local" });
@@ -23,6 +24,8 @@ export async function seed(db: ReturnType<typeof createDb>, opts: { sampleOrders
       set: { name: "Biktrix Vancouver", timezone: "America/Vancouver" },
     })
     .returning();
+
+  await ensurePickupType(db, showroom.id);
 
   const template = [
     { weekday: 0, capacity: 0, windowStart: "12:00", windowEnd: "17:15", maxConcurrent: 1 },

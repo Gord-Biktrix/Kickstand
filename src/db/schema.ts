@@ -10,16 +10,21 @@ const timestamps = {
     .$onUpdate(() => new Date()),
 };
 
+/**
+ * A booking profile. `kind` "showroom" is a physical store (pickups, special orders, Lightspeed shop);
+ * "online" is a team with no address (online sales: video and phone calls) that only has booking types.
+ */
 export const showrooms = pgTable("showrooms", {
   id: id(),
   slug: text("slug").notNull().unique(),
   name: text("name").notNull(),
+  kind: text("kind").notNull().default("showroom"),
   timezone: text("timezone").notNull(),
   addressLine: text("address_line").notNull(),
   phone: text("phone"),
   settings: jsonb("settings").$type<Record<string, unknown>>().notNull().default({}),
   ...timestamps,
-});
+}, (t) => [check("showrooms_kind_check", sql`${t.kind} in ('showroom','online')`)]);
 
 export const staffUsers = pgTable(
   "staff_users",
@@ -29,6 +34,8 @@ export const staffUsers = pgTable(
     name: text("name").notNull(),
     role: text("role").notNull(),
     showroomId: uuid("showroom_id").references(() => showrooms.id),
+    /** Other profiles this person works in besides their home store (e.g. floor staff who also take online calls). */
+    extraShowroomIds: uuid("extra_showroom_ids").array().notNull().default(sql`'{}'::uuid[]`),
     active: boolean("active").notNull().default(true),
     /** Optional password sign-in (scrypt hash, see lib/passwords.ts). Null = Google / emailed link only. */
     passwordHash: text("password_hash"),
@@ -318,6 +325,48 @@ export const lsWorkorders = pgTable(
   (t) => [index("ls_workorders_showroom_status_idx").on(t.showroomId, t.statusId)],
 );
 
+/**
+ * What customers can book with a profile (Calendly "event types"). `kind` "pickup" is the invite-only bike
+ * pickup, whose slots still come from capacity_rules; "standard" types (test ride, service, video call…) use
+ * the fields below. `hours` is weekly opening per weekday (0 = Sunday), each a list of [start, end] "HH:MM".
+ * capacity_mode "bench" = up to bench_capacity bookings at once for the profile; "staff" = one per free staff member.
+ */
+export const bookingTypes = pgTable(
+  "booking_types",
+  {
+    id: id(),
+    showroomId: uuid("showroom_id")
+      .notNull()
+      .references(() => showrooms.id),
+    slug: text("slug").notNull(),
+    name: text("name").notNull(),
+    description: text("description").notNull().default(""),
+    kind: text("kind").notNull().default("standard"),
+    access: text("access").notNull().default("public"),
+    location: text("location").notNull().default("in_person"),
+    durationMin: smallint("duration_min").notNull().default(30),
+    bufferMin: smallint("buffer_min").notNull().default(0),
+    slotStepMin: smallint("slot_step_min").notNull().default(30),
+    noticeMin: integer("notice_min").notNull().default(240),
+    horizonDays: smallint("horizon_days").notNull().default(60),
+    capacityMode: text("capacity_mode").notNull().default("bench"),
+    benchCapacity: smallint("bench_capacity").notNull().default(1),
+    hours: jsonb("hours").$type<Record<string, [string, string][]>>().notNull().default({}),
+    createsWorkOrder: boolean("creates_work_order").notNull().default(false),
+    active: boolean("active").notNull().default(true),
+    sortOrder: smallint("sort_order").notNull().default(0),
+    ...timestamps,
+  },
+  (t) => [
+    unique("booking_types_showroom_slug").on(t.showroomId, t.slug),
+    check("booking_types_kind_check", sql`${t.kind} in ('standard','pickup')`),
+    check("booking_types_access_check", sql`${t.access} in ('public','invite')`),
+    check("booking_types_location_check", sql`${t.location} in ('in_person','video','phone')`),
+    check("booking_types_capacity_mode_check", sql`${t.capacityMode} in ('bench','staff')`),
+    check("booking_types_numbers_check", sql`${t.durationMin} between 5 and 480 and ${t.bufferMin} between 0 and 240 and ${t.slotStepMin} between 5 and 240 and ${t.noticeMin} >= 0 and ${t.horizonDays} between 1 and 365 and ${t.benchCapacity} between 1 and 50`),
+  ],
+);
+
 /** A staff-defined view over the work-order mirror: a name plus the Lightspeed statuses it includes. */
 export const workorderViews = pgTable("workorder_views", {
   id: id(),
@@ -334,6 +383,7 @@ export const workorderViews = pgTable("workorder_views", {
 export type LsWorkorder = typeof lsWorkorders.$inferSelect;
 export type LsWorkorderStatus = typeof lsWorkorderStatuses.$inferSelect;
 export type WorkorderView = typeof workorderViews.$inferSelect;
+export type BookingType = typeof bookingTypes.$inferSelect;
 
 export type Order = typeof orders.$inferSelect;
 export type NewOrder = typeof orders.$inferInsert;

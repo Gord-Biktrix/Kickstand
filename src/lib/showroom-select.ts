@@ -9,7 +9,7 @@ import { listShowrooms, type ShowroomCtx } from "./showroom";
 
 export const SHOWROOM_COOKIE = "ks_showroom";
 
-export type UserLike = Pick<StaffUser, "role" | "showroomId"> | null;
+export type UserLike = (Pick<StaffUser, "role" | "showroomId"> & Partial<Pick<StaffUser, "extraShowroomIds">>) | null;
 
 /** Anyone signed in may *look at* any store (Gord: "view access only"). Editing is a separate question — see canEditShowroom. */
 export function canSwitchShowroom(user: UserLike): boolean {
@@ -17,13 +17,14 @@ export function canSwitchShowroom(user: UserLike): boolean {
 }
 
 /**
- * Admins edit everywhere. Managers and staff edit only their home store; another store is view-only.
+ * Admins edit everywhere. Managers and staff edit their home store and any extra profile they belong to
+ * (staff_users.extra_showroom_ids, e.g. floor staff who also take online calls); others are view-only.
  * An account with no home store is treated as at home everywhere (legacy single-store accounts).
  */
 export function canEditShowroom(user: UserLike, showroom: Pick<ShowroomCtx, "id">): boolean {
   if (!user) return false;
   if (hasRole(user.role, "admin")) return true;
-  return !user.showroomId || user.showroomId === showroom.id;
+  return !user.showroomId || user.showroomId === showroom.id || (user.extraShowroomIds ?? []).includes(showroom.id);
 }
 
 /** Why the current store is read-only for this user, or null when they may edit it. */

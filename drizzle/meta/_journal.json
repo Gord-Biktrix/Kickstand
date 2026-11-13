@@ -78,6 +78,13 @@
       "when": 1790272542540,
       "tag": "0010_real_owl",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1794528049543,
+      "tag": "0011_wandering_living_lightning",
+      "breakpoints": true
     }
   ]
 }

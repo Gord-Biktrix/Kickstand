@@ -237,7 +237,7 @@ export async function setStaffActive(id: string, active: boolean): Promise<void>
   if (!active) await db.delete(staffSessions).where(eq(staffSessions.staffUserId, id));
 }
 
-export async function updateStaff(id: string, patch: { name?: string; role?: Role; showroomId?: string | null }): Promise<void> {
+export async function updateStaff(id: string, patch: { name?: string; role?: Role; showroomId?: string | null; extraShowroomIds?: string[] }): Promise<void> {
   await db.update(staffUsers).set(patch).where(eq(staffUsers.id, id));
 }
 

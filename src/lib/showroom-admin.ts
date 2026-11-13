@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { capacityRules, showrooms } from "@/db/schema";
+import { ensurePickupType } from "./booking-types";
 import { DEFAULT_SETTINGS, type ProgramSettings } from "./settings";
 import { listShowrooms, patchShowroomSettings, type ShowroomCtx } from "./showroom";
 
@@ -10,7 +11,12 @@ import { listShowrooms, patchShowroomSettings, type ShowroomCtx } from "./showro
  * work-order status mapping and employee. Lightspeed work-order *statuses* are account-wide and may be
  * shared between stores; the shop is what keeps stores apart, and a shop can belong to only one store.
  */
-export type NewShowroom = { slug: string; name: string; timezone: string; addressLine: string; phone: string | null; copyCapacityFrom?: string | null };
+export type ProfileKind = "showroom" | "online";
+export type NewShowroom = { slug: string; name: string; kind?: ProfileKind; timezone: string; addressLine: string; phone: string | null; copyCapacityFrom?: string | null };
+
+export function isProfileKind(v: string): v is ProfileKind {
+  return v === "showroom" || v === "online";
+}
 
 export function slugify(name: string): string {
   return name
@@ -36,11 +42,15 @@ export async function createShowroom(dbx: Db, input: NewShowroom): Promise<Showr
   if (!validTimezone(input.timezone)) throw new Error(`"${input.timezone}" is not a valid time zone (use an IANA name such as America/Regina).`);
   const [taken] = await dbx.select({ id: showrooms.id }).from(showrooms).where(eq(showrooms.slug, slug));
   if (taken) throw new Error(`A store with the id "${slug}" already exists.`);
+  const kind: ProfileKind = input.kind ?? "showroom";
   const settings: ProgramSettings = { ...DEFAULT_SETTINGS, lightspeed: { ...DEFAULT_SETTINGS.lightspeed, enabled: false } };
   const [row] = await dbx
     .insert(showrooms)
-    .values({ slug, name: input.name.trim(), timezone: input.timezone, addressLine: input.addressLine.trim(), phone: input.phone?.trim() || null, settings })
+    .values({ slug, name: input.name.trim(), kind, timezone: input.timezone, addressLine: kind === "online" ? "" : input.addressLine.trim(), phone: input.phone?.trim() || null, settings })
     .returning();
+  // An online team has no pickups, capacity or Lightspeed shop: only booking types.
+  if (kind === "online") return (await listShowrooms(dbx)).find((s) => s.id === row.id)!;
+  await ensurePickupType(dbx, row.id);
   // Capacity: start from another store's weekly template so the calendar isn't empty; adjust in Settings › Capacity.
   if (input.copyCapacityFrom) {
     const [src] = await dbx.select().from(showrooms).where(eq(showrooms.slug, input.copyCapacityFrom));

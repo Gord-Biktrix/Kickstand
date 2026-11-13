@@ -18,7 +18,8 @@ import { formatDateTime, normalizeTime } from "@/lib/time";
 import { hashToken } from "@/lib/tokens";
 import { attachUnit, bookableCompanions, bookableSiblings, linkOrdersForPickup, mergeIntoVisit, splitFromVisit, unlinkOrderPickup, collectParts, completeHandover, createOrder, deleteUnit, detachUnit, futureVisitFor, grantExtension, inviteAllReceived, inviteOrders, inviteUnit, inviteUnits, joinVisit, markReady, receiveUnit, resendInvite, retagUnit, startBuild, unreceiveUnit, waiveStorage } from "@/lib/units";
 import { currentShowroom } from "@/lib/current-showroom";
-import { createShowroom, importShowroomsFromLightspeed, setLightspeedLink, updateShowroomDetails } from "@/lib/showroom-admin";
+import { createShowroom, importShowroomsFromLightspeed, isProfileKind, setLightspeedLink, updateShowroomDetails } from "@/lib/showroom-admin";
+import { createBookingType, NEW_TYPE_DEFAULTS, parseWeeklyHours, PRESETS, setBookingTypeActive, updateBookingType, updatePickupType, validateBookingType, WEEKDAY_8_TO_4, type BookingTypeInput } from "@/lib/booking-types";
 import { LightspeedClient } from "@/lib/lightspeed";
 import { googleEnabled } from "@/lib/google-auth";
 import { mailerKind } from "@/lib/mailer";
@@ -448,7 +449,9 @@ export async function updateStaffAction(id: string, formData: FormData) {
     if (user.id === id) throw new Error("You can't change your own role or store — ask someone above you.");
     await managedTarget(user.role, id);
     if (!assignableRoles(user.role).includes(role)) throw new Error(`You can't make someone a ${roleLabel(role).toLowerCase()}.`);
-    await updateStaff(id, { role, showroomId: str(formData, "showroom_id") || null, name: str(formData, "name") || undefined });
+    const showroomId = str(formData, "showroom_id") || null;
+    const extra = formData.getAll("extra_showroom_ids").map(String).filter((v) => v && v !== showroomId);
+    await updateStaff(id, { role, showroomId, extraShowroomIds: showroomId ? [...new Set(extra)] : [], name: str(formData, "name") || undefined });
     return "Account updated.";
   });
 }
@@ -458,14 +461,18 @@ export async function updateStaffAction(id: string, formData: FormData) {
 export async function createShowroomAction(formData: FormData) {
   return run("/app/settings/stores", async () => {
     await requireActor("admin");
+    const kind = str(formData, "kind") || "showroom";
+    if (!isProfileKind(kind)) throw new Error("Pick a store or the online team.");
     const s = await createShowroom(db, {
       slug: str(formData, "slug"),
       name: str(formData, "name"),
+      kind,
       timezone: str(formData, "timezone") || "America/Vancouver",
       addressLine: str(formData, "address_line"),
       phone: str(formData, "phone") || null,
       copyCapacityFrom: str(formData, "copy_from") || null,
     });
+    if (kind === "online") return `${s.name} created. Switch to it and add its video and phone call types in Settings › Booking types.`;
     return `${s.name} created. Link it to its Lightspeed shop below, then check Settings › Capacity for its hours.`;
   });
 }
@@ -983,4 +990,80 @@ export async function importCsvAction(_prev: ImportState, formData: FormData): P
   } catch (err) {
     return { stage: "idle", error: errorMessage(err) };
   }
+}
+
+// ---- Booking types ---------------------------------------------------------------------------
+
+const BT_PATH = "/app/settings/booking-types";
+
+function bookingTypeFromForm(formData: FormData, profileKind: string): BookingTypeInput {
+  const hours = parseWeeklyHours([0, 1, 2, 3, 4, 5, 6].map((wd) => str(formData, `hours_${wd}`)));
+  const location = str(formData, "location") as BookingTypeInput["location"];
+  return validateBookingType({
+    name: str(formData, "name"),
+    description: str(formData, "description"),
+    location,
+    access: (str(formData, "access") || "public") as BookingTypeInput["access"],
+    durationMin: num(formData, "duration_min", NaN),
+    bufferMin: num(formData, "buffer_min", 0),
+    slotStepMin: num(formData, "slot_step_min", NaN),
+    noticeMin: Math.round(num(formData, "notice_hours", NaN) * 60),
+    horizonDays: num(formData, "horizon_days", NaN),
+    capacityMode: (str(formData, "capacity_mode") || "bench") as BookingTypeInput["capacityMode"],
+    benchCapacity: num(formData, "bench_capacity", 1),
+    hours,
+    createsWorkOrder: bool(formData, "creates_work_order"),
+  }, profileKind);
+}
+
+/** Quick add from a preset (test ride, service, video call…) with the starting values; staff then tune it. */
+export async function addPresetBookingTypeAction(formData: FormData) {
+  return run(BT_PATH, async () => {
+    const user = await requireActor("manager");
+    const showroom = await currentShowroom(user);
+    const preset = PRESETS.find((p) => p.key === str(formData, "preset"));
+    if (!preset) throw new Error("Pick a booking type to add.");
+    const t = await createBookingType(db, showroom.id, validateBookingType({
+      name: preset.name, description: preset.description, location: preset.location, access: "public",
+      durationMin: preset.durationMin, bufferMin: NEW_TYPE_DEFAULTS.bufferMin, slotStepMin: NEW_TYPE_DEFAULTS.slotStepMin,
+      noticeMin: NEW_TYPE_DEFAULTS.noticeMin, horizonDays: NEW_TYPE_DEFAULTS.horizonDays, capacityMode: "bench",
+      benchCapacity: NEW_TYPE_DEFAULTS.benchCapacity, hours: WEEKDAY_8_TO_4, createsWorkOrder: preset.createsWorkOrder,
+    }, showroom.kind));
+    await logEvent(db, { showroomId: showroom.id, type: "booking_type_created", actor: user.id, payload: { booking_type_id: t.id, name: t.name, preset: preset.key } });
+    return `${t.name} added. Check its hours and length below.`;
+  });
+}
+
+export async function createBookingTypeAction(formData: FormData) {
+  return run(BT_PATH, async () => {
+    const user = await requireActor("manager");
+    const showroom = await currentShowroom(user);
+    const t = await createBookingType(db, showroom.id, bookingTypeFromForm(formData, showroom.kind));
+    await logEvent(db, { showroomId: showroom.id, type: "booking_type_created", actor: user.id, payload: { booking_type_id: t.id, name: t.name } });
+    return `${t.name} added.`;
+  });
+}
+
+export async function updateBookingTypeAction(id: string, formData: FormData) {
+  return run(BT_PATH, async () => {
+    const user = await requireActor("manager");
+    const showroom = await currentShowroom(user);
+    if (str(formData, "kind") === "pickup") {
+      await updatePickupType(db, showroom.id, id, { name: str(formData, "name"), description: str(formData, "description") });
+    } else {
+      await updateBookingType(db, showroom.id, id, bookingTypeFromForm(formData, showroom.kind));
+    }
+    await logEvent(db, { showroomId: showroom.id, type: "booking_type_updated", actor: user.id, payload: { booking_type_id: id, name: str(formData, "name") } });
+    return "Booking type saved.";
+  });
+}
+
+export async function setBookingTypeActiveAction(id: string, active: boolean) {
+  return run(BT_PATH, async () => {
+    const user = await requireActor("manager");
+    const showroom = await currentShowroom(user);
+    const t = await setBookingTypeActive(db, showroom.id, id, active);
+    await logEvent(db, { showroomId: showroom.id, type: active ? "booking_type_enabled" : "booking_type_disabled", actor: user.id, payload: { booking_type_id: id, name: t.name } });
+    return active ? `${t.name} is bookable again.` : `${t.name} switched off. Existing bookings stay.`;
+  });
 }

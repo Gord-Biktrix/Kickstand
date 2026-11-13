@@ -13,12 +13,13 @@ import { signOutAction } from "./actions";
 
 // Named after the questions staff ask, not the process steps: what's today, when is everything booked,
 // where is every bike, who is this customer. Receiving a box, the build board and the alerts live inside Bikes.
+// `store: true` items are about physical stock (bikes, parts, Lightspeed work orders): hidden for the online team.
 const NAV = [
   { href: "/app", label: "Today", min: "staff", exact: true },
   { href: "/app/schedule", label: "Appointments", min: "staff" },
-  { href: "/app/bikes", label: "Bikes", min: "staff" },
-  { href: "/app/parts", label: "Parts", min: "staff" },
-  { href: "/app/workorders", label: "Work orders", min: "staff" },
+  { href: "/app/bikes", label: "Bikes", min: "staff", store: true },
+  { href: "/app/parts", label: "Parts", min: "staff", store: true },
+  { href: "/app/workorders", label: "Work orders", min: "staff", store: true },
   { href: "/app/search", label: "Customers", min: "staff" },
   { href: "/app/settings", label: "Settings", min: "manager" },
 ] as const;
@@ -47,8 +48,8 @@ export default async function StaffLayout({ children }: { children: React.ReactN
           )}
           <nav aria-label="Main" className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
             <NavLinks
-              items={NAV.filter((n) => hasRole(user.role, n.min)).map((n) => ({
-                href: n.href === "/app/settings" ? "/app/settings/capacity" : n.href,
+              items={NAV.filter((n) => hasRole(user.role, n.min) && !(showroom.kind === "online" && "store" in n)).map((n) => ({
+                href: n.href === "/app/settings" ? (showroom.kind === "online" ? "/app/settings/booking-types" : "/app/settings/capacity") : n.href,
                 match: n.href === "/app/settings" ? "/app/settings" : undefined,
                 label: n.label,
                 exact: "exact" in n && n.exact,

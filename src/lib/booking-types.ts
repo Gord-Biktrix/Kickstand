@@ -1,0 +1,225 @@
+/**
+ * Booking types: what customers can book with a profile (a showroom or the online sales team), like
+ * Calendly's event types. Pure helpers (presets, hours, validation) sit at the top so they unit-test without
+ * a database; the DB functions follow. The bike pickup is a booking type too (kind "pickup"), but its slots
+ * still come from Settings › Capacity, so only its name, description and on/off switch are edited here.
+ */
+import { and, asc, eq } from "drizzle-orm";
+import type { DbOrTx } from "@/db/client";
+import { bookingTypes, type BookingType } from "@/db/schema";
+
+export type BookingLocation = "in_person" | "video" | "phone";
+export type BookingAccess = "public" | "invite";
+export type CapacityMode = "bench" | "staff";
+export type WeeklyHours = Record<string, [string, string][]>;
+
+export const LOCATION_LABEL: Record<BookingLocation, string> = { in_person: "In person", video: "Video call", phone: "Phone call" };
+export const ACCESS_LABEL: Record<BookingAccess, string> = { public: "Anyone (public booking page)", invite: "Invite link only" };
+export const CAPACITY_LABEL: Record<CapacityMode, string> = { bench: "Bench: a set number at the same time", staff: "Per staff member: one each" };
+export const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
+
+/** Mon–Fri 8am–4pm: the online sales team's hours (Gord, 2026-11-12) and a sensible start for a new type. */
+export const WEEKDAY_8_TO_4: WeeklyHours = { "1": [["08:00", "16:00"]], "2": [["08:00", "16:00"]], "3": [["08:00", "16:00"]], "4": [["08:00", "16:00"]], "5": [["08:00", "16:00"]] };
+
+/**
+ * Starting values for a new type, standing in for YouCanBookMe's defaults (YCBM is switched off, so its
+ * exact settings couldn't be copied): 30-minute bookings on a 30-minute grid, no buffer, at least 4 hours'
+ * notice, up to 60 days ahead. Every value is editable per type.
+ */
+export const NEW_TYPE_DEFAULTS = { durationMin: 30, bufferMin: 0, slotStepMin: 30, noticeMin: 240, horizonDays: 60, benchCapacity: 1 } as const;
+
+export type Preset = {
+  key: string;
+  name: string;
+  description: string;
+  location: BookingLocation;
+  durationMin: number;
+  createsWorkOrder: boolean;
+  /** Which profile kinds the preset makes sense for. */
+  for: ("showroom" | "online")[];
+};
+
+export const PRESETS: Preset[] = [
+  { key: "test-ride", name: "Test ride", description: "Try a bike at the showroom with one of our team.", location: "in_person", durationMin: 45, createsWorkOrder: false, for: ["showroom"] },
+  { key: "service", name: "Service appointment", description: "Bring your bike in for a tune-up or repair.", location: "in_person", durationMin: 60, createsWorkOrder: true, for: ["showroom"] },
+  { key: "showroom-visit", name: "Showroom visit", description: "Come in and talk to an expert about the right bike for you.", location: "in_person", durationMin: 30, createsWorkOrder: false, for: ["showroom"] },
+  { key: "video-call", name: "Video call with an expert", description: "A live video tour of the bikes with a product expert.", location: "video", durationMin: 30, createsWorkOrder: false, for: ["online"] },
+  { key: "phone-call", name: "Phone call with an expert", description: "We call you to answer questions and help you choose.", location: "phone", durationMin: 30, createsWorkOrder: false, for: ["online"] },
+];
+
+export function presetsFor(kind: string): Preset[] {
+  return PRESETS.filter((p) => p.for.includes(kind === "online" ? "online" : "showroom"));
+}
+
+export function typeSlug(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "booking";
+}
+
+const HHMM = /^([01]\d|2[0-3]):([0-5]\d)$/;
+const toMin = (t: string) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
+
+function normTime(raw: string): string | null {
+  const m = /^(\d{1,2})(?::?(\d{2}))?\s*(am|pm)?$/i.exec(raw.trim());
+  if (!m) return null;
+  let h = Number(m[1]);
+  const min = m[2] ?? "00";
+  const ap = m[3]?.toLowerCase();
+  if (ap === "pm" && h < 12) h += 12;
+  if (ap === "am" && h === 12) h = 0;
+  const t = `${String(h).padStart(2, "0")}:${min}`;
+  return HHMM.test(t) ? t : null;
+}
+
+/**
+ * One weekday's hours from what staff type: "8:00-16:00", "9am-12pm, 1pm-5pm", or blank for closed.
+ * Ranges must run forwards and not overlap.
+ */
+export function parseDayHours(text: string): [string, string][] {
+  const out: [string, string][] = [];
+  for (const part of text.split(",").map((p) => p.trim()).filter(Boolean)) {
+    const [a, b, extra] = part.split(/\s*[-–]\s*/);
+    const start = a ? normTime(a) : null;
+    const end = b ? normTime(b) : null;
+    if (!start || !end || extra !== undefined) throw new Error(`"${part}" isn't a time range. Write it like 8:00-16:00 or 9am-5pm.`);
+    if (toMin(end) <= toMin(start)) throw new Error(`"${part}" ends before it starts.`);
+    out.push([start, end]);
+  }
+  out.sort((x, y) => toMin(x[0]) - toMin(y[0]));
+  for (let i = 1; i < out.length; i++) {
+    if (toMin(out[i][0]) < toMin(out[i - 1][1])) throw new Error(`${out[i - 1].join("-")} and ${out[i].join("-")} overlap.`);
+  }
+  return out;
+}
+
+export function formatDayHours(ranges: [string, string][] | undefined): string {
+  return (ranges ?? []).map(([a, b]) => `${a}-${b}`).join(", ");
+}
+
+/** Weekly hours from seven text fields (index 0 = Sunday). A bad day names itself in the error. */
+export function parseWeeklyHours(days: string[]): WeeklyHours {
+  const out: WeeklyHours = {};
+  days.forEach((text, wd) => {
+    try {
+      const ranges = parseDayHours(text ?? "");
+      if (ranges.length) out[String(wd)] = ranges;
+    } catch (err) {
+      throw new Error(`${WEEKDAYS[wd]}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  });
+  return out;
+}
+
+export function hoursSummary(hours: WeeklyHours): string {
+  const days = WEEKDAYS.map((d, wd) => ({ d, h: formatDayHours(hours[String(wd)]) })).filter((x) => x.h);
+  if (!days.length) return "No hours set";
+  const groups: { from: string; to: string; h: string }[] = [];
+  for (const x of days) {
+    const last = groups.at(-1);
+    const prevIdx = last ? WEEKDAYS.indexOf(last.to as (typeof WEEKDAYS)[number]) : -2;
+    if (last && last.h === x.h && WEEKDAYS.indexOf(x.d) === prevIdx + 1) last.to = x.d;
+    else groups.push({ from: x.d, to: x.d, h: x.h });
+  }
+  return groups.map((g) => `${g.from === g.to ? g.from : `${g.from}–${g.to}`} ${g.h}`).join(" · ");
+}
+
+export type BookingTypeInput = {
+  name: string;
+  description: string;
+  location: BookingLocation;
+  access: BookingAccess;
+  durationMin: number;
+  bufferMin: number;
+  slotStepMin: number;
+  noticeMin: number;
+  horizonDays: number;
+  capacityMode: CapacityMode;
+  benchCapacity: number;
+  hours: WeeklyHours;
+  createsWorkOrder: boolean;
+};
+
+const isLocation = (v: string): v is BookingLocation => v === "in_person" || v === "video" || v === "phone";
+
+/** Check a standard type's fields; returns the cleaned input or throws with one plain sentence. */
+export function validateBookingType(raw: BookingTypeInput, profileKind: string): BookingTypeInput {
+  const name = raw.name.trim();
+  if (!name) throw new Error("Give the booking type a name.");
+  if (name.length > 80) throw new Error("Keep the name under 80 characters.");
+  if (!isLocation(raw.location)) throw new Error("Pick where the appointment happens.");
+  if (profileKind === "online" && raw.location === "in_person") throw new Error("The online team has no address, so its bookings must be video or phone calls.");
+  if (raw.access !== "public" && raw.access !== "invite") throw new Error("Pick who can book.");
+  if (raw.capacityMode !== "bench" && raw.capacityMode !== "staff") throw new Error("Pick how capacity is counted.");
+  const int = (v: number, lo: number, hi: number, what: string) => {
+    if (!Number.isInteger(v) || v < lo || v > hi) throw new Error(`${what} must be a whole number from ${lo} to ${hi}.`);
+    return v;
+  };
+  const out: BookingTypeInput = {
+    ...raw,
+    name,
+    description: raw.description.trim().slice(0, 500),
+    durationMin: int(raw.durationMin, 5, 480, "Length (minutes)"),
+    bufferMin: int(raw.bufferMin, 0, 240, "Buffer (minutes)"),
+    slotStepMin: int(raw.slotStepMin, 5, 240, "Start times every (minutes)"),
+    noticeMin: int(raw.noticeMin, 0, 60 * 24 * 30, "Minimum notice (minutes)"),
+    horizonDays: int(raw.horizonDays, 1, 365, "Bookable up to (days ahead)"),
+    benchCapacity: int(raw.benchCapacity, 1, 50, "Bookings at the same time"),
+    createsWorkOrder: raw.location === "in_person" && raw.createsWorkOrder,
+  };
+  if (!Object.keys(out.hours).length) throw new Error("Set the hours it can be booked on at least one day.");
+  return out;
+}
+
+// ---- Database ---------------------------------------------------------------------------------
+
+export async function listBookingTypes(dbx: DbOrTx, showroomId: string): Promise<BookingType[]> {
+  return dbx.select().from(bookingTypes).where(eq(bookingTypes.showroomId, showroomId)).orderBy(asc(bookingTypes.sortOrder), asc(bookingTypes.name));
+}
+
+export async function getBookingType(dbx: DbOrTx, showroomId: string, id: string): Promise<BookingType> {
+  const [row] = await dbx.select().from(bookingTypes).where(and(eq(bookingTypes.id, id), eq(bookingTypes.showroomId, showroomId)));
+  if (!row) throw new Error("That booking type isn't in this store.");
+  return row;
+}
+
+async function freeSlug(dbx: DbOrTx, showroomId: string, base: string, exceptId?: string): Promise<string> {
+  const taken = new Set((await listBookingTypes(dbx, showroomId)).filter((t) => t.id !== exceptId).map((t) => t.slug));
+  if (!taken.has(base)) return base;
+  for (let i = 2; ; i++) if (!taken.has(`${base}-${i}`)) return `${base}-${i}`;
+}
+
+export async function createBookingType(dbx: DbOrTx, showroomId: string, input: BookingTypeInput): Promise<BookingType> {
+  const existing = await listBookingTypes(dbx, showroomId);
+  const slug = await freeSlug(dbx, showroomId, typeSlug(input.name));
+  const sortOrder = Math.max(0, ...existing.map((t) => t.sortOrder)) + 1;
+  const [row] = await dbx.insert(bookingTypes).values({ showroomId, slug, kind: "standard", sortOrder, ...input }).returning();
+  return row;
+}
+
+export async function updateBookingType(dbx: DbOrTx, showroomId: string, id: string, input: BookingTypeInput): Promise<void> {
+  const current = await getBookingType(dbx, showroomId, id);
+  if (current.kind === "pickup") throw new Error("Bike pickup times come from Settings › Capacity.");
+  const slug = current.name === input.name ? current.slug : await freeSlug(dbx, showroomId, typeSlug(input.name), id);
+  await dbx.update(bookingTypes).set({ ...input, slug }).where(eq(bookingTypes.id, id));
+}
+
+/** The pickup type only takes a new name and description; its hours and capacity live in Settings › Capacity. */
+export async function updatePickupType(dbx: DbOrTx, showroomId: string, id: string, patch: { name: string; description: string }): Promise<void> {
+  const current = await getBookingType(dbx, showroomId, id);
+  if (current.kind !== "pickup") throw new Error("Not the pickup type.");
+  if (!patch.name.trim()) throw new Error("Give the booking type a name.");
+  await dbx.update(bookingTypes).set({ name: patch.name.trim(), description: patch.description.trim().slice(0, 500) }).where(eq(bookingTypes.id, id));
+}
+
+export async function setBookingTypeActive(dbx: DbOrTx, showroomId: string, id: string, active: boolean): Promise<BookingType> {
+  const current = await getBookingType(dbx, showroomId, id);
+  await dbx.update(bookingTypes).set({ active }).where(eq(bookingTypes.id, id));
+  return current;
+}
+
+/** Every physical store has a bike pickup type; created with the store (and by migration 0011 for existing ones). */
+export async function ensurePickupType(dbx: DbOrTx, showroomId: string): Promise<void> {
+  await dbx
+    .insert(bookingTypes)
+    .values({ showroomId, slug: "pickup", name: "Bike pickup", description: "Collect your new bike. Booked from the link we send when it arrives.", kind: "pickup", access: "invite", location: "in_person", noticeMin: 0, sortOrder: 0 })
+    .onConflictDoNothing();
+}

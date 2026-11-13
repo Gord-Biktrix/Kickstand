@@ -20,7 +20,7 @@ export default async function StaffSettingsPage({ searchParams }: { searchParams
   const showroom = await currentShowroom(user);
   const [staff, showrooms] = await Promise.all([listStaff(), listShowrooms(db)]);
   const storeName = (id: string | null) => (id ? showrooms.find((s) => s.id === id)?.name ?? "—" : "All stores");
-  const visible = admin ? staff : staff.filter((s) => s.showroomId === showroom.id);
+  const visible = admin ? staff : staff.filter((s) => s.showroomId === showroom.id || s.extraShowroomIds.includes(showroom.id));
   const google = googleEnabled();
   const emailKey = mailerKind() !== "console";
 
@@ -74,14 +74,24 @@ export default async function StaffSettingsPage({ searchParams }: { searchParams
                             <select name="role" defaultValue={s.role} className="input h-8 w-auto py-0 text-sm">
                               {options.map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
                             </select>
-                            <select name="showroom_id" defaultValue={s.showroomId ?? ""} className="input h-8 w-auto py-0 text-sm">
+                            <select name="showroom_id" defaultValue={s.showroomId ?? ""} className="input h-8 w-auto py-0 text-sm" aria-label="Home store">
                               {showrooms.map((sh) => <option key={sh.id} value={sh.id}>{sh.name}</option>)}
                               <option value="">All stores</option>
                             </select>
                             <button type="submit" className="btn btn-sm">Save</button>
+                            {showrooms.length > 1 && s.showroomId && (
+                              <details className="w-full text-xs">
+                                <summary className="cursor-pointer text-muted">Also works in{s.extraShowroomIds.length ? `: ${s.extraShowroomIds.map(storeName).join(", ")}` : "…"}</summary>
+                                <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
+                                  {showrooms.filter((sh) => sh.id !== s.showroomId).map((sh) => (
+                                    <label key={sh.id} className="flex items-center gap-1"><input type="checkbox" name="extra_showroom_ids" value={sh.id} defaultChecked={s.extraShowroomIds.includes(sh.id)} className="h-3.5 w-3.5" />{sh.name}</label>
+                                  ))}
+                                </div>
+                              </details>
+                            )}
                           </form>
                         ) : (
-                          <div className="text-sm">{roleLabel(s.role)} <span className="text-muted">· {storeName(s.showroomId)}</span></div>
+                          <div className="text-sm">{roleLabel(s.role)} <span className="text-muted">· {storeName(s.showroomId)}{s.extraShowroomIds.length ? ` + ${s.extraShowroomIds.map(storeName).join(", ")}` : ""}</span></div>
                         )}
                       </td>
                       <td>

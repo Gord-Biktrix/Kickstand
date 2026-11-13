@@ -54,6 +54,12 @@ export default async function StoresPage({ searchParams }: { searchParams: Promi
             </form>
           )}
           <form action={createShowroomAction} className="space-y-3">
+            <Field label="Type" htmlFor="st_kind" hint="The online team has no address, pickups or Lightspeed shop: only video and phone call bookings.">
+              <select id="st_kind" name="kind" className="input" defaultValue="showroom">
+                <option value="showroom">Showroom (a physical store)</option>
+                <option value="online">Online team (calls only)</option>
+              </select>
+            </Field>
             <Field label="Name" htmlFor="st_name"><input id="st_name" name="name" required className="input" placeholder="Biktrix Saskatoon" /></Field>
             <Field label="Short id" htmlFor="st_slug" hint="Used in links and the store switcher; letters and dashes. Left blank, it comes from the name."><input id="st_slug" name="slug" className="input" placeholder="saskatoon" pattern="[a-z0-9-]*" /></Field>
             <Field label="Time zone" htmlFor="st_tz">
@@ -79,7 +85,7 @@ export default async function StoresPage({ searchParams }: { searchParams: Promi
               <Card
                 key={s.id}
                 title={<span className="inline-flex items-center gap-2">{s.name} <span className="text-xs font-normal text-muted">/{s.slug}</span></span>}
-                action={ls.enabled ? <Badge tone="ok">Lightspeed on · shop {ls.shop_id}{shopName ? ` (${shopName})` : ""}</Badge> : <Badge>Lightspeed off</Badge>}
+                action={s.kind === "online" ? <Badge>Online team</Badge> : ls.enabled ? <Badge tone="ok">Lightspeed on · shop {ls.shop_id}{shopName ? ` (${shopName})` : ""}</Badge> : <Badge>Lightspeed off</Badge>}
               >
                 <div className="grid gap-6 md:grid-cols-2">
                   <form action={updateShowroomAction.bind(null, s.id)} className="space-y-3">
@@ -93,6 +99,9 @@ export default async function StoresPage({ searchParams }: { searchParams: Promi
                     <button type="submit" className="btn btn-sm">Save details</button>
                   </form>
 
+                  {s.kind === "online" ? (
+                    <p className="text-sm text-muted">An online team has no Lightspeed shop. Its bookings are set up in Settings › Booking types (switch to {s.name} first).</p>
+                  ) : (
                   <form action={setLightspeedLinkAction.bind(null, s.id)} className="space-y-3">
                     <h3 className="text-sm font-semibold">Lightspeed link</h3>
                     <Field label="Shop" htmlFor={`shop_${s.id}`} hint="Work orders and special orders are read from and written to this shop only.">
@@ -124,6 +133,7 @@ export default async function StoresPage({ searchParams }: { searchParams: Promi
                       <button type="submit" formAction={refreshLightspeedStatusesAction} className="btn btn-sm" title="Reload the status list from Lightspeed">Refresh statuses</button>
                     </div>
                   </form>
+                  )}
                 </div>
               </Card>
             );
