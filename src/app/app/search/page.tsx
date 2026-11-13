@@ -8,7 +8,7 @@ import { sp, type SearchParams } from "@/lib/flash";
 import { formatDateTime } from "@/lib/time";
 import { currentShowroom } from "@/lib/current-showroom";
 
-export const metadata = { title: "Search" };
+export const metadata = { title: "Customers" };
 
 /** Global search: every order and box, any status, grouped into customers. */
 export default async function SearchPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
@@ -20,7 +20,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
 
   return (
     <div>
-      <PageHeader title="Search" subtitle="Customers by name, phone, email, sale number, box tag or model — including past pickups." />
+      <PageHeader title="Customers" subtitle="Find anyone by name, phone, email, sale number, box tag or model: buyers, test riders and callers." />
       <form action="/app/search" role="search" className="mb-6 flex max-w-xl gap-2">
         <input name="q" defaultValue={q} placeholder="Name, phone, email, sale # or box" className="input flex-1" autoFocus />
         <button type="submit" className="btn btn-primary">Search</button>
@@ -42,6 +42,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
                   </div>
                   <Link href={`/app/customers/${encodeURIComponent(h.key)}`} className="btn btn-sm">View customer</Link>
                 </div>
+                {h.visits > 0 && <p className="mt-2 text-sm text-muted">{h.visits} visit{h.visits === 1 ? "" : "s"} or call{h.visits === 1 ? "" : "s"} booked{h.orders.length === 0 ? " · no orders yet" : ""}</p>}
                 <ul className="mt-3 divide-y divide-border text-sm">
                   {h.orders.map((o) => {
                     const us = h.units.filter((u) => u.orderId === o.id);

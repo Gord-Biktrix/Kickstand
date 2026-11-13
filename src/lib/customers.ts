@@ -5,7 +5,7 @@
  */
 import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
 import type { Db } from "@/db/client";
-import { appointments, events, orders, units, type Appointment, type Event, type Order, type Unit } from "@/db/schema";
+import { appointments, bookings, bookingTypes, events, orders, units, type Appointment, type Booking, type BookingType, type Event, type Order, type Unit } from "@/db/schema";
 import type { ShowroomCtx } from "./showroom";
 
 export type CustomerKey = `ls:${string}` | `ph:${string}` | `em:${string}` | `nm:${string}`;
@@ -119,6 +119,32 @@ export async function customerOrders(dbx: Db, showroom: ShowroomCtx, key: string
 }
 
 export type CustomerBike = { unit: Unit; order: Order; appointment: Appointment | null };
+export type CustomerVisit = { booking: Booking; type: BookingType };
+
+/** The customer key for someone known only from a booking (test ride, call…): phone, then email, then name. */
+export function bookingCustomerKey(b: Pick<Booking, "customerPhone" | "customerEmail" | "customerName">): CustomerKey {
+  const ph = normalizePhone(b.customerPhone);
+  if (ph) return `ph:${ph}`;
+  const em = normalizeEmail(b.customerEmail);
+  if (em) return `em:${em}`;
+  return `nm:${b.customerName.trim().toLowerCase()}`;
+}
+
+/** Bookings in this store made with any of these phones (compared on the last 10 digits) or emails, newest first. */
+export async function visitsFor(dbx: Db, showroomId: string, phones: string[], emails: string[]): Promise<CustomerVisit[]> {
+  const conds = [
+    ...phones.map((p) => sql`right(regexp_replace(coalesce(${bookings.customerPhone}, ''), '\\D', '', 'g'), 10) = ${p.slice(-10)}`),
+    emails.length ? sql`lower(${bookings.customerEmail}) in ${emails}` : undefined,
+  ].filter((c): c is NonNullable<typeof c> => !!c);
+  if (!conds.length) return [];
+  return dbx
+    .select({ booking: bookings, type: bookingTypes })
+    .from(bookings)
+    .innerJoin(bookingTypes, eq(bookingTypes.id, bookings.bookingTypeId))
+    .where(and(eq(bookings.showroomId, showroomId), or(...conds)))
+    .orderBy(desc(bookings.startsAt))
+    .limit(100);
+}
 export type CustomerProfile = {
   key: CustomerKey;
   name: string;
@@ -128,11 +154,31 @@ export type CustomerProfile = {
   orders: Order[];
   bikes: CustomerBike[];
   events: Event[];
+  /** Bookings of booking types (test rides, service, calls) matched by phone or email. */
+  visits: CustomerVisit[];
 };
 
 export async function customerProfile(dbx: Db, showroom: ShowroomCtx, key: string): Promise<CustomerProfile | null> {
   const list = await customerOrders(dbx, showroom, key);
-  if (list.length === 0) return null;
+  if (list.length === 0) {
+    // Someone who has only booked (a test ride, a call): no orders, so the profile comes from their bookings.
+    const parsed = parseCustomerKey(key);
+    if (!parsed || (parsed.kind !== "ph" && parsed.kind !== "em")) return null;
+    const visits = await visitsFor(dbx, showroom.id, parsed.kind === "ph" ? [parsed.value] : [], parsed.kind === "em" ? [parsed.value] : []);
+    if (visits.length === 0) return null;
+    const latest = visits[0].booking;
+    return {
+      key: parsed.kind === "ph" ? `ph:${parsed.value}` : `em:${parsed.value}`,
+      name: latest.customerName,
+      phone: visits.map((v) => v.booking.customerPhone).find(Boolean) ?? null,
+      email: visits.map((v) => v.booking.customerEmail).find(Boolean) ?? null,
+      lsCustomerId: null,
+      orders: [],
+      bikes: [],
+      events: [],
+      visits,
+    };
+  }
   const ids = list.map((o) => o.id);
   const [unitRows, evs] = await Promise.all([
     dbx.select().from(units).where(inArray(units.orderId, ids)).orderBy(desc(units.createdAt)),
@@ -154,6 +200,12 @@ export async function customerProfile(dbx: Db, showroom: ShowroomCtx, key: strin
     orders: list,
     bikes: unitRows.map((unit) => ({ unit, order: byId.get(unit.orderId!)!, appointment: latest.get(unit.id) ?? null })).filter((b) => b.order),
     events: evs,
+    visits: await visitsFor(
+      dbx,
+      showroom.id,
+      [...new Set(list.map((o) => normalizePhone(o.customerPhone)).filter((v): v is string => !!v))],
+      [...new Set(list.map((o) => normalizeEmail(o.customerEmail)).filter((v): v is string => !!v))],
+    ),
   };
 }
 
@@ -165,6 +217,8 @@ export type CustomerHit = {
   lsCustomerId: string | null;
   orders: Order[];
   units: Unit[];
+  /** How many bookings (test rides, service, calls) this person has in the store. */
+  visits: number;
   lastActivity: Date;
 };
 
@@ -200,7 +254,7 @@ export async function searchCustomers(dbx: Db, showroom: ShowroomCtx, q: string,
     orderMap.set(r.order.id, entry);
   }
   const grouped = groupOrders([...orderMap.values()].map((e) => e.order));
-  return grouped
+  const hits: CustomerHit[] = grouped
     .map((group) => {
       const primary = group.find((o) => o.lsCustomerId) ?? group[0];
       const us = group.flatMap((o) => orderMap.get(o.id)?.units ?? []);
@@ -213,9 +267,37 @@ export async function searchCustomers(dbx: Db, showroom: ShowroomCtx, q: string,
         lsCustomerId: primary.lsCustomerId ?? null,
         orders: group,
         units: us,
+        visits: 0,
         lastActivity: last,
       };
-    })
-    .sort((a, b) => b.lastActivity.getTime() - a.lastActivity.getTime())
-    .slice(0, limit);
+    });
+  // People who booked a test ride, service or call: added to their order-based customer when phone or email
+  // match, otherwise listed on their own (a lead who hasn't bought yet).
+  const bookingRows = await dbx
+    .select()
+    .from(bookings)
+    .where(
+      and(
+        eq(bookings.showroomId, showroom.id),
+        or(
+          sql`${bookings.customerName} ilike ${term}`,
+          sql`${bookings.customerEmail} ilike ${term}`,
+          digits.length >= 4 ? sql`regexp_replace(coalesce(${bookings.customerPhone}, ''), '\\D', '', 'g') like ${`%${digits}%`}` : sql`false`,
+        ),
+      ),
+    )
+    .orderBy(desc(bookings.updatedAt))
+    .limit(200);
+  for (const b of bookingRows) {
+    const ph = normalizePhone(b.customerPhone);
+    const em = normalizeEmail(b.customerEmail);
+    const hit = hits.find((h) => (ph && normalizePhone(h.phone) === ph) || (em && normalizeEmail(h.email) === em) || h.key === bookingCustomerKey(b));
+    if (hit) {
+      hit.visits++;
+      if (b.updatedAt > hit.lastActivity) hit.lastActivity = b.updatedAt;
+    } else {
+      hits.push({ key: bookingCustomerKey(b), name: b.customerName, phone: b.customerPhone, email: b.customerEmail, lsCustomerId: null, orders: [], units: [], visits: 1, lastActivity: b.updatedAt });
+    }
+  }
+  return hits.sort((a, b) => b.lastActivity.getTime() - a.lastActivity.getTime()).slice(0, limit);
 }

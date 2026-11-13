@@ -42,10 +42,15 @@ export default async function TodayPage({ searchParams }: { searchParams: Promis
   }
   const denied = sp(q.denied) === "1";
   // Pickups and bookings (test rides, service, calls…) in one list, by start time.
-  const items: ({ kind: "visit"; at: number; visit: (typeof rows) } | { kind: "booking"; at: number; row: BookingRow })[] = [
+  const allItems: ({ kind: "visit"; at: number; visit: (typeof rows) } | { kind: "booking"; at: number; row: BookingRow })[] = [
     ...visits.map((visit) => ({ kind: "visit" as const, at: visit[0].appointment.startsAt.getTime(), visit })),
     ...bookingRows.map((row) => ({ kind: "booking" as const, at: row.booking.startsAt.getTime(), row })),
   ].sort((a, b) => a.at - b.at);
+  // Filter chips by visit type: pickups, then each booking type that has visits this day.
+  const filter = sp(q.type) ?? "";
+  const typeChips = [...new Map(bookingRows.map((r) => [r.type.id, r.type])).values()];
+  const items = allItems.filter((i) => !filter || (filter === "pickups" ? i.kind === "visit" : i.kind === "booking" && i.row.type.id === filter));
+  const chipHref = (t: string) => `/app?${new URLSearchParams({ ...(date !== today ? { date } : {}), ...(t ? { type: t } : {}) }).toString()}`;
   const back = `/app?date=${date}`;
   const counts = [
     rows.length ? `${rows.length} pickup${rows.length === 1 ? "" : "s"}` : "",
@@ -66,6 +71,17 @@ export default async function TodayPage({ searchParams }: { searchParams: Promis
         }
       />
       <Flash ok={sp(q.ok)} error={denied ? "You don't have permission for that page." : sp(q.error)} />
+      {allItems.length > 0 && (rows.length > 0 ? 1 : 0) + typeChips.length > 1 && (
+        <nav aria-label="Filter by visit type" className="mb-4 flex flex-wrap gap-2 text-sm">
+          <Link href={chipHref("")} aria-current={!filter ? "page" : undefined} className={`rounded-md border px-3 py-1.5 font-medium ${!filter ? "border-foreground bg-foreground text-white" : "border-border bg-card"}`}>All {allItems.length}</Link>
+          {rows.length > 0 && <Link href={chipHref("pickups")} aria-current={filter === "pickups" ? "page" : undefined} className={`inline-flex items-center gap-2 rounded-md border px-3 py-1.5 font-medium ${filter === "pickups" ? "border-foreground bg-foreground text-white" : "border-border bg-card"}`}><span aria-hidden="true" className="h-2 w-2 rounded-full bg-[#0f766e]" />Pickups {visits.length}</Link>}
+          {typeChips.map((t) => (
+            <Link key={t.id} href={chipHref(t.id)} aria-current={filter === t.id ? "page" : undefined} className={`inline-flex items-center gap-2 rounded-md border px-3 py-1.5 font-medium ${filter === t.id ? "border-foreground bg-foreground text-white" : "border-border bg-card"}`}>
+              <span aria-hidden="true" className="h-2 w-2 rounded-full" style={{ background: colorOf(t.color).hex }} />{t.name} {bookingRows.filter((r) => r.type.id === t.id).length}
+            </Link>
+          ))}
+        </nav>
+      )}
       <div className="flex flex-wrap items-start gap-6">
       <div className="min-w-0 flex-[999_1_560px]">
       {items.length === 0 ? (

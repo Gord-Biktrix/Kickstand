@@ -10,6 +10,7 @@ import { currentShowroom } from "@/lib/current-showroom";
 import { sp, type SearchParams } from "@/lib/flash";
 import { formatDateTime, formatLongDate, formatLongDateFromLocal, formatTime } from "@/lib/time";
 import { bookingUrls, getBookingDetail } from "@/lib/type-bookings";
+import { bookingCustomerKey } from "@/lib/customers";
 import { getTypeAvailability } from "@/lib/type-slots";
 import { lightspeedEnabled } from "@/lib/lightspeed";
 import { lightspeedWorkorderUrl } from "@/lib/workorders";
@@ -62,7 +63,7 @@ export default async function BookingPage({ params, searchParams }: { params: Pr
   return (
     <div className="max-w-3xl">
       <PageHeader
-        title={b.customerName}
+        title={<Link href={`/app/customers/${encodeURIComponent(bookingCustomerKey(b))}`} className="hover:text-accent">{b.customerName}</Link>}
         subtitle={`${type.name} · ${showroom.name}`}
         action={<Link href={`/app?date=${b.onDate}`} className="btn btn-sm">← {formatLongDateFromLocal(b.onDate)}</Link>}
       />

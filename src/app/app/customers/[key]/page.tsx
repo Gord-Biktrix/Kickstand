@@ -7,7 +7,8 @@ import { Badge, Card, Dl, PageHeader } from "@/components/ui";
 import { requireUser } from "@/lib/auth";
 import { customerProfile } from "@/lib/customers";
 import { formatMoney } from "@/lib/format";
-import { formatDateTime, formatLongDateFromLocal } from "@/lib/time";
+import { formatDateTime, formatLongDateFromLocal, formatTime } from "@/lib/time";
+import { colorOf, LOCATION_LABEL, type BookingLocation } from "@/lib/booking-types";
 import { currentShowroom } from "@/lib/current-showroom";
 
 export const metadata = { title: "Customer" };
@@ -25,6 +26,8 @@ export default async function CustomerPage({ params }: { params: Promise<{ key: 
   const active = profile.bikes.filter((b) => !["picked_up", "cancelled", "unassigned", "released"].includes(b.unit.status));
   const past = profile.bikes.filter((b) => !active.includes(b));
   const withoutUnit = profile.orders.filter((o) => !profile.bikes.some((b) => b.order.id === o.id));
+  // The online team handles calls only: bike sections and "New pickup" appear only when there is something to show.
+  const showBikes = showroom.kind !== "online" || profile.bikes.length > 0 || profile.orders.length > 0;
 
   const bikeRow = (b: (typeof profile.bikes)[number]) => (
     <li key={b.unit.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
@@ -53,13 +56,43 @@ export default async function CustomerPage({ params }: { params: Promise<{ key: 
       <PageHeader
         title={profile.name}
         subtitle={<>{[profile.phone, profile.email].filter(Boolean).join(" · ") || "no contact details"}{profile.lsCustomerId && <> · <Badge>Lightspeed customer #{profile.lsCustomerId}</Badge></>}</>}
-        action={profile.lsCustomerId ? <Link href={`/app/book?customerID=${profile.lsCustomerId}&new=1`} className="btn btn-primary">New pickup</Link> : <Link href="/app/book" className="btn btn-primary">New pickup</Link>}
+        action={
+          <div className="flex flex-wrap gap-2">
+            <Link href="/app/bookings/new" className="btn btn-primary">+ Book a visit</Link>
+            {showBikes && (profile.lsCustomerId ? <Link href={`/app/book?customerID=${profile.lsCustomerId}&new=1`} className="btn">New pickup</Link> : <Link href="/app/book" className="btn">New pickup</Link>)}
+          </div>
+        }
       />
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="space-y-6 lg:col-span-2">
-          <Card title={`Bikes in progress (${active.length})`}>
-            {active.length === 0 ? <p className="text-sm text-muted">Nothing in the building for this customer.</p> : <ul className="divide-y divide-border">{active.map(bikeRow)}</ul>}
+          <Card title={`Visits and calls (${profile.visits.length})`}>
+            {profile.visits.length === 0 ? <p className="text-sm text-muted">No test rides, service visits or calls booked.</p> : (
+              <ul className="divide-y divide-border">
+                {profile.visits.map(({ booking: b, type }) => {
+                  const now = new Date();
+                  const label = b.status === "cancelled" ? "Cancelled" : b.status === "completed" ? "Done" : b.status === "no_show" ? "No-show" : b.startsAt > now ? "Booked" : "Past";
+                  const tone = b.status === "completed" ? "text-ok" : b.status === "no_show" ? "text-danger" : b.startsAt > now && b.status === "booked" ? "text-foreground" : "text-muted";
+                  return (
+                    <li key={b.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
+                      <div className="min-w-0">
+                        <p className="flex items-center gap-2 font-medium"><span aria-hidden="true" className="h-2 w-2 shrink-0 rounded-full" style={{ background: colorOf(type.color).hex }} />{type.name}</p>
+                        <p className="text-sm text-muted">{formatDateTime(b.startsAt, tz)}–{formatTime(b.endsAt, tz)} · {LOCATION_LABEL[type.location as BookingLocation]}{b.customerNote && <> · &ldquo;{b.customerNote}&rdquo;</>}</p>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <span className={`badge ${tone}`}>{label}</span>
+                        <Link href={`/app/bookings/${b.id}`} className="btn btn-sm">Open</Link>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
           </Card>
+          {showBikes && (
+            <Card title={`Bikes in progress (${active.length})`}>
+              {active.length === 0 ? <p className="text-sm text-muted">Nothing in the building for this customer.</p> : <ul className="divide-y divide-border">{active.map(bikeRow)}</ul>}
+            </Card>
+          )}
           {withoutUnit.length > 0 && (
             <Card title="Orders not received yet">
               <ul className="divide-y divide-border text-sm">
@@ -77,8 +110,8 @@ export default async function CustomerPage({ params }: { params: Promise<{ key: 
         </div>
         <div className="space-y-6">
           <Card title="Customer">
-            <Dl items={[["Name", profile.name], ["Phone", profile.phone ?? "—"], ["Email", profile.email ?? "—"], ["Lightspeed", profile.lsCustomerId ? `#${profile.lsCustomerId}` : "not linked"], ["Orders", String(profile.orders.length)], ["Bikes", String(profile.bikes.length)]]} />
-            <p className="mt-3 text-xs text-muted">Contact details are edited on each order; Kickstand groups orders by Lightspeed customer, phone or email.</p>
+            <Dl items={[["Name", profile.name], ["Phone", profile.phone ?? "—"], ["Email", profile.email ?? "—"], ["Lightspeed", profile.lsCustomerId ? `#${profile.lsCustomerId}` : "not linked"], ["Orders", String(profile.orders.length)], ["Bikes", String(profile.bikes.length)], ["Visits", String(profile.visits.length)]]} />
+            <p className="mt-3 text-xs text-muted">Kickstand groups orders and bookings by Lightspeed customer, phone or email. Contact details are edited on each order or booking.</p>
           </Card>
         </div>
       </div>
