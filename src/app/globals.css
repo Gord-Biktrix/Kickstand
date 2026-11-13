@@ -123,3 +123,7 @@ button[aria-busy="true"]::after {
   border-top-color: #fff;
 }
 @keyframes pending-spin { to { transform: rotate(360deg); } }
+
+/* Booking pages inside the website embed: the host page has its own header. */
+.in-embed .booking-header { display: none; }
+.in-embed body { background: transparent; }

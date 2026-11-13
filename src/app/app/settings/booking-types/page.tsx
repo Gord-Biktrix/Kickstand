@@ -50,6 +50,12 @@ export default async function BookingTypesPage({ searchParams }: { searchParams:
         Public booking page: <a href={`/book/${showroom.slug}`} target="_blank" rel="noreferrer" className="font-medium underline">{baseUrl()}/book/{showroom.slug}</a>
         <span className="text-muted"> · lists every public type that&apos;s switched on. Each type also has its own link, shown on its card.</span>
       </p>
+      <details className="mb-4 rounded-lg border border-border bg-card p-3 text-sm">
+        <summary className="cursor-pointer font-medium">Put it on the website</summary>
+        <p className="mt-2 text-muted">Paste this where the booking box should appear (Shopify: a Custom Liquid or HTML block). It grows to fit, and replaces the old YouCanBookMe box.</p>
+        <pre className="mt-2 overflow-x-auto rounded bg-background p-2 text-xs"><code>{`<div data-biktrix-booking="${showroom.slug}"></div>\n<script src="${baseUrl()}/embed.js" async></script>`}</code></pre>
+        <p className="mt-2 text-muted">To show one type only, add its id: <code className="text-xs">data-type=&quot;{types.find((t) => t.kind === "standard")?.slug ?? "test-ride"}&quot;</code>. Ids are the last part of each type&apos;s link.</p>
+      </details>
       <div className="grid gap-6 lg:grid-cols-[340px_minmax(0,1fr)]">
         <div className="space-y-6">
           <Card title="Add a booking type">
