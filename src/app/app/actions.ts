@@ -19,7 +19,7 @@ import { hashToken } from "@/lib/tokens";
 import { attachUnit, bookableCompanions, bookableSiblings, linkOrdersForPickup, mergeIntoVisit, splitFromVisit, unlinkOrderPickup, collectParts, completeHandover, createOrder, deleteUnit, detachUnit, futureVisitFor, grantExtension, inviteAllReceived, inviteOrders, inviteUnit, inviteUnits, joinVisit, markReady, receiveUnit, resendInvite, retagUnit, startBuild, unreceiveUnit, waiveStorage } from "@/lib/units";
 import { currentShowroom } from "@/lib/current-showroom";
 import { createShowroom, importShowroomsFromLightspeed, isProfileKind, setLightspeedLink, updateShowroomDetails } from "@/lib/showroom-admin";
-import { cancelTypeBooking, createTypeBooking, getBookingDetail, rescheduleTypeBooking, setBookingOutcome } from "@/lib/type-bookings";
+import { cancelTypeBooking, createTypeBooking, getBookingDetail, rescheduleTypeBooking, setBookingOutcome, syncBookingWorkorder } from "@/lib/type-bookings";
 import { createBookingType, getBookingType, NEW_TYPE_DEFAULTS, parseWeeklyHours, PRESETS, setBookingTypeActive, updateBookingType, updatePickupType, validateBookingType, WEEKDAY_8_TO_4, type BookingTypeInput } from "@/lib/booking-types";
 import { LightspeedClient } from "@/lib/lightspeed";
 import { googleEnabled } from "@/lib/google-auth";
@@ -1144,4 +1144,13 @@ export async function staffCreateTypeBookingAction(typeId: string, formData: For
     target = withFlash(`/app/bookings/new?type=${typeId}${date && time ? `&date=${date}&time=${time}` : ""}`, { error: errorMessage(err) });
   }
   redirect(target);
+}
+
+export async function retryBookingWorkorderAction(id: string) {
+  return run(`/app/bookings/${id}`, async () => {
+    const { user, showroom, detail } = await staffBooking(id);
+    const synced = await syncBookingWorkorder(db, { showroom, type: detail.type, booking: detail.booking, actor: user.id });
+    if (!synced?.lsWorkorderId) throw new Error("Lightspeed didn't take it. The reason is on the timeline below.");
+    return `Work order #${synced.lsWorkorderId} is in Lightspeed.`;
+  });
 }

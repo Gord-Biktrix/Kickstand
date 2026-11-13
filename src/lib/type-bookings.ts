@@ -4,9 +4,11 @@
  * (booking.ts). Each confirmed change fires one Klaviyo event ("Booking: Confirmed" / "Rescheduled" /
  * "Cancelled"); the flow in Klaviyo owns the wording and channel, as for pickups.
  */
-import { and, asc, between, desc, eq, ne, sql } from "drizzle-orm";
+import { and, asc, between, desc, eq, isNotNull, ne, or, sql } from "drizzle-orm";
 import type { Db, DbOrTx } from "@/db/client";
-import { bookings, bookingTypes, events, type Booking, type BookingType } from "@/db/schema";
+import { bookings, bookingTypes, events, orders, type Booking, type BookingType } from "@/db/schema";
+import { formatInTimeZone } from "date-fns-tz";
+import { LightspeedClient, lightspeedEnabled } from "./lightspeed";
 import { LOCATION_LABEL, type BookingLocation } from "./booking-types";
 import { logger } from "./logger";
 import { baseUrl } from "./messages";
@@ -112,7 +114,8 @@ export async function createTypeBooking(
     return row;
   });
   await notifyBooking(db, { showroom, type, booking, metric: BOOKING_METRIC.confirmed, actor: args.createdBy });
-  return { booking, token };
+  const synced = await syncBookingWorkorder(db, { showroom, type, booking, actor: args.createdBy });
+  return { booking: synced ?? booking, token };
 }
 
 export async function rescheduleTypeBooking(
@@ -139,6 +142,7 @@ export async function rescheduleTypeBooking(
     return { booking: row, type, showroom, from: current.startsAt };
   });
   await notifyBooking(db, { ...result, metric: BOOKING_METRIC.rescheduled, actor: args.actor, extra: { previous_display: `${formatLongDate(result.from, result.showroom.timezone)} at ${formatTime(result.from, result.showroom.timezone)}` } });
+  await syncBookingWorkorder(db, { ...result, actor: args.actor });
   return result.booking;
 }
 
@@ -149,6 +153,7 @@ export async function cancelTypeBooking(db: Db, args: { bookingId: string; actor
   const [type] = await db.select().from(bookingTypes).where(eq(bookingTypes.id, current.bookingTypeId));
   const showroom = await getShowroomById(db, current.showroomId);
   await notifyBooking(db, { showroom, type, booking: row, metric: BOOKING_METRIC.cancelled, actor: args.actor });
+  await syncBookingWorkorder(db, { showroom, type, booking: row, actor: args.actor });
   return row;
 }
 
@@ -258,4 +263,90 @@ export async function setBookingOutcome(
     payload: { booking_id: current.id, booking_type_id: current.bookingTypeId, previous: current.status },
   });
   return row;
+}
+
+// ---- Lightspeed work orders for service bookings ------------------------------------------------
+
+/**
+ * The Lightspeed customer for a booking, matched by email or phone against orders Kickstand already mirrors
+ * (special orders carry their Lightspeed customerID; phones are stored E.164, like bookings). Null = new customer.
+ */
+export async function matchLightspeedCustomer(dbx: DbOrTx, b: Pick<Booking, "customerEmail" | "customerPhone">): Promise<string | null> {
+  const conds = [
+    b.customerEmail ? sql`lower(${orders.customerEmail}) = ${b.customerEmail.toLowerCase()}` : undefined,
+    b.customerPhone ? eq(orders.customerPhone, b.customerPhone) : undefined,
+  ].filter(Boolean);
+  if (!conds.length) return null;
+  const [row] = await dbx
+    .select({ id: orders.lsCustomerId })
+    .from(orders)
+    .where(and(isNotNull(orders.lsCustomerId), or(...conds)))
+    .orderBy(desc(orders.updatedAt))
+    .limit(1);
+  return row?.id ?? null;
+}
+
+function workorderNote(showroom: ShowroomCtx, type: BookingType, b: Booking): string {
+  const tz = showroom.timezone;
+  const when = `${formatLongDate(b.startsAt, tz)} ${formatTime(b.startsAt, tz)}–${formatTime(b.endsAt, tz)}`;
+  return [
+    b.status === "cancelled" ? `CANCELLED (${b.cancelledReason === "customer" ? "by the customer" : "by staff"}) · was booked for ${when}` : "",
+    `${type.name.toUpperCase()} · booked in Kickstand`,
+    b.status === "cancelled" ? "" : `CUSTOMER BOOKED: ${when}`,
+    b.customerNote ? `Customer says: ${b.customerNote}` : "",
+    [b.customerName, b.customerPhone, b.customerEmail].filter(Boolean).join(" · "),
+    `Manage: ${bookingUrls(b).manage_url}`,
+  ].filter(Boolean).join("\n");
+}
+
+/**
+ * Keep a service booking's Lightspeed work order in step (design rule: staff never retype a booking into
+ * Lightspeed). First booking: match or create the customer, create the work order in the store's "new work
+ * order" status with Due = the appointment. Later changes only move Due, Hook Out and the note — the status is
+ * never changed here, so Ikeono's status automations can't fire by surprise. Never throws: a failure is logged
+ * on the booking's timeline and staff can retry from the booking page.
+ */
+export async function syncBookingWorkorder(db: Db, args: { showroom: ShowroomCtx; type: BookingType; booking: Booking; actor: string }): Promise<Booking | null> {
+  const { showroom, type } = args;
+  if (!type.createsWorkOrder || type.location !== "in_person" || !lightspeedEnabled(showroom)) return null;
+  const [b] = await db.select().from(bookings).where(eq(bookings.id, args.booking.id));
+  if (!b) return null;
+  if (!b.lsWorkorderId && b.status !== "booked") return null;
+  const ls = showroom.settings.lightspeed;
+  const tz = showroom.timezone;
+  const common = {
+    note: workorderNote(showroom, type, b),
+    internalNote: `Kickstand booking ${baseUrl()}/app/bookings/${b.id}`,
+    etaOut: b.startsAt.toISOString(),
+    hookIn: type.name.slice(0, 40),
+    hookOut: b.status === "cancelled" ? "CANCELLED" : `Booked ${formatInTimeZone(b.startsAt, tz, "EEE d MMM h:mm aaa")}`,
+  };
+  try {
+    const client = new LightspeedClient(db);
+    if (b.lsWorkorderId) {
+      await client.updateWorkorder(b.lsWorkorderId, common);
+      await db.insert(events).values({ showroomId: showroom.id, type: "booking_workorder_updated", actor: args.actor, payload: { booking_id: b.id, workorder_id: b.lsWorkorderId } });
+      return b;
+    }
+    let customerID = await matchLightspeedCustomer(db, b);
+    const matched = !!customerID;
+    if (!customerID) customerID = await client.createCustomer({ customerName: b.customerName, customerEmail: b.customerEmail, customerPhone: b.customerPhone });
+    const workorderID = await client.createWorkorder({
+      shopID: ls.shop_id,
+      customerID: Number(customerID),
+      ...(ls.employee_id ? { employeeID: ls.employee_id } : {}),
+      timeIn: new Date().toISOString(),
+      warranty: false,
+      workorderStatusID: ls.open_status_id,
+      ...common,
+    });
+    const [row] = await db.update(bookings).set({ lsWorkorderId: workorderID }).where(eq(bookings.id, b.id)).returning();
+    await db.insert(events).values({ showroomId: showroom.id, type: "booking_workorder_created", actor: args.actor, payload: { booking_id: b.id, workorder_id: workorderID, customer_id: customerID, customer_matched: matched } });
+    return row;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    logger.warn({ err: message, bookingId: b.id }, "booking work order not synced");
+    await db.insert(events).values({ showroomId: showroom.id, type: "booking_workorder_failed", actor: args.actor, payload: { booking_id: b.id, error: message.slice(0, 300) } });
+    return null;
+  }
 }

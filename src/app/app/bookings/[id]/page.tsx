@@ -11,7 +11,9 @@ import { sp, type SearchParams } from "@/lib/flash";
 import { formatDateTime, formatLongDate, formatLongDateFromLocal, formatTime } from "@/lib/time";
 import { bookingUrls, getBookingDetail } from "@/lib/type-bookings";
 import { getTypeAvailability } from "@/lib/type-slots";
-import { checkInBookingAction, noShowBookingAction, staffCancelTypeBookingAction, staffRescheduleTypeBookingAction, undoBookingOutcomeAction } from "../../actions";
+import { lightspeedEnabled } from "@/lib/lightspeed";
+import { lightspeedWorkorderUrl } from "@/lib/workorders";
+import { checkInBookingAction, noShowBookingAction, retryBookingWorkorderAction, staffCancelTypeBookingAction, staffRescheduleTypeBookingAction, undoBookingOutcomeAction } from "../../actions";
 
 export const metadata = { title: "Booking" };
 
@@ -29,6 +31,9 @@ const EVENT_LABEL: Record<string, string> = {
   booking_checked_in: "Checked in",
   booking_no_show: "Marked no-show",
   booking_outcome_undone: "Check-in / no-show undone",
+  booking_workorder_created: "Lightspeed work order created",
+  booking_workorder_updated: "Lightspeed work order updated",
+  booking_workorder_failed: "Lightspeed work order failed",
 };
 
 /** One booking: the booking itself with Check in / No-show / Change time / Cancel beside it, then its timeline. */
@@ -71,6 +76,20 @@ export default async function BookingPage({ params, searchParams }: { params: Pr
             <dt className="text-muted">Email</dt><dd>{b.customerEmail ? <a href={`mailto:${b.customerEmail}`} className="underline">{b.customerEmail}</a> : "—"}</dd>
             {b.customerNote && <><dt className="text-muted">Note</dt><dd>{b.customerNote}</dd></>}
             <dt className="text-muted">Booked by</dt><dd>{who(b.createdBy)}</dd>
+            {type.createsWorkOrder && (
+              <>
+                <dt className="text-muted">Lightspeed</dt>
+                <dd>
+                  {b.lsWorkorderId ? (
+                    <a href={lightspeedWorkorderUrl(b.lsWorkorderId)} target="_blank" rel="noreferrer" className="underline">Work order #{b.lsWorkorderId}</a>
+                  ) : !lightspeedEnabled(showroom) ? (
+                    <span className="text-muted">Lightspeed link is off for this store</span>
+                  ) : b.status === "booked" ? (
+                    <form action={retryBookingWorkorderAction.bind(null, b.id)} className="inline"><span className="text-danger">No work order yet</span> <button type="submit" className="btn btn-sm ml-2">Create it now</button></form>
+                  ) : "—"}
+                </dd>
+              </>
+            )}
           </dl>
           <div className="flex flex-col gap-2">
             {b.status === "booked" && (
@@ -115,7 +134,12 @@ export default async function BookingPage({ params, searchParams }: { params: Pr
           <ul className="divide-y divide-border text-sm">
             {timeline.map((e) => (
               <li key={e.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
-                <span>{EVENT_LABEL[e.type] ?? e.type}{e.klaviyoStatus === "failed" && <Badge tone="danger">message not sent</Badge>}</span>
+                <span>
+                  {EVENT_LABEL[e.type] ?? e.type}
+                  {typeof e.payload.workorder_id === "string" && <span className="text-muted"> #{e.payload.workorder_id}{e.payload.customer_matched === true ? " (existing customer)" : e.payload.customer_matched === false ? " (new customer)" : ""}</span>}
+                  {typeof e.payload.error === "string" && <span className="text-danger"> · {e.payload.error}</span>}
+                  {e.klaviyoStatus === "failed" && <Badge tone="danger">message not sent</Badge>}
+                </span>
                 <span className="text-xs text-muted">{who(e.actor)} · {formatDateTime(e.createdAt, tz)}</span>
               </li>
             ))}

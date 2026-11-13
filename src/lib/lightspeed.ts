@@ -265,7 +265,7 @@ export class LightspeedClient {
     return asList(res, "WorkorderStatus");
   }
 
-  async createCustomer(order: Order): Promise<string> {
+  async createCustomer(order: Pick<Order, "customerName" | "customerEmail" | "customerPhone">): Promise<string> {
     const [firstName, ...rest] = order.customerName.trim().split(/\s+/);
     const body = {
       firstName: firstName || "Customer",
