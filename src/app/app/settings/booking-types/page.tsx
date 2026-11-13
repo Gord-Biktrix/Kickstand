@@ -10,6 +10,7 @@ import {
   CAPACITY_LABEL,
   formatDayHours,
   hoursSummary,
+  ensureDefaultBookingTypes,
   listBookingTypes,
   LOCATION_LABEL,
   NEW_TYPE_DEFAULTS,
@@ -32,6 +33,7 @@ export default async function BookingTypesPage({ searchParams }: { searchParams:
   const q = await searchParams;
   const user = await requireUser("manager");
   const showroom = await currentShowroom(user);
+  await ensureDefaultBookingTypes(db, showroom);
   const types = await listBookingTypes(db, showroom.id);
   const online = showroom.kind === "online";
   const existing = new Set(types.map((t) => t.name));

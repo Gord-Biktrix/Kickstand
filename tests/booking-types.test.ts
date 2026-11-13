@@ -2,6 +2,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { Db } from "@/db/client";
 import {
   createBookingType,
+  ensureDefaultBookingTypes,
+  hoursFromCapacity,
   hoursSummary,
   listBookingTypes,
   NEW_TYPE_DEFAULTS,
@@ -73,21 +75,42 @@ describe("booking types in the database", () => {
   afterAll(async () => { await db.$client.end(); });
   beforeEach(async () => { vancouver = await resetDb(db); });
 
-  it("every showroom has a bike pickup type; the online team does not", async () => {
-    const vanTypes = await listBookingTypes(db, vancouver.id);
-    expect(vanTypes.map((t) => [t.slug, t.kind, t.access])).toEqual([["pickup", "pickup", "invite"]]);
-    const sk = await createShowroom(db, { slug: "", name: "Biktrix Saskatoon", timezone: "America/Regina", addressLine: "", phone: null });
-    expect((await listBookingTypes(db, sk.id)).map((t) => t.kind)).toEqual(["pickup"]);
+  it("every store works out of the box: showrooms get pickup + test ride, service, visit; the online team gets calls", async () => {
+    const sk = await createShowroom(db, { slug: "", name: "Biktrix Saskatoon", timezone: "America/Regina", addressLine: "", phone: null, copyCapacityFrom: vancouver.slug });
+    const skTypes = await listBookingTypes(db, sk.id);
+    expect(skTypes.map((t) => [t.slug, t.access, t.active])).toEqual([["pickup", "invite", true], ["test-ride", "public", true], ["service", "public", true], ["showroom-visit", "public", true]]);
+    // Hours come from the store's pickup days and times (Vancouver template: closed Sun/Mon, Sat from 11).
+    const ride = skTypes.find((t) => t.slug === "test-ride")!;
+    expect(ride.hours).toMatchObject({ "2": [["12:00", "17:15"]], "6": [["11:00", "17:15"]] });
+    expect(ride.hours).not.toHaveProperty("0");
+    expect(skTypes.find((t) => t.slug === "service")!.createsWorkOrder).toBe(true);
     const online = await createShowroom(db, { slug: "online", name: "Online sales", kind: "online", timezone: "America/Vancouver", addressLine: "ignored", phone: null });
     expect(online.kind).toBe("online");
     expect(online.addressLine).toBe("");
-    expect(await listBookingTypes(db, online.id)).toEqual([]);
+    const calls = await listBookingTypes(db, online.id);
+    expect(calls.map((t) => [t.slug, t.location])).toEqual([["video-call", "video"], ["phone-call", "phone"]]);
+    expect(calls[0].hours).toEqual(WEEKDAY_8_TO_4);
+  });
+
+  it("an existing store gets its defaults on first use, once; staff changes stick", async () => {
+    expect((await listBookingTypes(db, vancouver.id)).map((t) => t.slug)).toEqual(["pickup"]);
+    await ensureDefaultBookingTypes(db, vancouver);
+    await ensureDefaultBookingTypes(db, vancouver);
+    const types = await listBookingTypes(db, vancouver.id);
+    expect(types.map((t) => t.slug)).toEqual(["pickup", "test-ride", "service", "showroom-visit"]);
+    // Switched off and renamed: never re-added.
+    const ride = types.find((t) => t.slug === "test-ride")!;
+    await setBookingTypeActive(db, vancouver.id, ride.id, false);
+    await updateBookingType(db, vancouver.id, ride.id, { ...base, name: "E-bike test ride" });
+    await ensureDefaultBookingTypes(db, vancouver);
+    expect((await listBookingTypes(db, vancouver.id)).length).toBe(4);
+    expect(hoursFromCapacity([])).toEqual(WEEKDAY_8_TO_4);
   });
 
   it("creates, edits and switches off types per profile without touching other profiles", async () => {
     const online = await createShowroom(db, { slug: "online", name: "Online sales", kind: "online", timezone: "America/Vancouver", addressLine: "", phone: null });
     const call = await createBookingType(db, online.id, validateBookingType({ ...base, name: "Video call with an expert", location: "video" }, "online"));
-    expect(call.slug).toBe("video-call-with-an-expert");
+    expect(call.slug).toBe("video-call-with-an-expert");  // the default is "video-call", so no clash
     const ride = await createBookingType(db, vancouver.id, base);
     const ride2 = await createBookingType(db, vancouver.id, base);
     expect(ride2.slug).toBe("test-ride-2");
@@ -103,6 +126,6 @@ describe("booking types in the database", () => {
     await expect(updateBookingType(db, vancouver.id, pickup.id, base)).rejects.toThrow(/Capacity/);
     await updatePickupType(db, vancouver.id, pickup.id, { name: "Pick up your bike", description: "x" });
     expect((await listBookingTypes(db, vancouver.id)).find((t) => t.id === pickup.id)!.name).toBe("Pick up your bike");
-    expect((await listBookingTypes(db, online.id)).map((t) => t.name)).toEqual(["Video call with an expert"]);
+    expect((await listBookingTypes(db, online.id)).map((t) => t.name)).toEqual(["Video call with an expert", "Phone call with an expert", "Video call with an expert"]);
   });
 });

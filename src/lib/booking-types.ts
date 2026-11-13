@@ -4,9 +4,9 @@
  * a database; the DB functions follow. The bike pickup is a booking type too (kind "pickup"), but its slots
  * still come from Settings › Capacity, so only its name, description and on/off switch are edited here.
  */
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import type { DbOrTx } from "@/db/client";
-import { bookingTypes, type BookingType } from "@/db/schema";
+import { bookingTypes, capacityRules, type BookingType, type CapacityRule } from "@/db/schema";
 
 export type BookingLocation = "in_person" | "video" | "phone";
 export type BookingAccess = "public" | "invite";
@@ -221,5 +221,55 @@ export async function ensurePickupType(dbx: DbOrTx, showroomId: string): Promise
   await dbx
     .insert(bookingTypes)
     .values({ showroomId, slug: "pickup", name: "Bike pickup", description: "Collect your new bike. Booked from the link we send when it arrives.", kind: "pickup", access: "invite", location: "in_person", noticeMin: 0, sortOrder: 0 })
+    .onConflictDoNothing();
+}
+
+/**
+ * The weekly hours a showroom's new types start with: the days and times it takes pickups (Settings ›
+ * Capacity), the only opening hours Kickstand knows. Mon–Fri 8–4 when a store has none (and for the online team).
+ */
+export function hoursFromCapacity(rules: Pick<CapacityRule, "weekday" | "capacity" | "windowStart" | "windowEnd">[]): WeeklyHours {
+  const out: WeeklyHours = {};
+  for (const r of rules) if (r.capacity > 0) out[String(r.weekday)] = [[r.windowStart.slice(0, 5), r.windowEnd.slice(0, 5)]];
+  return Object.keys(out).length ? out : WEEKDAY_8_TO_4;
+}
+
+/** The types every profile gets without anyone setting them up: the presets for its kind, all public and on. */
+export function defaultTypes(kind: string, hours: WeeklyHours): (BookingTypeInput & { slug: string })[] {
+  return presetsFor(kind).map((p) => ({
+    slug: p.key,
+    name: p.name,
+    description: p.description,
+    location: p.location,
+    access: "public",
+    durationMin: p.durationMin,
+    bufferMin: NEW_TYPE_DEFAULTS.bufferMin,
+    slotStepMin: NEW_TYPE_DEFAULTS.slotStepMin,
+    noticeMin: NEW_TYPE_DEFAULTS.noticeMin,
+    horizonDays: NEW_TYPE_DEFAULTS.horizonDays,
+    capacityMode: "bench",
+    benchCapacity: NEW_TYPE_DEFAULTS.benchCapacity,
+    hours: kind === "online" ? WEEKDAY_8_TO_4 : hours,
+    createsWorkOrder: p.createsWorkOrder,
+  }));
+}
+
+/**
+ * Give a profile its default booking types the first time it has none, so booking works out of the box
+ * (Gord, 2026-11-13: "it should just be available"). Once a profile has any standard type — even one switched
+ * off or renamed — nothing is added again, so staff changes stick. Safe to call on every page load.
+ */
+export async function ensureDefaultBookingTypes(dbx: DbOrTx, showroom: { id: string; kind: string }): Promise<void> {
+  const [{ n }] = await dbx
+    .select({ n: sql<number>`count(*)::int` })
+    .from(bookingTypes)
+    .where(and(eq(bookingTypes.showroomId, showroom.id), eq(bookingTypes.kind, "standard")));
+  if (n > 0) return;
+  const rules = showroom.kind === "online" ? [] : await dbx.select().from(capacityRules).where(eq(capacityRules.showroomId, showroom.id));
+  const types = defaultTypes(showroom.kind, hoursFromCapacity(rules));
+  if (!types.length) return;
+  await dbx
+    .insert(bookingTypes)
+    .values(types.map((t, i) => ({ ...t, showroomId: showroom.id, kind: "standard", sortOrder: i + 1 })))
     .onConflictDoNothing();
 }

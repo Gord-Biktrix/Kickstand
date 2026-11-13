@@ -3,7 +3,8 @@ import { db } from "@/db/client";
 import { SlotPicker } from "@/components/slot-picker";
 import { Card, Field, Flash, PageHeader } from "@/components/ui";
 import { requireUser } from "@/lib/auth";
-import { listBookingTypes, LOCATION_LABEL, type BookingLocation } from "@/lib/booking-types";
+import { ensureDefaultBookingTypes,
+  listBookingTypes, LOCATION_LABEL, type BookingLocation } from "@/lib/booking-types";
 import { currentShowroom } from "@/lib/current-showroom";
 import { sp, type SearchParams } from "@/lib/flash";
 import { formatLongDateFromLocal, formatTime } from "@/lib/time";
@@ -20,6 +21,7 @@ export default async function NewBookingPage({ searchParams }: { searchParams: P
   const q = await searchParams;
   const user = await requireUser("staff");
   const showroom = await currentShowroom(user);
+  await ensureDefaultBookingTypes(db, showroom);
   const types = (await listBookingTypes(db, showroom.id)).filter((t) => t.kind === "standard" && t.active);
   const type = types.find((t) => t.id === sp(q.type));
   const tz = showroom.timezone;

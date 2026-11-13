@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { capacityRules, showrooms } from "@/db/schema";
-import { ensurePickupType } from "./booking-types";
+import { ensureDefaultBookingTypes, ensurePickupType } from "./booking-types";
 import { DEFAULT_SETTINGS, type ProgramSettings } from "./settings";
 import { listShowrooms, patchShowroomSettings, type ShowroomCtx } from "./showroom";
 
@@ -49,7 +49,10 @@ export async function createShowroom(dbx: Db, input: NewShowroom): Promise<Showr
     .values({ slug, name: input.name.trim(), kind, timezone: input.timezone, addressLine: kind === "online" ? "" : input.addressLine.trim(), phone: input.phone?.trim() || null, settings })
     .returning();
   // An online team has no pickups, capacity or Lightspeed shop: only booking types.
-  if (kind === "online") return (await listShowrooms(dbx)).find((s) => s.id === row.id)!;
+  if (kind === "online") {
+    await ensureDefaultBookingTypes(dbx, row);
+    return (await listShowrooms(dbx)).find((s) => s.id === row.id)!;
+  }
   await ensurePickupType(dbx, row.id);
   // Capacity: start from another store's weekly template so the calendar isn't empty; adjust in Settings › Capacity.
   if (input.copyCapacityFrom) {
@@ -64,6 +67,8 @@ export async function createShowroom(dbx: Db, input: NewShowroom): Promise<Showr
       if (srcSettings) await patchShowroomSettings(dbx, row.id, { ...srcSettings, lightspeed: settings.lightspeed });
     }
   }
+  // After copying capacity, so the default types start from the store's pickup days and times.
+  await ensureDefaultBookingTypes(dbx, row);
   return (await listShowrooms(dbx)).find((s) => s.id === row.id)!;
 }
 

@@ -2,7 +2,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { db } from "@/db/client";
 import { Card } from "@/components/ui";
-import { listBookingTypes, LOCATION_LABEL, type BookingLocation } from "@/lib/booking-types";
+import { ensureDefaultBookingTypes,
+  listBookingTypes, LOCATION_LABEL, type BookingLocation } from "@/lib/booking-types";
 import { getShowroom } from "@/lib/showroom";
 
 export async function generateMetadata({ params }: { params: Promise<{ profile: string }> }) {
@@ -15,6 +16,7 @@ export default async function ProfileBookingPage({ params }: { params: Promise<{
   const { profile } = await params;
   const showroom = await getShowroom(db, profile).catch(() => null);
   if (!showroom) notFound();
+  await ensureDefaultBookingTypes(db, showroom);
   const types = (await listBookingTypes(db, showroom.id)).filter((t) => t.kind === "standard" && t.access === "public" && t.active);
   return (
     <div className="space-y-4">
