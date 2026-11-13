@@ -10,7 +10,7 @@ export type NavItem = { href: string; label: string; exact?: boolean; match?: st
  * Nav links with an active state. `exact` matches the path alone (for "/app" so it does not
  * light up on every child route); otherwise the item is active for the href and anything under it.
  */
-export function NavLinks({ items, variant = "top" }: { items: NavItem[]; variant?: "top" | "tabs" }) {
+export function NavLinks({ items, variant = "top" }: { items: NavItem[]; variant?: "top" | "tabs" | "chrome" }) {
   const pathname = usePathname();
   const isActive = (i: NavItem) => {
     if (i.exact) return pathname === i.href;
@@ -31,12 +31,17 @@ export function NavLinks({ items, variant = "top" }: { items: NavItem[]; variant
       </div>
     );
   }
+  // "chrome": white on the charcoal header, high-vis underline on the current page.
+  const chrome = variant === "chrome";
   return (
     <>
       {items.map((i) => {
         const active = isActive(i);
+        const cls = chrome
+          ? active ? "border-action font-semibold text-white" : "border-transparent text-chrome-muted hover:text-white"
+          : active ? "border-accent font-semibold text-accent" : "border-transparent text-foreground hover:text-accent";
         return (
-          <Link key={i.href} href={i.href} aria-current={active ? "page" : undefined} className={`border-b-2 pb-0.5 ${active ? "border-accent font-semibold text-accent" : "border-transparent text-foreground hover:text-accent"}`}>
+          <Link key={i.href} href={i.href} aria-current={active ? "page" : undefined} className={`border-b-2 pb-0.5 ${cls}`}>
             {i.label}
           </Link>
         );

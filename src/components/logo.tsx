@@ -19,11 +19,11 @@ export function KickstandMark({ size = 24, className }: { size?: number; classNa
 }
 
 /** Tile + "Kickstand" wordmark. `size` is the tile height; the wordmark scales with it. */
-export function KickstandLogo({ size = 24, className = "" }: { size?: number; className?: string }) {
+export function KickstandLogo({ size = 24, className = "", onDark = false }: { size?: number; className?: string; onDark?: boolean }) {
   return (
     <span className={`inline-flex items-center ${className}`} style={{ gap: size * 0.32 }}>
       <KickstandMark size={size} />
-      <span className="font-semibold text-foreground" style={{ fontSize: size * 0.86, letterSpacing: "-0.025em", lineHeight: 1 }}>Kickstand</span>
+      <span className={`font-semibold ${onDark ? "text-white" : "text-foreground"}`} style={{ fontSize: size * 0.86, letterSpacing: "-0.025em", lineHeight: 1 }}>Kickstand</span>
     </span>
   );
 }

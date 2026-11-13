@@ -61,8 +61,8 @@ export type Preset = {
 };
 
 export const PRESETS: Preset[] = [
-  { key: "test-ride", name: "Test ride", description: "Try a bike at the showroom with one of our team.", location: "in_person", durationMin: 45, createsWorkOrder: false, color: "blue", for: ["showroom"] },
-  { key: "service", name: "Service appointment", description: "Bring your bike in for a tune-up or repair.", location: "in_person", durationMin: 60, createsWorkOrder: true, color: "orange", for: ["showroom"] },
+  { key: "test-ride", name: "Test ride", description: "Try a bike at the showroom with one of our team.", location: "in_person", durationMin: 45, createsWorkOrder: false, color: "orange", for: ["showroom"] },
+  { key: "service", name: "Service appointment", description: "Bring your bike in for a tune-up or repair.", location: "in_person", durationMin: 60, createsWorkOrder: true, color: "amber", for: ["showroom"] },
   { key: "showroom-visit", name: "Showroom visit", description: "Come in and talk to an expert about the right bike for you.", location: "in_person", durationMin: 30, createsWorkOrder: false, color: "green", for: ["showroom"] },
   { key: "video-call", name: "Video call with an expert", description: "A live video tour of the bikes with a product expert.", location: "video", durationMin: 30, createsWorkOrder: false, color: "purple", for: ["online"] },
   { key: "phone-call", name: "Phone call with an expert", description: "We call you to answer questions and help you choose.", location: "phone", durationMin: 30, createsWorkOrder: false, color: "teal", for: ["online"] },

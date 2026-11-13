@@ -7,7 +7,7 @@ import { usePathname, useRouter } from "next/navigation";
  * redirects), submitted on change — a full navigation on purpose, so every server component re-reads
  * the cookie.
  */
-export function ShowroomSwitcher({ current, options, manageHref }: { current: string; options: { slug: string; name: string }[]; manageHref?: string }) {
+export function ShowroomSwitcher({ current, options, manageHref, onDark = false }: { current: string; options: { slug: string; name: string }[]; manageHref?: string; onDark?: boolean }) {
   const pathname = usePathname() || "/app";
   const router = useRouter();
   return (
@@ -16,7 +16,7 @@ export function ShowroomSwitcher({ current, options, manageHref }: { current: st
       <select
         name="showroom"
         aria-label="Showroom"
-        className="input h-8 w-auto py-0 text-sm"
+        className={onDark ? "h-8 w-auto rounded-md border border-chrome-line bg-chrome-2 px-2 py-0 text-sm font-medium text-white focus:outline-2 focus:outline-offset-1 focus:outline-action" : "input h-8 w-auto py-0 text-sm"}
         defaultValue={current}
         onChange={(e) => {
           if (e.currentTarget.value === "__manage" && manageHref) {

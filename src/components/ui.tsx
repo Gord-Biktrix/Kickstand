@@ -11,8 +11,17 @@ const toneClass: Record<Tone, string> = {
   danger: "border-danger/30 bg-danger-soft text-danger",
 };
 
+/** Status and labels are plain caps text (no pastel pills — Shop floor brand); colour only where it carries meaning. */
+const badgeText: Record<Tone, string> = {
+  neutral: "text-muted",
+  accent: "text-foreground",
+  ok: "text-ok",
+  warn: "text-warn",
+  danger: "text-danger",
+};
+
 export function Badge({ tone = "neutral", children }: { tone?: Tone; children: ReactNode }) {
-  return <span className={`badge ${toneClass[tone]}`}>{children}</span>;
+  return <span className={`badge ${badgeText[tone]}`}>{children}</span>;
 }
 
 export function Alert({ tone = "neutral", children }: { tone?: Tone; children: ReactNode }) {

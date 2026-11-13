@@ -48,8 +48,8 @@ describe("store availability", () => {
     const types = await listBookingTypes(db, van.id);
     const ride = types.find((t) => t.slug === "test-ride")!;
     expect(ride.useStoreHours).toBe(true);
-    expect(ride.color).toBe("blue");
-    expect(types.find((t) => t.slug === "service")!.color).toBe("orange");
+    expect(ride.color).toBe("orange");
+    expect(types.find((t) => t.slug === "service")!.color).toBe("amber");
     // A custom-hours type ignores the store's hours.
     const late = await createBookingType(db, van.id, validateBookingType({ name: "Evening clinic", description: "", location: "in_person", access: "public", durationMin: 60, bufferMin: 0, slotStepMin: 60, noticeMin: 0, horizonDays: 30, capacityMode: "bench", benchCapacity: 1, hours: { "1": [["18:00", "20:00"]] }, createsWorkOrder: false, useStoreHours: false, color: "pink" }, "showroom"));
     await setStoreHours(db, van.id, { "1": [["09:00", "11:00"]] });

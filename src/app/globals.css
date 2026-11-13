@@ -1,14 +1,22 @@
 @import "tailwindcss";
 
 :root {
-  --background: #f7f6f2;
-  --foreground: #1a1a1a;
-  --muted: #5b5b5b;
+  /* "Shop floor" (2026-11): concrete ground, charcoal chrome, high-vis orange for actions (always charcoal text on it). */
+  --background: #edebe7;
+  --foreground: #17181a;
+  --muted: #62666d;
   --card: #ffffff;
-  --border: #dcd9d1;
-  --accent: #c2410c;
-  --accent-strong: #9a3412;
+  --border: #dcd9d3;
+  /* Orange dark enough to read as text and outlines on white; buttons use --action. */
+  --accent: #a84300;
+  --accent-strong: #7c3200;
   --accent-soft: #fff1e8;
+  --action: #ff6b1a;
+  --action-strong: #f25a08;
+  --chrome: #17181a;
+  --chrome-2: #232427;
+  --chrome-line: #3d3f43;
+  --chrome-muted: #b9bcc2;
   --ok: #166534;
   --ok-soft: #ecfdf3;
   --warn: #92400e;
@@ -26,13 +34,19 @@
   --color-accent: var(--accent);
   --color-accent-strong: var(--accent-strong);
   --color-accent-soft: var(--accent-soft);
+  --color-action: var(--action);
+  --color-action-strong: var(--action-strong);
+  --color-chrome: var(--chrome);
+  --color-chrome-2: var(--chrome-2);
+  --color-chrome-line: var(--chrome-line);
+  --color-chrome-muted: var(--chrome-muted);
   --color-ok: var(--ok);
   --color-ok-soft: var(--ok-soft);
   --color-warn: var(--warn);
   --color-warn-soft: var(--warn-soft);
   --color-danger: var(--danger);
   --color-danger-soft: var(--danger-soft);
-  --font-sans: var(--font-geist-sans);
+  --font-sans: var(--font-inter);
   --font-mono: var(--font-geist-mono);
 }
 
@@ -43,10 +57,10 @@ body {
 
 @layer components {
   .btn {
-    @apply inline-flex items-center justify-center gap-2 rounded-lg border border-border bg-card px-4 py-2.5 text-sm font-medium text-foreground shadow-sm transition hover:bg-neutral-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-50;
+    @apply inline-flex items-center justify-center gap-2 rounded-md border border-border bg-card px-4 py-2.5 text-sm font-medium text-foreground shadow-sm transition hover:bg-neutral-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-50;
   }
   .btn-primary {
-    @apply border-accent bg-accent text-white hover:bg-accent-strong;
+    @apply border-action bg-action font-semibold text-foreground hover:border-action-strong hover:bg-action-strong;
   }
   .btn-danger {
     @apply border-danger bg-card text-danger hover:bg-danger-soft;
@@ -58,13 +72,13 @@ body {
     @apply w-full py-3 text-base;
   }
   .input {
-    @apply w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground shadow-sm focus:outline-2 focus:outline-offset-1 focus:outline-accent;
+    @apply w-full rounded-md border border-border bg-card px-3 py-2 text-sm text-foreground shadow-sm focus:outline-2 focus:outline-offset-1 focus:outline-accent;
   }
   .card {
-    @apply rounded-xl border border-border bg-card p-4 shadow-sm sm:p-5;
+    @apply rounded-lg border border-border bg-card p-4 shadow-sm sm:p-5;
   }
   .badge {
-    @apply inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium;
+    @apply inline-flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wide;
   }
   .table {
     @apply w-full text-left text-sm;
@@ -118,9 +132,13 @@ button[aria-busy="true"]::after {
   border-radius: 9999px;
   animation: pending-spin 0.7s linear infinite;
 }
-.btn-primary[aria-busy="true"]::after, .btn-danger[aria-busy="true"]::after {
+.btn-danger[aria-busy="true"]::after {
   border-color: rgba(255, 255, 255, 0.35);
   border-top-color: #fff;
+}
+.btn-primary[aria-busy="true"]::after {
+  border-color: rgba(0, 0, 0, 0.2);
+  border-top-color: var(--foreground);
 }
 @keyframes pending-spin { to { transform: rotate(360deg); } }
 

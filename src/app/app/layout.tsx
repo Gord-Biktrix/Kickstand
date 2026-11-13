@@ -38,16 +38,17 @@ export default async function StaffLayout({ children }: { children: React.ReactN
   return (
     <div className="flex flex-1 flex-col">
       <Suspense fallback={null}><PendingIndicator /></Suspense>
-      <header className="border-b border-border bg-card">
+      <header className="bg-chrome text-white">
         <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3">
-          <Link href="/app" aria-label="Kickstand home" className="rounded-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"><KickstandLogo size={22} /></Link>
+          <Link href="/app" aria-label="Kickstand home" className="rounded-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-action"><KickstandLogo size={24} onDark /></Link>
           {switchable ? (
-            <ShowroomSwitcher current={showroom.slug} options={all.map((s) => ({ slug: s.slug, name: s.name }))} manageHref={hasRole(user.role, "admin") ? "/app/settings/stores" : undefined} />
+            <ShowroomSwitcher current={showroom.slug} options={all.map((s) => ({ slug: s.slug, name: s.name }))} manageHref={hasRole(user.role, "admin") ? "/app/settings/stores" : undefined} onDark />
           ) : (
-            <span className="rounded-full border border-border px-2 py-0.5 text-xs text-muted" title="Showroom">{showroom.name}</span>
+            <span className="rounded-md border border-chrome-line px-2 py-1 text-xs text-chrome-muted" title="Store">{showroom.name}</span>
           )}
-          <nav aria-label="Main" className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
+          <nav aria-label="Main" className="flex flex-wrap gap-x-5 gap-y-1 text-sm">
             <NavLinks
+              variant="chrome"
               items={NAV.filter((n) => hasRole(user.role, n.min) && !(showroom.kind === "online" && "store" in n)).map((n) => ({
                 href: n.href === "/app/settings" ? (showroom.kind === "online" ? "/app/settings/booking-types" : "/app/settings/capacity") : n.href,
                 match: n.href === "/app/settings" ? "/app/settings" : undefined,
@@ -57,12 +58,12 @@ export default async function StaffLayout({ children }: { children: React.ReactN
             />
           </nav>
           <form action="/app/search" role="search" className="ml-auto">
-            <input name="q" type="search" placeholder="Search customers" aria-label="Search customers" className="input h-8 w-44 text-sm sm:w-56" />
+            <input name="q" type="search" placeholder="Search customers" aria-label="Search customers" className="h-8 w-44 rounded-md border border-chrome-line bg-chrome-2 px-3 text-sm text-white placeholder:text-chrome-muted focus:outline-2 focus:outline-offset-1 focus:outline-action sm:w-56" />
           </form>
-          <div className="flex items-center gap-3 text-xs text-muted">
-            {hasRole(user.role, "admin") && <Link href="/app/reports" className="hover:text-accent">Reports</Link>}
-            <Link href="/app/account" className="hidden hover:text-accent sm:inline" title="Your account">{user.name} · {roleLabel(user.role)}</Link>
-            <form action={signOutAction}><button type="submit" className="btn btn-sm">Sign out</button></form>
+          <div className="flex items-center gap-3 text-xs text-chrome-muted">
+            {hasRole(user.role, "admin") && <Link href="/app/reports" className="hover:text-white">Reports</Link>}
+            <Link href="/app/account" className="hidden hover:text-white sm:inline" title="Your account">{user.name} · {roleLabel(user.role)}</Link>
+            <form action={signOutAction}><button type="submit" className="rounded-md border border-chrome-line bg-chrome-2 px-3 py-1.5 text-xs font-medium text-white hover:bg-chrome-line">Sign out</button></form>
           </div>
         </div>
       </header>
