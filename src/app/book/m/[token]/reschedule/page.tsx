@@ -7,7 +7,7 @@ import { formatLongDate, formatLongDateFromLocal, formatTime } from "@/lib/time"
 import { getBookingByToken } from "@/lib/type-bookings";
 import { getTypeAvailability } from "@/lib/type-slots";
 import { rescheduleTypeAction } from "../../../actions";
-import { SlotPicker } from "../../../slot-picker";
+import { SlotPicker } from "@/components/slot-picker";
 import { zoneLabel } from "../../../zone";
 
 export const metadata = { title: "Change time" };

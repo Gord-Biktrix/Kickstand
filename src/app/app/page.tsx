@@ -7,7 +7,9 @@ import { formatMoney } from "@/lib/format";
 import { sp, type SearchParams } from "@/lib/flash";
 import { todayAppointments } from "@/lib/queries";
 import { addLocalDays, formatLongDateFromLocal, formatTime, toLocalDate } from "@/lib/time";
-import { collectPartsAction, recordNoShowAction } from "./actions";
+import { checkInBookingAction, collectPartsAction, noShowBookingAction, recordNoShowAction } from "./actions";
+import { LOCATION_LABEL, type BookingLocation } from "@/lib/booking-types";
+import { listBookings, type BookingRow } from "@/lib/type-bookings";
 import { currentShowroom } from "@/lib/current-showroom";
 import { ContactFlag } from "@/components/contact-flag";
 
@@ -20,7 +22,7 @@ export default async function TodayPage({ searchParams }: { searchParams: Promis
   const now = new Date();
   const today = toLocalDate(now, showroom.timezone);
   const date = /^\d{4}-\d{2}-\d{2}$/.test(sp(q.date) ?? "") ? sp(q.date)! : today;
-  const rows = await todayAppointments(db, showroom, date, now);
+  const [rows, bookingRows] = await Promise.all([todayAppointments(db, showroom, date, now), listBookings(db, showroom.id, date, date)]);
   // One card per visit: bikes collected together share a group id.
   const visits: (typeof rows)[] = [];
   for (const r of rows) {
@@ -30,14 +32,25 @@ export default async function TodayPage({ searchParams }: { searchParams: Promis
     else visits.push([r]);
   }
   const denied = sp(q.denied) === "1";
+  // Pickups and bookings (test rides, service, calls…) in one list, by start time.
+  const items: ({ kind: "visit"; at: number; visit: (typeof rows) } | { kind: "booking"; at: number; row: BookingRow })[] = [
+    ...visits.map((visit) => ({ kind: "visit" as const, at: visit[0].appointment.startsAt.getTime(), visit })),
+    ...bookingRows.map((row) => ({ kind: "booking" as const, at: row.booking.startsAt.getTime(), row })),
+  ].sort((a, b) => a.at - b.at);
+  const back = `/app?date=${date}`;
+  const counts = [
+    rows.length ? `${rows.length} pickup${rows.length === 1 ? "" : "s"}` : "",
+    bookingRows.length ? `${bookingRows.length} booking${bookingRows.length === 1 ? "" : "s"}` : "",
+  ].filter(Boolean).join(" · ") || "Nothing booked";
 
   return (
     <div>
       <PageHeader
         title={date === today ? "Today" : formatLongDateFromLocal(date)}
-        subtitle={`${formatLongDateFromLocal(date)} · ${rows.length} pickup${rows.length === 1 ? "" : "s"} · ${showroom.name}`}
+        subtitle={`${formatLongDateFromLocal(date)} · ${counts} · ${showroom.name}`}
         action={
-          <div className="flex gap-2 text-sm">
+          <div className="flex flex-wrap gap-2 text-sm">
+            <Link className="btn btn-primary btn-sm" href="/app/bookings/new">+ Book for a customer</Link>
             <Link className="btn btn-sm" href={`/app?date=${addLocalDays(date, -1)}`}>← Prev</Link>
             <Link className="btn btn-sm" href="/app">Today</Link>
             <Link className="btn btn-sm" href={`/app?date=${addLocalDays(date, 1)}`}>Next →</Link>
@@ -45,11 +58,13 @@ export default async function TodayPage({ searchParams }: { searchParams: Promis
         }
       />
       <Flash ok={sp(q.ok)} error={denied ? "You don't have permission for that page." : sp(q.error)} />
-      {rows.length === 0 ? (
-        <Empty>No pickups booked for this day.</Empty>
+      {items.length === 0 ? (
+        <Empty>Nothing booked for this day.</Empty>
       ) : (
         <div className="space-y-3">
-          {visits.map((visit) => {
+          {items.map((item) => {
+            if (item.kind === "booking") return <BookingCard key={item.row.booking.id} row={item.row} tz={showroom.timezone} now={now} back={back} />;
+            const visit = item.visit;
             const first = visit[0];
             const { appointment } = first;
             const passed = appointment.startsAt < now;
@@ -106,5 +121,44 @@ export default async function TodayPage({ searchParams }: { searchParams: Promis
         </div>
       )}
     </div>
+  );
+}
+
+const OUTCOME: Record<string, { label: string; tone: "ok" | "danger" | "neutral" }> = {
+  completed: { label: "checked in", tone: "ok" },
+  no_show: { label: "no-show", tone: "danger" },
+};
+
+/** A booking of a booking type on the day list: who, what, how to reach them, and check-in / no-show. */
+function BookingCard({ row, tz, now, back }: { row: BookingRow; tz: string; now: Date; back: string }) {
+  const { booking: b, type } = row;
+  const outcome = OUTCOME[b.status];
+  return (
+    <Card>
+      <div className="flex flex-wrap items-start gap-4">
+        <div className="w-24 shrink-0">
+          <p className="text-xl font-semibold">{formatTime(b.startsAt, tz)}</p>
+          <p className="text-xs text-muted">to {formatTime(b.endsAt, tz)}</p>
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="font-semibold">
+            <Link href={`/app/bookings/${b.id}`} className="hover:text-accent">{b.customerName}</Link>
+            <span className="ml-2 text-sm font-normal text-muted">{type.name}</span>
+          </p>
+          <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
+            <Badge tone="accent">{LOCATION_LABEL[type.location as BookingLocation]}</Badge>
+            {outcome && <Badge tone={outcome.tone}>{outcome.label}</Badge>}
+            <span className="text-muted">{[b.customerPhone, b.customerEmail].filter(Boolean).join(" · ")}</span>
+          </div>
+          {b.customerNote && <p className="mt-1 text-sm text-muted">&ldquo;{b.customerNote}&rdquo;</p>}
+        </div>
+        {b.status === "booked" && (
+          <div className="flex shrink-0 flex-col gap-2">
+            <form action={checkInBookingAction.bind(null, b.id, back)}><button type="submit" className="btn btn-primary btn-sm w-full">Check in</button></form>
+            {b.startsAt < now && <form action={noShowBookingAction.bind(null, b.id, back)}><button type="submit" className="btn btn-sm w-full">No-show</button></form>}
+          </div>
+        )}
+      </div>
+    </Card>
   );
 }

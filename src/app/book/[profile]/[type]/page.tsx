@@ -10,7 +10,7 @@ import { getShowroom } from "@/lib/showroom";
 import { formatLongDateFromLocal, formatTime } from "@/lib/time";
 import { getTypeAvailability } from "@/lib/type-slots";
 import { bookTypeAction } from "../../actions";
-import { SlotPicker } from "../../slot-picker";
+import { SlotPicker } from "@/components/slot-picker";
 import { zoneLabel } from "../../zone";
 
 export const metadata = { title: "Pick a time" };

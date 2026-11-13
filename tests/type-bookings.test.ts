@@ -7,7 +7,7 @@ import { MemoryNotifier, setNotifier } from "@/lib/notifier";
 import type { ShowroomCtx } from "@/lib/showroom";
 import { createShowroom } from "@/lib/showroom-admin";
 import { localToUtc } from "@/lib/time";
-import { BOOKING_METRIC, cancelTypeBooking, cleanDetails, createTypeBooking, getBookingByToken, rescheduleTypeBooking, TypeBookingError } from "@/lib/type-bookings";
+import { BOOKING_METRIC, cancelTypeBooking, cleanDetails, createTypeBooking, getBookingByToken, getBookingDetail, listBookings, rescheduleTypeBooking, setBookingOutcome, TypeBookingError } from "@/lib/type-bookings";
 import { getTypeAvailability, typeSlots } from "@/lib/type-slots";
 import { resetDb, testDb } from "./helpers";
 
@@ -116,5 +116,28 @@ describe("booking a booking type", () => {
     await expect(createTypeBooking(db, { showroom: online, type: invite, startsAt: slot("10:00"), details, createdBy: "customer", now: NOW })).rejects.toMatchObject({ code: "NOT_BOOKABLE" });
     await expect(createTypeBooking(db, { showroom: online, type: { ...type, active: false }, startsAt: slot("10:00"), details, createdBy: "customer", now: NOW })).rejects.toMatchObject({ code: "NOT_BOOKABLE" });
     await expect(createTypeBooking(db, { showroom: online, type: { ...type, kind: "pickup" }, startsAt: slot("10:00"), details, createdBy: "customer", now: NOW })).rejects.toMatchObject({ code: "NOT_BOOKABLE" });
+  });
+
+  it("staff see the day's bookings, check people in, mark no-shows and undo; cancelled ones drop off the day", async () => {
+    const a = (await createTypeBooking(db, { showroom: online, type, startsAt: slot("10:00"), details, createdBy: "staff-1", now: NOW })).booking;
+    const b = (await createTypeBooking(db, { showroom: online, type, startsAt: slot("11:00"), details: { ...details, name: "Alex" }, createdBy: "customer", now: NOW })).booking;
+    expect((await listBookings(db, online.id, "2026-11-17", "2026-11-17")).map((r) => r.booking.customerName)).toEqual(["Sam Rider", "Alex"]);
+    // Before it starts: check-in is fine (early arrival), a no-show isn't.
+    await expect(setBookingOutcome(db, { showroomId: online.id, bookingId: b.id, outcome: "no_show", actor: "staff-1", now: NOW })).rejects.toMatchObject({ code: "TOO_EARLY" });
+    await setBookingOutcome(db, { showroomId: online.id, bookingId: a.id, outcome: "completed", actor: "staff-1", now: NOW });
+    const later = localToUtc("2026-11-17", "12:00", TZ);
+    await setBookingOutcome(db, { showroomId: online.id, bookingId: b.id, outcome: "no_show", actor: "staff-1", now: later });
+    await setBookingOutcome(db, { showroomId: online.id, bookingId: b.id, outcome: "booked", actor: "staff-1", now: later });
+    await expect(setBookingOutcome(db, { showroomId: online.id, bookingId: b.id, outcome: "booked", actor: "staff-1", now: later })).rejects.toMatchObject({ code: "NOT_ACTIVE" });
+    // Another profile can't touch it.
+    await expect(setBookingOutcome(db, { showroomId: "00000000-0000-0000-0000-000000000000", bookingId: a.id, outcome: "no_show", actor: "x", now: later })).rejects.toMatchObject({ code: "NOT_ACTIVE" });
+    const detail = await getBookingDetail(db, online.id, b.id);
+    expect(detail!.timeline.map((e) => e.type)).toEqual(["booking_outcome_undone", "booking_no_show", "booking_confirmed"]);
+    expect(await getBookingDetail(db, "00000000-0000-0000-0000-000000000000", b.id)).toBeNull();
+    // Outcomes send nothing to Klaviyo.
+    expect(notifier.sent.map((s) => s.metric)).toEqual([BOOKING_METRIC.confirmed, BOOKING_METRIC.confirmed]);
+    await cancelTypeBooking(db, { bookingId: b.id, actor: "staff-1", reason: "staff" });
+    expect((await listBookings(db, online.id, "2026-11-17", "2026-11-17")).map((r) => r.booking.id)).toEqual([a.id]);
+    expect((await listBookings(db, online.id, "2026-11-17", "2026-11-17", { includeCancelled: true })).length).toBe(2);
   });
 });

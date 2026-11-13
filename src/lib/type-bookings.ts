@@ -4,7 +4,7 @@
  * (booking.ts). Each confirmed change fires one Klaviyo event ("Booking: Confirmed" / "Rescheduled" /
  * "Cancelled"); the flow in Klaviyo owns the wording and channel, as for pickups.
  */
-import { eq, sql } from "drizzle-orm";
+import { and, asc, between, desc, eq, ne, sql } from "drizzle-orm";
 import type { Db, DbOrTx } from "@/db/client";
 import { bookings, bookingTypes, events, type Booking, type BookingType } from "@/db/schema";
 import { LOCATION_LABEL, type BookingLocation } from "./booking-types";
@@ -23,7 +23,7 @@ export const BOOKING_METRIC = {
   cancelled: "Booking: Cancelled",
 } as const;
 
-export type TypeBookingErrorCode = "SLOT_TAKEN" | "INVALID_SLOT" | "NOT_BOOKABLE" | "NOT_ACTIVE" | "DETAILS";
+export type TypeBookingErrorCode = "SLOT_TAKEN" | "INVALID_SLOT" | "NOT_BOOKABLE" | "NOT_ACTIVE" | "DETAILS" | "TOO_EARLY";
 
 export const TYPE_BOOKING_ERROR_TEXT: Record<TypeBookingErrorCode, string> = {
   SLOT_TAKEN: "Someone just booked that time. Please pick another.",
@@ -31,6 +31,7 @@ export const TYPE_BOOKING_ERROR_TEXT: Record<TypeBookingErrorCode, string> = {
   NOT_BOOKABLE: "This appointment can't be booked online.",
   NOT_ACTIVE: "This booking has already been cancelled or has passed.",
   DETAILS: "Please check your details.",
+  TOO_EARLY: "That appointment hasn't started yet.",
 };
 
 export class TypeBookingError extends Error {
@@ -199,4 +200,62 @@ async function notifyBooking(
     payload: { booking_id: booking.id, booking_type_id: type.id, booking_type: type.name, starts_at: booking.startsAt.toISOString(), metric },
     klaviyoStatus: status,
   });
+}
+
+// ---- Staff side ---------------------------------------------------------------------------------
+
+export type BookingRow = { booking: Booking; type: BookingType };
+
+/** Bookings for a profile between two local dates (inclusive), cancelled ones left out unless asked. */
+export async function listBookings(dbx: DbOrTx, showroomId: string, from: string, to: string, opts: { includeCancelled?: boolean } = {}): Promise<BookingRow[]> {
+  return dbx
+    .select({ booking: bookings, type: bookingTypes })
+    .from(bookings)
+    .innerJoin(bookingTypes, eq(bookingTypes.id, bookings.bookingTypeId))
+    .where(and(eq(bookings.showroomId, showroomId), between(bookings.onDate, from, to), opts.includeCancelled ? undefined : ne(bookings.status, "cancelled")))
+    .orderBy(asc(bookings.startsAt));
+}
+
+/** One booking in this profile, with its timeline (newest first). */
+export async function getBookingDetail(dbx: DbOrTx, showroomId: string, id: string) {
+  if (!/^[0-9a-f-]{36}$/i.test(id)) return null;
+  const [row] = await dbx
+    .select({ booking: bookings, type: bookingTypes })
+    .from(bookings)
+    .innerJoin(bookingTypes, eq(bookingTypes.id, bookings.bookingTypeId))
+    .where(and(eq(bookings.id, id), eq(bookings.showroomId, showroomId)));
+  if (!row) return null;
+  const timeline = await dbx
+    .select()
+    .from(events)
+    .where(and(eq(events.showroomId, showroomId), sql`${events.payload}->>'booking_id' = ${id}`))
+    .orderBy(desc(events.createdAt));
+  return { ...row, timeline };
+}
+
+/**
+ * Staff mark how it went: checked in (completed) or no-show. Only a booked appointment that has started can
+ * be marked; "booked" again undoes either mark. No customer message: Klaviyo hears only confirm/move/cancel.
+ */
+export async function setBookingOutcome(
+  db: Db,
+  args: { showroomId: string; bookingId: string; outcome: "completed" | "no_show" | "booked"; actor: string; now?: Date },
+): Promise<Booking> {
+  const [current] = await db.select().from(bookings).where(and(eq(bookings.id, args.bookingId), eq(bookings.showroomId, args.showroomId)));
+  if (!current) throw new TypeBookingError("NOT_ACTIVE");
+  const now = args.now ?? new Date();
+  if (args.outcome === "booked") {
+    if (current.status !== "completed" && current.status !== "no_show") throw new TypeBookingError("NOT_ACTIVE");
+  } else {
+    if (current.status !== "booked") throw new TypeBookingError("NOT_ACTIVE");
+    if (args.outcome === "no_show" && current.startsAt > now) throw new TypeBookingError("TOO_EARLY");
+  }
+  const [row] = await db.update(bookings).set({ status: args.outcome }).where(eq(bookings.id, current.id)).returning();
+  await db.insert(events).values({
+    showroomId: current.showroomId,
+    type: args.outcome === "completed" ? "booking_checked_in" : args.outcome === "no_show" ? "booking_no_show" : "booking_outcome_undone",
+    actor: args.actor,
+    payload: { booking_id: current.id, booking_type_id: current.bookingTypeId, previous: current.status },
+  });
+  return row;
 }

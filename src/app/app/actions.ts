@@ -19,7 +19,8 @@ import { hashToken } from "@/lib/tokens";
 import { attachUnit, bookableCompanions, bookableSiblings, linkOrdersForPickup, mergeIntoVisit, splitFromVisit, unlinkOrderPickup, collectParts, completeHandover, createOrder, deleteUnit, detachUnit, futureVisitFor, grantExtension, inviteAllReceived, inviteOrders, inviteUnit, inviteUnits, joinVisit, markReady, receiveUnit, resendInvite, retagUnit, startBuild, unreceiveUnit, waiveStorage } from "@/lib/units";
 import { currentShowroom } from "@/lib/current-showroom";
 import { createShowroom, importShowroomsFromLightspeed, isProfileKind, setLightspeedLink, updateShowroomDetails } from "@/lib/showroom-admin";
-import { createBookingType, NEW_TYPE_DEFAULTS, parseWeeklyHours, PRESETS, setBookingTypeActive, updateBookingType, updatePickupType, validateBookingType, WEEKDAY_8_TO_4, type BookingTypeInput } from "@/lib/booking-types";
+import { cancelTypeBooking, createTypeBooking, getBookingDetail, rescheduleTypeBooking, setBookingOutcome } from "@/lib/type-bookings";
+import { createBookingType, getBookingType, NEW_TYPE_DEFAULTS, parseWeeklyHours, PRESETS, setBookingTypeActive, updateBookingType, updatePickupType, validateBookingType, WEEKDAY_8_TO_4, type BookingTypeInput } from "@/lib/booking-types";
 import { LightspeedClient } from "@/lib/lightspeed";
 import { googleEnabled } from "@/lib/google-auth";
 import { mailerKind } from "@/lib/mailer";
@@ -1066,4 +1067,81 @@ export async function setBookingTypeActiveAction(id: string, active: boolean) {
     await logEvent(db, { showroomId: showroom.id, type: active ? "booking_type_enabled" : "booking_type_disabled", actor: user.id, payload: { booking_type_id: id, name: t.name } });
     return active ? `${t.name} is bookable again.` : `${t.name} switched off. Existing bookings stay.`;
   });
+}
+
+// ---- Bookings of booking types (staff side) ------------------------------------------------------
+
+async function staffBooking(id: string) {
+  const user = await requireActor("staff");
+  const showroom = await currentShowroom(user);
+  const detail = await getBookingDetail(db, showroom.id, id);
+  if (!detail) throw new Error("That booking isn't in this store.");
+  return { user, showroom, detail };
+}
+
+export async function checkInBookingAction(id: string, returnTo: string) {
+  return run(safeReturn(returnTo, `/app/bookings/${id}`), async () => {
+    const { user, showroom } = await staffBooking(id);
+    await setBookingOutcome(db, { showroomId: showroom.id, bookingId: id, outcome: "completed", actor: user.id });
+    return "Checked in.";
+  });
+}
+
+export async function noShowBookingAction(id: string, returnTo: string) {
+  return run(safeReturn(returnTo, `/app/bookings/${id}`), async () => {
+    const { user, showroom } = await staffBooking(id);
+    await setBookingOutcome(db, { showroomId: showroom.id, bookingId: id, outcome: "no_show", actor: user.id });
+    return "Marked as a no-show.";
+  });
+}
+
+export async function undoBookingOutcomeAction(id: string) {
+  return run(`/app/bookings/${id}`, async () => {
+    const { user, showroom } = await staffBooking(id);
+    await setBookingOutcome(db, { showroomId: showroom.id, bookingId: id, outcome: "booked", actor: user.id });
+    return "Back to booked.";
+  });
+}
+
+export async function staffCancelTypeBookingAction(id: string) {
+  return run(`/app/bookings/${id}`, async () => {
+    const { user } = await staffBooking(id);
+    await cancelTypeBooking(db, { bookingId: id, actor: user.id, reason: "staff" });
+    return "Booking cancelled. The customer is told through Klaviyo.";
+  });
+}
+
+export async function staffRescheduleTypeBookingAction(id: string, formData: FormData) {
+  return run(`/app/bookings/${id}`, async () => {
+    const { user } = await staffBooking(id);
+    const startsAt = new Date(str(formData, "starts_at"));
+    if (Number.isNaN(startsAt.getTime())) throw new Error("Pick a time.");
+    await rescheduleTypeBooking(db, { bookingId: id, startsAt, actor: user.id });
+    return "Moved to the new time. The customer is told through Klaviyo.";
+  });
+}
+
+/** Staff book for a customer who phoned or walked in. Invite-only types are allowed here. */
+export async function staffCreateTypeBookingAction(typeId: string, formData: FormData) {
+  let target = `/app/bookings/new?type=${typeId}`;
+  try {
+    const user = await requireActor("staff");
+    const showroom = await currentShowroom(user);
+    const type = await getBookingType(db, showroom.id, typeId);
+    const startsAt = new Date(str(formData, "starts_at"));
+    if (Number.isNaN(startsAt.getTime())) throw new Error("Pick a time.");
+    const { booking } = await createTypeBooking(db, {
+      showroom,
+      type,
+      startsAt,
+      createdBy: user.id,
+      details: { name: str(formData, "name"), email: str(formData, "email"), phone: str(formData, "phone"), smsConsent: bool(formData, "sms_consent"), note: str(formData, "note") },
+    });
+    target = withFlash(`/app/bookings/${booking.id}`, { ok: `Booked. ${booking.customerEmail || booking.customerPhone ? "The customer gets a confirmation through Klaviyo." : ""}` });
+  } catch (err) {
+    const date = str(formData, "date");
+    const time = str(formData, "time");
+    target = withFlash(`/app/bookings/new?type=${typeId}${date && time ? `&date=${date}&time=${time}` : ""}`, { error: errorMessage(err) });
+  }
+  redirect(target);
 }

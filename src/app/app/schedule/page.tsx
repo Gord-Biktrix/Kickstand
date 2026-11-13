@@ -7,6 +7,8 @@ import { sp, type SearchParams } from "@/lib/flash";
 import { weekSchedule, type ScheduleDay, type ScheduleRow } from "@/lib/queries";
 import { addLocalDays, formatLongDateFromLocal, formatShortDateFromLocal, formatTime, localToUtc, minutesToTime, timeToMinutes, toLocalDate, weekdayOf } from "@/lib/time";
 import { formatInTimeZone } from "date-fns-tz";
+import { listBookings, type BookingRow } from "@/lib/type-bookings";
+import { listBookingTypes, type WeeklyHours } from "@/lib/booking-types";
 import { parseISO, format } from "date-fns";
 
 export const metadata = { title: "Appointments" };
@@ -87,16 +89,27 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
     to = addLocalDays(mondayOf(lastOfMonth), 6);
     title = format(parseISO(first), "MMMM yyyy"); prev = addMonths(first, -1); next = addMonths(first, 1);
   }
-  const days = await weekSchedule(db, showroom, from, to);
+  const [days, bookingRows, types] = await Promise.all([weekSchedule(db, showroom, from, to), listBookings(db, showroom.id, from, to), listBookingTypes(db, showroom.id)]);
+  // Bookings of booking types (test rides, service, calls…) sit beside pickups in "Customers" mode.
+  const bookingsOn = (d: string): BookingRow[] => (mode === "pickups" ? bookingRows.filter((r) => r.booking.onDate === d) : []);
+  const online = showroom.kind === "online";
+  // The online team has no pickup hours: its days are only "closed" when nothing is booked.
+  const isClosed = (d: ScheduleDay) => (online ? false : d.closed && bookingsOn(d.date).length === 0);
   const href = (d: string, v: View = view, m: Mode = mode) => `/app/schedule?view=${v}&mode=${m}&date=${d}`;
   const inScope = days.filter((d) => view !== "month" || monthOf(d.date) === monthOf(date));
   const totalPickups = inScope.reduce((n, d) => n + visitsOf(d).length, 0);
+  const totalBookings = inScope.reduce((n, d) => n + bookingsOn(d.date).length, 0);
   const totalBuilds = inScope.reduce((n, d) => n + d.builds.length, 0);
 
   // Time grid bounds: earliest opening to latest close across the visible open days.
-  const open = days.filter((d) => !d.closed);
-  const gridStart = Math.min(...(open.length ? open.map((d) => timeToMinutes(d.windowStart)) : [600]));
-  const gridEnd = Math.max(...(open.length ? open.map((d) => timeToMinutes(d.windowEnd)) : [1035]), gridStart + 60);
+  const open = online ? [] : days.filter((d) => !d.closed);
+  const bookingMins = (mode === "pickups" ? bookingRows : []).flatMap((r) => [timeToMinutes(formatInTimeZone(r.booking.startsAt, tz, "HH:mm")), timeToMinutes(formatInTimeZone(r.booking.endsAt, tz, "HH:mm"))]);
+  // Booking types' own hours widen the grid too (the online team has no pickup hours at all).
+  const typeRanges = mode === "pickups" ? types.filter((t) => t.kind === "standard" && t.active).flatMap((t) => Object.values(t.hours as WeeklyHours).flat()) : [];
+  const starts = [...open.map((d) => timeToMinutes(d.windowStart)), ...bookingMins, ...typeRanges.map(([a]) => timeToMinutes(a))];
+  const ends = [...open.map((d) => timeToMinutes(d.windowEnd)), ...bookingMins, ...typeRanges.map(([, b]) => timeToMinutes(b))];
+  const gridStart = Math.floor(Math.min(...(starts.length ? starts : [online ? 480 : 600])) / 60) * 60;
+  const gridEnd = Math.max(...(ends.length ? ends : [online ? 960 : 1035]), gridStart + 60);
   const span = gridEnd - gridStart;
   const hours: number[] = [];
   for (let m = Math.floor(gridStart / 60) * 60; m <= gridEnd; m += 60) hours.push(m);
@@ -106,7 +119,7 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
 
   // Render helpers (plain functions, not components — see react-hooks/static-components).
   const blocksOf = (d: ScheduleDay) => (mode === "builds" ? buildBlocksOf(d, tz) : visitsOf(d));
-  const visitBlock = (v: Visit, compact = false) => {
+  const visitBlock = (v: Visit, compact = false, half = false) => {
     const rawTop = yOf(v.startsAt);
     const top = Math.max(0, Math.min(rawTop, gridHeight - 28));
     const height = Math.max(28, Math.min(yOf(v.endsAt), gridHeight) - top);
@@ -115,7 +128,7 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
     return (
       <Link
         href={`/app/units/${first.unit.id}`}
-        className={`absolute left-1 right-1 overflow-hidden rounded-md border px-2 py-1 text-xs leading-tight shadow-sm hover:ring-2 hover:ring-accent ${isBuild ? buildTone(v.rows, now) : tone(v.rows)}`}
+        className={`absolute left-1 ${half ? "right-[50%]" : "right-1"} overflow-hidden rounded-md border px-2 py-1 text-xs leading-tight shadow-sm hover:ring-2 hover:ring-accent ${isBuild ? buildTone(v.rows, now) : tone(v.rows)}`}
         style={{ top, height }}
         title={isBuild ? `Build by ${formatTime(v.endsAt, tz)} · ${first.unit.model} · box ${first.unit.boxTag} · pickup ${formatShortDateFromLocal(first.appointment.onDate)} ${formatTime(first.appointment.startsAt, tz)}` : `${formatTime(v.startsAt, tz)} · ${v.customer} · ${v.rows.map((r) => r.unit.model).join(", ")}`}
       >
@@ -137,6 +150,25 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
     );
   };
 
+  const bookingTone = (r: BookingRow) => (r.booking.status === "completed" ? "bg-ok-soft border-ok/40" : r.booking.status === "no_show" ? "bg-danger-soft border-danger/40" : "bg-card border-accent/60");
+  const bookingBlock = (r: BookingRow, compact = false, half = false) => {
+    const rawTop = yOf(r.booking.startsAt);
+    const top = Math.max(0, Math.min(rawTop, gridHeight - 28));
+    const height = Math.max(28, Math.min(yOf(r.booking.endsAt), gridHeight) - top);
+    return (
+      <Link
+        key={r.booking.id}
+        href={`/app/bookings/${r.booking.id}`}
+        className={`absolute ${half ? "left-[50%]" : "left-1"} right-1 overflow-hidden rounded-md border border-dashed px-2 py-1 text-xs leading-tight shadow-sm hover:ring-2 hover:ring-accent ${bookingTone(r)}`}
+        style={{ top, height }}
+        title={`${formatTime(r.booking.startsAt, tz)} · ${r.booking.customerName} · ${r.type.name}`}
+      >
+        <span className="font-semibold">{formatTime(r.booking.startsAt, tz)}</span> <span className="font-medium">{r.booking.customerName}</span>
+        {!compact && height >= 44 ? <div className="truncate text-muted">{r.type.name}</div> : <span className="text-muted"> · {r.type.name}</span>}
+      </Link>
+    );
+  };
+
   const timeGrid = (cols: ScheduleDay[]) => (
     <div className="overflow-x-auto">
       <div className="grid" style={{ gridTemplateColumns: `56px repeat(${cols.length}, minmax(${cols.length === 1 ? "320px" : "140px"}, 1fr))` }}>
@@ -144,12 +176,14 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
         <div />
         {cols.map((d) => {
           const n = visitsOf(d).length;
+          const nb = bookingsOn(d.date).length;
           const isToday = d.date === today;
           return (
-            <div key={d.date} className={`border-b border-border px-2 pb-2 text-center ${d.closed ? "text-muted" : ""}`}>
+            <div key={d.date} className={`border-b border-border px-2 pb-2 text-center ${isClosed(d) ? "text-muted" : ""}`}>
               <Link href={href(d.date, "day")} className={`block text-sm font-semibold ${isToday ? "text-accent" : ""}`}>{cols.length === 1 ? formatLongDateFromLocal(d.date) : formatShortDateFromLocal(d.date)}</Link>
               <div className="mt-0.5 flex items-center justify-center gap-2 text-xs text-muted">
-                {d.closed ? <span>closed</span> : <Link href={`/app/bikes?filter=booked&date=${d.date}`} className="hover:text-accent" title="This day's bookings on Bikes">{n}/{d.capacity} booked</Link>}
+                {isClosed(d) ? <span>closed</span> : online ? <span>{nb} booked</span> : <Link href={`/app/bikes?filter=booked&date=${d.date}`} className="hover:text-accent" title="This day's pickups on Bikes">{n}/{d.capacity} pickups</Link>}
+                {!online && nb > 0 && <span className="rounded bg-accent-soft px-1.5 text-accent">{nb} booking{nb === 1 ? "" : "s"}</span>}
                 {d.builds.length > 0 && <span title={d.builds.map((b) => `${b.buildAt ? formatTime(b.buildAt, tz) : "EOD"} ${b.unit.model} (${b.order?.customerName ?? "—"})`).join("\n")} className="rounded bg-warn-soft px-1.5 text-warn">{d.builds.length} build{d.builds.length === 1 ? "" : "s"} due</span>}
               </div>
             </div>
@@ -162,16 +196,26 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
           ))}
         </div>
         {cols.map((d) => (
-          <div key={d.date} className={`relative border-l border-border ${d.closed ? "bg-neutral-100/60" : d.date < today ? "bg-neutral-50" : ""} ${d.date === today ? "ring-1 ring-inset ring-accent/40" : ""}`} style={{ height: gridHeight }}>
+          <div key={d.date} className={`relative border-l border-border ${isClosed(d) ? "bg-neutral-100/60" : d.date < today ? "bg-neutral-50" : ""} ${d.date === today ? "ring-1 ring-inset ring-accent/40" : ""}`} style={{ height: gridHeight }}>
             {hours.map((m) => <div key={m} className="absolute left-0 right-0 border-t border-border/70" style={{ top: ((m - gridStart) / span) * gridHeight }} />)}
-            {!d.closed && (
+            {!d.closed && !online && (
               <>
                 <div className="absolute left-0 right-0 bg-neutral-200/40" style={{ top: 0, height: Math.max(0, ((timeToMinutes(d.windowStart) - gridStart) / span) * gridHeight) }} />
                 <div className="absolute left-0 right-0 bg-neutral-200/40" style={{ top: ((timeToMinutes(d.windowEnd) - gridStart) / span) * gridHeight, bottom: 0 }} />
               </>
             )}
             {d.date === today && now.getTime() >= 0 && (() => { const y = yOf(now); return y >= 0 && y <= gridHeight ? <div className="absolute left-0 right-0 z-10 border-t-2 border-danger" style={{ top: y }} /> : null; })()}
-            {blocksOf(d).map((v) => <div key={v.key}>{visitBlock(v, cols.length > 1)}</div>)}
+            {(() => {
+              const bks = bookingsOn(d.date);
+              const blocks = blocksOf(d);
+              const half = bks.length > 0 && blocks.length > 0;
+              return (
+                <>
+                  {blocks.map((v) => <div key={v.key}>{visitBlock(v, cols.length > 1, half)}</div>)}
+                  {bks.map((r) => bookingBlock(r, cols.length > 1, half))}
+                </>
+              );
+            })()}
           </div>
         ))}
       </div>
@@ -182,13 +226,16 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
     <div>
       <PageHeader
         title="Appointments"
-        subtitle={`${title} · ${mode === "builds" ? `${totalBuilds} build${totalBuilds === 1 ? "" : "s"} due` : `${totalPickups} pickup${totalPickups === 1 ? "" : "s"}`} · ${showroom.name}`}
+        subtitle={`${title} · ${mode === "builds" ? `${totalBuilds} build${totalBuilds === 1 ? "" : "s"} due` : [online ? "" : `${totalPickups} pickup${totalPickups === 1 ? "" : "s"}`, `${totalBookings} booking${totalBookings === 1 ? "" : "s"}`].filter(Boolean).join(" · ")} · ${showroom.name}`}
         action={
           <div className="flex flex-wrap items-center gap-2 text-sm">
-            <div className="flex rounded-lg border border-border bg-card p-0.5" role="tablist" aria-label="Who is this for">
-              <Link role="tab" aria-selected={mode === "pickups"} href={href(date, view, "pickups")} className={`rounded-md px-3 py-1 ${mode === "pickups" ? "bg-accent text-white" : "hover:text-accent"}`}>Customer pickups</Link>
-              <Link role="tab" aria-selected={mode === "builds"} href={href(date, view, "builds")} className={`rounded-md px-3 py-1 ${mode === "builds" ? "bg-accent text-white" : "hover:text-accent"}`}>Mechanic builds</Link>
-            </div>
+            <Link className="btn btn-primary btn-sm" href="/app/bookings/new">+ Book</Link>
+            {!online && (
+              <div className="flex rounded-lg border border-border bg-card p-0.5" role="tablist" aria-label="Who is this for">
+                <Link role="tab" aria-selected={mode === "pickups"} href={href(date, view, "pickups")} className={`rounded-md px-3 py-1 ${mode === "pickups" ? "bg-accent text-white" : "hover:text-accent"}`}>Customers</Link>
+                <Link role="tab" aria-selected={mode === "builds"} href={href(date, view, "builds")} className={`rounded-md px-3 py-1 ${mode === "builds" ? "bg-accent text-white" : "hover:text-accent"}`}>Mechanic builds</Link>
+              </div>
+            )}
             <div className="flex rounded-lg border border-border bg-card p-0.5" role="tablist" aria-label="View">
               {(["day", "week", "month"] as View[]).map((v) => (
                 <Link key={v} role="tab" aria-selected={view === v} href={href(view === "week" && v !== "week" ? date : date, v)} className={`rounded-md px-3 py-1 capitalize ${view === v ? "bg-accent text-white" : "hover:text-accent"}`}>{v}</Link>
@@ -210,10 +257,10 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
               const inMonth = monthOf(d.date) === monthOf(date);
               const isToday = d.date === today;
               return (
-                <div key={d.date} className={`min-h-[112px] bg-card p-1.5 ${!inMonth ? "opacity-40" : ""} ${d.closed ? "bg-neutral-50" : ""}`}>
+                <div key={d.date} className={`min-h-[112px] bg-card p-1.5 ${!inMonth ? "opacity-40" : ""} ${isClosed(d) ? "bg-neutral-50" : ""}`}>
                   <div className="mb-1 flex items-baseline justify-between">
                     <Link href={href(d.date, "day")} className={`text-sm font-semibold ${isToday ? "rounded-full bg-accent px-1.5 text-white" : ""}`}>{d.date.slice(8).replace(/^0/, "")}</Link>
-                    <span className="text-[10px] text-muted">{d.closed ? "closed" : `${visits.length}/${d.capacity}`}</span>
+                    <span className="text-[10px] text-muted">{isClosed(d) ? "closed" : online ? `${bookingsOn(d.date).length} booked` : `${visits.length}/${d.capacity}`}</span>
                   </div>
                   <ul className="space-y-0.5">
                     {mode === "builds" ? (
@@ -235,6 +282,14 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
                       </li>
                     ))}
                     {mode === "pickups" && visits.length > 3 && <li><Link href={href(d.date, "day")} className="text-[11px] text-muted hover:text-accent">+{visits.length - 3} more</Link></li>}
+                    {bookingsOn(d.date).slice(0, 3).map((r) => (
+                      <li key={r.booking.id}>
+                        <Link href={`/app/bookings/${r.booking.id}`} className={`block truncate rounded border border-dashed px-1 text-[11px] leading-5 ${bookingTone(r)}`} title={r.type.name}>
+                          <span className="font-semibold">{formatTime(r.booking.startsAt, tz).replace(" ", "")}</span> {r.booking.customerName}
+                        </Link>
+                      </li>
+                    ))}
+                    {bookingsOn(d.date).length > 3 && <li><Link href={href(d.date, "day")} className="text-[11px] text-muted hover:text-accent">+{bookingsOn(d.date).length - 3} more bookings</Link></li>}
                     {mode === "pickups" && d.builds.length > 0 && <li className="text-[10px] text-warn">{d.builds.length} build{d.builds.length === 1 ? "" : "s"} due</li>}
                   </ul>
                 </div>
@@ -248,7 +303,21 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
         <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
           {timeGrid(days)}
           <div className="space-y-4">
-            <Card title={`Pickups (${visitsOf(days[0]).length})`}>
+            {mode === "pickups" && (
+              <Card title={`Bookings (${bookingsOn(days[0].date).length})`}>
+                {bookingsOn(days[0].date).length === 0 ? <p className="text-sm text-muted">No bookings.</p> : (
+                  <ul className="divide-y divide-border text-sm">
+                    {bookingsOn(days[0].date).map((r) => (
+                      <li key={r.booking.id} className="py-2">
+                        <Link href={`/app/bookings/${r.booking.id}`} className="font-medium hover:text-accent">{formatTime(r.booking.startsAt, tz)} · {r.booking.customerName}</Link>
+                        <p className="text-xs text-muted">{r.type.name}{r.booking.status !== "booked" ? ` · ${r.booking.status === "completed" ? "checked in" : "no-show"}` : ""}</p>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </Card>
+            )}
+            {!online && <Card title={`Pickups (${visitsOf(days[0]).length})`}>
               {visitsOf(days[0]).length === 0 ? <p className="text-sm text-muted">{days[0].closed ? "Closed." : "No pickups booked."}</p> : (
                 <ul className="divide-y divide-border text-sm">
                   {visitsOf(days[0]).map((v) => (
@@ -261,8 +330,8 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
                   ))}
                 </ul>
               )}
-            </Card>
-            <Card title={`Builds due (${days[0].builds.length})`}>
+            </Card>}
+            {!online && <Card title={`Builds due (${days[0].builds.length})`}>
               {days[0].builds.length === 0 ? <p className="text-sm text-muted">Nothing due today.</p> : (
                 <ul className="divide-y divide-border text-sm">
                   {days[0].builds.map((r) => {
@@ -276,11 +345,11 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
                   })}
                 </ul>
               )}
-            </Card>
+            </Card>}
           </div>
         </div>
       )}
-      <p className="mt-3 text-xs text-muted">{mode === "builds" ? "Blocks end at each bike's build-by time (8 working hours before its pickup). Red = overdue, orange = building, green = ready." : "Blocks are visits; a customer collecting several bikes is one block."} Shaded time is outside opening hours. Click a day to open it.</p>
+      <p className="mt-3 text-xs text-muted">{mode === "builds" ? "Blocks end at each bike's build-by time (8 working hours before its pickup). Red = overdue, orange = building, green = ready." : "Solid blocks are pickup visits (several bikes collected together are one block); dashed blocks are bookings such as test rides, service and calls."} Shaded time is outside opening hours. Click a day to open it.</p>
     </div>
   );
 }
