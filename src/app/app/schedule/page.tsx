@@ -8,7 +8,7 @@ import { weekSchedule, type ScheduleDay, type ScheduleRow } from "@/lib/queries"
 import { addLocalDays, formatLongDateFromLocal, formatShortDateFromLocal, formatTime, localToUtc, minutesToTime, timeToMinutes, toLocalDate, weekdayOf } from "@/lib/time";
 import { formatInTimeZone } from "date-fns-tz";
 import { listBookings, type BookingRow } from "@/lib/type-bookings";
-import { listBookingTypes, type WeeklyHours } from "@/lib/booking-types";
+import { colorOf, effectiveHours, listBookingTypes, type WeeklyHours } from "@/lib/booking-types";
 import { parseISO, format } from "date-fns";
 
 export const metadata = { title: "Appointments" };
@@ -105,7 +105,7 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
   const open = online ? [] : days.filter((d) => !d.closed);
   const bookingMins = (mode === "pickups" ? bookingRows : []).flatMap((r) => [timeToMinutes(formatInTimeZone(r.booking.startsAt, tz, "HH:mm")), timeToMinutes(formatInTimeZone(r.booking.endsAt, tz, "HH:mm"))]);
   // Booking types' own hours widen the grid too (the online team has no pickup hours at all).
-  const typeRanges = mode === "pickups" ? types.filter((t) => t.kind === "standard" && t.active).flatMap((t) => Object.values(t.hours as WeeklyHours).flat()) : [];
+  const typeRanges = mode === "pickups" ? types.filter((t) => t.kind === "standard" && t.active).flatMap((t) => Object.values(effectiveHours(t, showroom.bookingHours as WeeklyHours)).flat()) : [];
   const starts = [...open.map((d) => timeToMinutes(d.windowStart)), ...bookingMins, ...typeRanges.map(([a]) => timeToMinutes(a))];
   const ends = [...open.map((d) => timeToMinutes(d.windowEnd)), ...bookingMins, ...typeRanges.map(([, b]) => timeToMinutes(b))];
   const gridStart = Math.floor(Math.min(...(starts.length ? starts : [online ? 480 : 600])) / 60) * 60;
@@ -160,7 +160,7 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
         key={r.booking.id}
         href={`/app/bookings/${r.booking.id}`}
         className={`absolute ${half ? "left-[50%]" : "left-1"} right-1 overflow-hidden rounded-md border border-dashed px-2 py-1 text-xs leading-tight shadow-sm hover:ring-2 hover:ring-accent ${bookingTone(r)}`}
-        style={{ top, height }}
+        style={{ top, height, borderLeft: `4px solid ${colorOf(r.type.color).hex}` }}
         title={`${formatTime(r.booking.startsAt, tz)} · ${r.booking.customerName} · ${r.type.name}`}
       >
         <span className="font-semibold">{formatTime(r.booking.startsAt, tz)}</span> <span className="font-medium">{r.booking.customerName}</span>
@@ -284,7 +284,7 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
                     {mode === "pickups" && visits.length > 3 && <li><Link href={href(d.date, "day")} className="text-[11px] text-muted hover:text-accent">+{visits.length - 3} more</Link></li>}
                     {bookingsOn(d.date).slice(0, 3).map((r) => (
                       <li key={r.booking.id}>
-                        <Link href={`/app/bookings/${r.booking.id}`} className={`block truncate rounded border border-dashed px-1 text-[11px] leading-5 ${bookingTone(r)}`} title={r.type.name}>
+                        <Link href={`/app/bookings/${r.booking.id}`} className={`block truncate rounded border border-dashed px-1 text-[11px] leading-5 ${bookingTone(r)}`} style={{ borderLeft: `3px solid ${colorOf(r.type.color).hex}` }} title={r.type.name}>
                           <span className="font-semibold">{formatTime(r.booking.startsAt, tz).replace(" ", "")}</span> {r.booking.customerName}
                         </Link>
                       </li>

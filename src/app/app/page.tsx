@@ -8,7 +8,7 @@ import { sp, type SearchParams } from "@/lib/flash";
 import { todayAppointments } from "@/lib/queries";
 import { addLocalDays, formatLongDateFromLocal, formatTime, toLocalDate } from "@/lib/time";
 import { checkInBookingAction, collectPartsAction, noShowBookingAction, recordNoShowAction } from "./actions";
-import { LOCATION_LABEL, type BookingLocation } from "@/lib/booking-types";
+import { colorOf, LOCATION_LABEL, type BookingLocation } from "@/lib/booking-types";
 import { listBookings, type BookingRow } from "@/lib/type-bookings";
 import { currentShowroom } from "@/lib/current-showroom";
 import { ContactFlag } from "@/components/contact-flag";
@@ -136,6 +136,7 @@ function BookingCard({ row, tz, now, back }: { row: BookingRow; tz: string; now:
   return (
     <Card>
       <div className="flex flex-wrap items-start gap-4">
+        <span aria-hidden="true" className="w-1 self-stretch rounded-full" style={{ background: colorOf(type.color).hex }} />
         <div className="w-24 shrink-0">
           <p className="text-xl font-semibold">{formatTime(b.startsAt, tz)}</p>
           <p className="text-xs text-muted">to {formatTime(b.endsAt, tz)}</p>

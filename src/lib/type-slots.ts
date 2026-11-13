@@ -8,7 +8,7 @@
 import { and, eq, gte, inArray, lt, ne, or, sql } from "drizzle-orm";
 import type { DbOrTx } from "@/db/client";
 import { bookings, staffUsers, type BookingType } from "@/db/schema";
-import type { WeeklyHours } from "./booking-types";
+import { effectiveHours, type WeeklyHours } from "./booking-types";
 import type { ShowroomCtx } from "./showroom";
 import { addLocalDays, dateRange, localToUtc, minutesToTime, timeToMinutes, toLocalDate, weekdayOf, type LocalDate } from "./time";
 
@@ -104,5 +104,6 @@ export async function getTypeAvailability(
     typeCapacity(dbx, args.showroom, args.type),
     busyFor(dbx, args.type.id, now, horizonEnd, args.exceptBookingId),
   ]);
-  return typeSlots({ type: { ...args.type, hours: args.type.hours as WeeklyHours }, tz, now, capacity, busy, from: args.from, to: args.to });
+  const hours = effectiveHours(args.type, args.showroom.bookingHours as WeeklyHours);
+  return typeSlots({ type: { ...args.type, hours }, tz, now, capacity, busy, from: args.from, to: args.to });
 }

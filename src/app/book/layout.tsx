@@ -11,12 +11,12 @@ export default function PublicBookingLayout({ children }: { children: React.Reac
       <Suspense fallback={null}><PendingIndicator /></Suspense>
       <FrameSizer />
       <header className="booking-header border-b border-border bg-card">
-        <div className="mx-auto flex w-full max-w-md items-center justify-between px-4 py-3">
+        <div className="mx-auto flex w-full max-w-5xl items-center justify-between px-4 py-3">
           <span className="text-sm font-semibold uppercase tracking-widest text-accent">Biktrix</span>
           <span className="text-sm text-muted">Book an appointment</span>
         </div>
       </header>
-      <main className="mx-auto w-full max-w-md flex-1 px-4 py-6">{children}</main>
+      <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-6">{children}</main>
     </div>
   );
 }

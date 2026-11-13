@@ -21,6 +21,8 @@ export const showrooms = pgTable("showrooms", {
   kind: text("kind").notNull().default("showroom"),
   /** Google Calendar that this profile's bookings are copied to (shared with the service account in GOOGLE_SERVICE_ACCOUNT_JSON). */
   googleCalendarId: text("google_calendar_id"),
+  /** Weekly hours booking types use by default ("Manage availability"), per weekday (0 = Sunday) a list of [start, end] "HH:MM". */
+  bookingHours: jsonb("booking_hours").$type<Record<string, [string, string][]>>().notNull().default({}),
   timezone: text("timezone").notNull(),
   addressLine: text("address_line").notNull(),
   phone: text("phone"),
@@ -354,6 +356,10 @@ export const bookingTypes = pgTable(
     capacityMode: text("capacity_mode").notNull().default("bench"),
     benchCapacity: smallint("bench_capacity").notNull().default(1),
     hours: jsonb("hours").$type<Record<string, [string, string][]>>().notNull().default({}),
+    /** true = follow the profile's availability (showrooms.booking_hours); false = this type's own `hours`. */
+    useStoreHours: boolean("use_store_hours").notNull().default(false),
+    /** Colour key (see BOOKING_COLORS) for the type's row, the booking page and calendar blocks. */
+    color: text("color").notNull().default("blue"),
     createsWorkOrder: boolean("creates_work_order").notNull().default(false),
     active: boolean("active").notNull().default(true),
     sortOrder: smallint("sort_order").notNull().default(0),

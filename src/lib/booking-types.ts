@@ -6,7 +6,7 @@
  */
 import { and, asc, eq, sql } from "drizzle-orm";
 import type { DbOrTx } from "@/db/client";
-import { bookingTypes, capacityRules, type BookingType, type CapacityRule } from "@/db/schema";
+import { bookingTypes, capacityRules, showrooms, type BookingType, type CapacityRule } from "@/db/schema";
 
 export type BookingLocation = "in_person" | "video" | "phone";
 export type BookingAccess = "public" | "invite";
@@ -26,6 +26,26 @@ export const WEEKDAY_8_TO_4: WeeklyHours = { "1": [["08:00", "16:00"]], "2": [["
  * exact settings couldn't be copied): 30-minute bookings on a 30-minute grid, no buffer, at least 4 hours'
  * notice, up to 60 days ahead. Every value is editable per type.
  */
+/** Colours a type can take (row bar, booking page accent, calendar blocks). Hex values chosen to read on white. */
+export const BOOKING_COLORS = {
+  blue: { label: "Blue", hex: "#2563eb", soft: "#dbeafe" },
+  orange: { label: "Orange", hex: "#c2410c", soft: "#ffedd5" },
+  green: { label: "Green", hex: "#15803d", soft: "#dcfce7" },
+  purple: { label: "Purple", hex: "#7c3aed", soft: "#ede9fe" },
+  teal: { label: "Teal", hex: "#0f766e", soft: "#ccfbf1" },
+  pink: { label: "Pink", hex: "#be185d", soft: "#fce7f3" },
+  amber: { label: "Amber", hex: "#b45309", soft: "#fef3c7" },
+  slate: { label: "Grey", hex: "#475569", soft: "#f1f5f9" },
+} as const;
+export type BookingColor = keyof typeof BOOKING_COLORS;
+export const isBookingColor = (v: string): v is BookingColor => v in BOOKING_COLORS;
+export function colorOf(key: string | null | undefined) {
+  return BOOKING_COLORS[key && isBookingColor(key) ? key : "blue"];
+}
+
+/** Lengths offered as one click in the editor (Calendly-style); any other number goes in "Custom". */
+export const DURATION_CHOICES = [15, 30, 45, 60, 90, 120] as const;
+
 export const NEW_TYPE_DEFAULTS = { durationMin: 30, bufferMin: 0, slotStepMin: 30, noticeMin: 240, horizonDays: 60, benchCapacity: 1 } as const;
 
 export type Preset = {
@@ -35,16 +55,17 @@ export type Preset = {
   location: BookingLocation;
   durationMin: number;
   createsWorkOrder: boolean;
+  color: BookingColor;
   /** Which profile kinds the preset makes sense for. */
   for: ("showroom" | "online")[];
 };
 
 export const PRESETS: Preset[] = [
-  { key: "test-ride", name: "Test ride", description: "Try a bike at the showroom with one of our team.", location: "in_person", durationMin: 45, createsWorkOrder: false, for: ["showroom"] },
-  { key: "service", name: "Service appointment", description: "Bring your bike in for a tune-up or repair.", location: "in_person", durationMin: 60, createsWorkOrder: true, for: ["showroom"] },
-  { key: "showroom-visit", name: "Showroom visit", description: "Come in and talk to an expert about the right bike for you.", location: "in_person", durationMin: 30, createsWorkOrder: false, for: ["showroom"] },
-  { key: "video-call", name: "Video call with an expert", description: "A live video tour of the bikes with a product expert.", location: "video", durationMin: 30, createsWorkOrder: false, for: ["online"] },
-  { key: "phone-call", name: "Phone call with an expert", description: "We call you to answer questions and help you choose.", location: "phone", durationMin: 30, createsWorkOrder: false, for: ["online"] },
+  { key: "test-ride", name: "Test ride", description: "Try a bike at the showroom with one of our team.", location: "in_person", durationMin: 45, createsWorkOrder: false, color: "blue", for: ["showroom"] },
+  { key: "service", name: "Service appointment", description: "Bring your bike in for a tune-up or repair.", location: "in_person", durationMin: 60, createsWorkOrder: true, color: "orange", for: ["showroom"] },
+  { key: "showroom-visit", name: "Showroom visit", description: "Come in and talk to an expert about the right bike for you.", location: "in_person", durationMin: 30, createsWorkOrder: false, color: "green", for: ["showroom"] },
+  { key: "video-call", name: "Video call with an expert", description: "A live video tour of the bikes with a product expert.", location: "video", durationMin: 30, createsWorkOrder: false, color: "purple", for: ["online"] },
+  { key: "phone-call", name: "Phone call with an expert", description: "We call you to answer questions and help you choose.", location: "phone", durationMin: 30, createsWorkOrder: false, color: "teal", for: ["online"] },
 ];
 
 export function presetsFor(kind: string): Preset[] {
@@ -87,6 +108,29 @@ export function parseDayHours(text: string): [string, string][] {
   out.sort((x, y) => toMin(x[0]) - toMin(y[0]));
   for (let i = 1; i < out.length; i++) {
     if (toMin(out[i][0]) < toMin(out[i - 1][1])) throw new Error(`${out[i - 1].join("-")} and ${out[i].join("-")} overlap.`);
+  }
+  return out;
+}
+
+/**
+ * Weekly hours from the HoursEditor's fields: each ticked day takes its first range and, when both times are
+ * filled, a second one. A bad day names itself in the error.
+ */
+export function hoursFromForm(get: (name: string) => string, prefix = ""): WeeklyHours {
+  const out: WeeklyHours = {};
+  for (let wd = 0; wd < 7; wd++) {
+    const on = get(`${prefix}day_${wd}`);
+    if (on !== "on" && on !== "true" && on !== "1") continue;
+    const parts = [[get(`${prefix}s1_${wd}`), get(`${prefix}e1_${wd}`)], [get(`${prefix}s2_${wd}`), get(`${prefix}e2_${wd}`)]]
+      .filter(([a, b]) => a && b)
+      .map(([a, b]) => `${a}-${b}`);
+    try {
+      const ranges = parseDayHours(parts.join(", "));
+      if (!ranges.length) throw new Error("ticked but no times set.");
+      out[String(wd)] = ranges;
+    } catch (err) {
+      throw new Error(`${["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][wd]}: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
   return out;
 }
@@ -136,7 +180,15 @@ export type BookingTypeInput = {
   benchCapacity: number;
   hours: WeeklyHours;
   createsWorkOrder: boolean;
+  /** Follow the profile's availability instead of `hours`. */
+  useStoreHours?: boolean;
+  color?: string;
 };
+
+/** The weekly hours a type is actually bookable in: the profile's availability, or its own custom hours. */
+export function effectiveHours(type: Pick<BookingType, "useStoreHours" | "hours">, profileHours: WeeklyHours | null | undefined): WeeklyHours {
+  return type.useStoreHours ? (profileHours ?? {}) : (type.hours as WeeklyHours);
+}
 
 const isLocation = (v: string): v is BookingLocation => v === "in_person" || v === "video" || v === "phone";
 
@@ -164,8 +216,10 @@ export function validateBookingType(raw: BookingTypeInput, profileKind: string):
     horizonDays: int(raw.horizonDays, 1, 365, "Bookable up to (days ahead)"),
     benchCapacity: int(raw.benchCapacity, 1, 50, "Bookings at the same time"),
     createsWorkOrder: raw.location === "in_person" && raw.createsWorkOrder,
+    useStoreHours: !!raw.useStoreHours,
+    color: raw.color && isBookingColor(raw.color) ? raw.color : "blue",
   };
-  if (!Object.keys(out.hours).length) throw new Error("Set the hours it can be booked on at least one day.");
+  if (!out.useStoreHours && !Object.keys(out.hours).length) throw new Error("Set the hours it can be booked on at least one day, or use the store's availability.");
   return out;
 }
 
@@ -220,7 +274,7 @@ export async function setBookingTypeActive(dbx: DbOrTx, showroomId: string, id: 
 export async function ensurePickupType(dbx: DbOrTx, showroomId: string): Promise<void> {
   await dbx
     .insert(bookingTypes)
-    .values({ showroomId, slug: "pickup", name: "Bike pickup", description: "Collect your new bike. Booked from the link we send when it arrives.", kind: "pickup", access: "invite", location: "in_person", noticeMin: 0, sortOrder: 0 })
+    .values({ showroomId, slug: "pickup", name: "Bike pickup", description: "Collect your new bike. Booked from the link we send when it arrives.", kind: "pickup", access: "invite", location: "in_person", noticeMin: 0, sortOrder: 0, color: "slate" })
     .onConflictDoNothing();
 }
 
@@ -251,7 +305,28 @@ export function defaultTypes(kind: string, hours: WeeklyHours): (BookingTypeInpu
     benchCapacity: NEW_TYPE_DEFAULTS.benchCapacity,
     hours: kind === "online" ? WEEKDAY_8_TO_4 : hours,
     createsWorkOrder: p.createsWorkOrder,
+    useStoreHours: true,
+    color: p.color,
   }));
+}
+
+/**
+ * The profile's availability ("Manage availability"), set up the first time it's needed: a showroom starts
+ * from its pickup days and times, the online team from Mon–Fri 8–4. Returns the hours in force.
+ */
+export async function ensureStoreHours(dbx: DbOrTx, showroom: { id: string; kind: string }): Promise<WeeklyHours> {
+  const [row] = await dbx.select({ hours: showrooms.bookingHours }).from(showrooms).where(eq(showrooms.id, showroom.id));
+  if (row && Object.keys(row.hours ?? {}).length) return row.hours as WeeklyHours;
+  const rules = showroom.kind === "online" ? [] : await dbx.select().from(capacityRules).where(eq(capacityRules.showroomId, showroom.id));
+  const hours = hoursFromCapacity(rules);
+  await dbx.update(showrooms).set({ bookingHours: hours }).where(eq(showrooms.id, showroom.id));
+  return hours;
+}
+
+/** Save the profile's availability. Types following it change at once. */
+export async function setStoreHours(dbx: DbOrTx, showroomId: string, hours: WeeklyHours): Promise<void> {
+  if (!Object.keys(hours).length) throw new Error("Open at least one day. To stop online booking, switch the booking types off instead.");
+  await dbx.update(showrooms).set({ bookingHours: hours }).where(eq(showrooms.id, showroomId));
 }
 
 /**
@@ -265,8 +340,7 @@ export async function ensureDefaultBookingTypes(dbx: DbOrTx, showroom: { id: str
     .from(bookingTypes)
     .where(and(eq(bookingTypes.showroomId, showroom.id), eq(bookingTypes.kind, "standard")));
   if (n > 0) return;
-  const rules = showroom.kind === "online" ? [] : await dbx.select().from(capacityRules).where(eq(capacityRules.showroomId, showroom.id));
-  const types = defaultTypes(showroom.kind, hoursFromCapacity(rules));
+  const types = defaultTypes(showroom.kind, await ensureStoreHours(dbx, showroom));
   if (!types.length) return;
   await dbx
     .insert(bookingTypes)

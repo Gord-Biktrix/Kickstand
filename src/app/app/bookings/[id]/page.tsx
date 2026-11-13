@@ -2,10 +2,10 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { db } from "@/db/client";
 import { ConfirmButton } from "@/components/confirm-button";
-import { SlotPicker } from "@/components/slot-picker";
+import { BookingCalendar, BookingInfo } from "@/components/booking-calendar";
 import { Badge, Card, Flash, PageHeader } from "@/components/ui";
 import { listStaff, requireUser } from "@/lib/auth";
-import { LOCATION_LABEL, type BookingLocation } from "@/lib/booking-types";
+import { colorOf, LOCATION_LABEL, type BookingLocation } from "@/lib/booking-types";
 import { currentShowroom } from "@/lib/current-showroom";
 import { sp, type SearchParams } from "@/lib/flash";
 import { formatDateTime, formatLongDate, formatLongDateFromLocal, formatTime } from "@/lib/time";
@@ -53,7 +53,7 @@ export default async function BookingPage({ params, searchParams }: { params: Pr
   const date = sp(q.date);
   const time = sp(q.time);
   const days = moving && b.status === "booked" ? await getTypeAvailability(db, { showroom, type, exceptBookingId: b.id }) : [];
-  const slot = date && time ? days.find((d) => d.date === date)?.slots.find((s) => s.time === time) : undefined;
+  const slot = date && time && sp(q.confirm) === "1" ? days.find((d) => d.date === date)?.slots.find((s) => s.time === time) : undefined;
   const staffNames = new Map((await listStaff()).map((s) => [s.id, s.name]));
   const who = (actor: string) => staffNames.get(actor) ?? (actor === "customer" ? "Customer" : actor);
   const status = STATUS[b.status] ?? STATUS.booked;
@@ -126,7 +126,17 @@ export default async function BookingPage({ params, searchParams }: { params: Pr
               </form>
             </Card>
           ) : (
-            <SlotPicker days={days} base={`${self}?move=1`} date={date} tz={tz} />
+            <BookingCalendar
+              days={days}
+              tz={tz}
+              base={`${self}?move=1`}
+              month={sp(q.month)}
+              date={date}
+              time={time}
+              accent={colorOf(type.color).hex}
+              zone={tz}
+              info={<BookingInfo brand={showroom.name} title={`Move ${b.customerName}`} durationMin={type.durationMin} location={type.name} extra={<p className="text-sm">Now: {formatLongDate(b.startsAt, tz)} {formatTime(b.startsAt, tz)}</p>} />}
+            />
           )}
         </div>
       )}

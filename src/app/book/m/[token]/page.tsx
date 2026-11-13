@@ -23,7 +23,7 @@ export default async function ManageBookingPage({ params, searchParams }: { para
   const q = await searchParams;
   const view = await getBookingByToken(db, token);
   if (!view) {
-    return <Card title="Link not found"><p className="text-sm">This booking link isn&apos;t valid. Check the link in your confirmation, or book again.</p></Card>;
+    return <div className="mx-auto max-w-md"><Card title="Link not found"><p className="text-sm">This booking link isn&apos;t valid. Check the link in your confirmation, or book again.</p></Card></div>;
   }
   const { booking, type, showroom } = view;
   const tz = showroom.timezone;
@@ -37,7 +37,7 @@ export default async function ManageBookingPage({ params, searchParams }: { para
       : LOCATION_LABEL[type.location as BookingLocation];
 
   return (
-    <div className="space-y-4">
+    <div className="mx-auto max-w-md space-y-4">
       {ok && OK[ok] && <Alert tone="ok">{OK[ok]}</Alert>}
       {error && <Alert tone="danger">{error}</Alert>}
       <Card

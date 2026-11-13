@@ -1,9 +1,9 @@
 import Link from "next/link";
 import { db } from "@/db/client";
-import { SlotPicker } from "@/components/slot-picker";
+import { BookingCalendar, BookingInfo } from "@/components/booking-calendar";
 import { Card, Field, Flash, PageHeader } from "@/components/ui";
 import { requireUser } from "@/lib/auth";
-import { ensureDefaultBookingTypes,
+import { colorOf, ensureDefaultBookingTypes,
   listBookingTypes, LOCATION_LABEL, type BookingLocation } from "@/lib/booking-types";
 import { currentShowroom } from "@/lib/current-showroom";
 import { sp, type SearchParams } from "@/lib/flash";
@@ -28,7 +28,7 @@ export default async function NewBookingPage({ searchParams }: { searchParams: P
   const days = type ? await getTypeAvailability(db, { showroom, type }) : [];
   const date = sp(q.date);
   const time = sp(q.time);
-  const slot = date && time ? days.find((d) => d.date === date)?.slots.find((s) => s.time === time) : undefined;
+  const slot = date && time && sp(q.confirm) === "1" ? days.find((d) => d.date === date)?.slots.find((s) => s.time === time) : undefined;
   const base = type ? `/app/bookings/new?type=${type.id}` : "/app/bookings/new";
 
   return (
@@ -76,7 +76,17 @@ export default async function NewBookingPage({ searchParams }: { searchParams: P
               </form>
             </Card>
           ) : (
-            <SlotPicker days={days} base={base} date={date} tz={tz} />
+            <BookingCalendar
+              days={days}
+              tz={tz}
+              base={base}
+              month={sp(q.month)}
+              date={date}
+              time={time}
+              accent={colorOf(type.color).hex}
+              zone={tz}
+              info={<BookingInfo brand={showroom.name} title={type.name} durationMin={type.durationMin} location={LOCATION_LABEL[type.location as BookingLocation]} description={type.access === "invite" ? "Invite only: customers can't book this online." : undefined} />}
+            />
           )}
         </div>
       )}

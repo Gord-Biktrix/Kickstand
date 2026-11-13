@@ -5,6 +5,7 @@ import { currentShowroom } from "@/lib/current-showroom";
 // `store: true` tabs only apply to a physical store (pickup capacity, the pickup program, Lightspeed views, CSV import).
 const TABS: { href: string; label: string; min?: Role; store?: boolean }[] = [
   { href: "/app/settings/booking-types", label: "Booking types" },
+  { href: "/app/settings/availability", label: "Availability" },
   { href: "/app/settings/capacity", label: "Capacity", store: true },
   { href: "/app/settings/program", label: "Program", store: true },
   { href: "/app/settings/views", label: "Views", store: true },

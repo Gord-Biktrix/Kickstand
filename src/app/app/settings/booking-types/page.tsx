@@ -1,196 +1,264 @@
 import Link from "next/link";
 import { db } from "@/db/client";
 import type { BookingType } from "@/db/schema";
-import { Badge, Card, Field, Flash, PageHeader } from "@/components/ui";
+import { CopyButton } from "@/components/copy-button";
+import { HoursEditor } from "@/components/hours-editor";
+import { Badge, Field, Flash, PageHeader } from "@/components/ui";
 import { requireUser } from "@/lib/auth";
-import { currentShowroom } from "@/lib/current-showroom";
-import { sp, type SearchParams } from "@/lib/flash";
 import {
   ACCESS_LABEL,
+  BOOKING_COLORS,
   CAPACITY_LABEL,
-  formatDayHours,
-  hoursSummary,
+  colorOf,
+  DURATION_CHOICES,
+  effectiveHours,
   ensureDefaultBookingTypes,
+  ensureStoreHours,
+  hoursSummary,
   listBookingTypes,
   LOCATION_LABEL,
   NEW_TYPE_DEFAULTS,
-  presetsFor,
   WEEKDAY_8_TO_4,
-  WEEKDAYS,
   type BookingLocation,
   type WeeklyHours,
 } from "@/lib/booking-types";
+import { currentShowroom } from "@/lib/current-showroom";
+import { sp, type SearchParams } from "@/lib/flash";
 import { baseUrl } from "@/lib/messages";
-import { addPresetBookingTypeAction, createBookingTypeAction, setBookingTypeActiveAction, updateBookingTypeAction } from "../../actions";
+import { createBookingTypeAction, setBookingTypeActiveAction, updateBookingTypeAction } from "../../actions";
 
 export const metadata = { title: "Booking types" };
 
 /**
- * What customers can book with this profile, like Calendly's event types. Each store and the online team
- * have their own list. The bike pickup is listed too, but its times come from Settings › Capacity.
+ * What customers can book with this profile, laid out like Calendly's event types: one compact row per type
+ * (colour, name, length · where · who can book, Copy link, open, Turn on/off, Edit). New and Edit open a side
+ * panel with the few fields that matter and "More options" for the rest, beside a live preview of the
+ * customer's page. Store-wide hours live in Settings › Availability.
  */
 export default async function BookingTypesPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const q = await searchParams;
   const user = await requireUser("manager");
   const showroom = await currentShowroom(user);
   await ensureDefaultBookingTypes(db, showroom);
+  const storeHours = await ensureStoreHours(db, showroom);
   const types = await listBookingTypes(db, showroom.id);
   const online = showroom.kind === "online";
-  const existing = new Set(types.map((t) => t.name));
-  const presets = presetsFor(showroom.kind).filter((p) => !existing.has(p.name));
+  const editing = sp(q.edit) ? types.find((t) => t.id === sp(q.edit)) : undefined;
+  const creating = sp(q.new) === "1";
+  const root = baseUrl();
+  const close = "/app/settings/booking-types";
 
   return (
     <div>
       <PageHeader
         title={`Booking types · ${showroom.name}`}
-        subtitle={online
-          ? "What customers can book with the online team. Calls only: there's no address. Each type has its own length, hours and notice."
-          : "What customers can book at this store. Each type has its own length, hours and notice. Other stores and the online team keep their own lists."}
+        subtitle={online ? "What customers can book with the online team: video and phone calls." : "What customers can book at this store. Other stores and the online team keep their own lists."}
+        action={
+          <div className="flex flex-wrap gap-2">
+            <Link href="/app/settings/availability" className="btn btn-sm">Manage availability</Link>
+            <Link href={`${close}?new=1`} className="btn btn-primary btn-sm">+ New booking type</Link>
+          </div>
+        }
       />
       <Flash ok={sp(q.ok)} error={sp(q.error)} />
-      <p className="mb-4 text-sm">
-        Public booking page: <a href={`/book/${showroom.slug}`} target="_blank" rel="noreferrer" className="font-medium underline">{baseUrl()}/book/{showroom.slug}</a>
-        <span className="text-muted"> · lists every public type that&apos;s switched on. Each type also has its own link, shown on its card.</span>
-      </p>
-      <details className="mb-4 rounded-lg border border-border bg-card p-3 text-sm">
-        <summary className="cursor-pointer font-medium">Put it on the website</summary>
-        <p className="mt-2 text-muted">Paste this where the booking box should appear (Shopify: a Custom Liquid or HTML block). It grows to fit, and replaces the old YouCanBookMe box.</p>
-        <pre className="mt-2 overflow-x-auto rounded bg-background p-2 text-xs"><code>{`<div data-biktrix-booking="${showroom.slug}"></div>\n<script src="${baseUrl()}/embed.js" async></script>`}</code></pre>
-        <p className="mt-2 text-muted">To show one type only, add its id: <code className="text-xs">data-type=&quot;{types.find((t) => t.kind === "standard")?.slug ?? "test-ride"}&quot;</code>. Ids are the last part of each type&apos;s link.</p>
-      </details>
-      <div className="grid gap-6 lg:grid-cols-[340px_minmax(0,1fr)]">
-        <div className="space-y-6">
-          <Card title="Add a booking type">
-            {presets.length > 0 && (
-              <form action={addPresetBookingTypeAction} className="mb-5 space-y-2">
-                <p className="text-sm text-muted">Start from a common one:</p>
-                <div className="flex flex-wrap gap-2">
-                  {presets.map((p) => (
-                    <button key={p.key} type="submit" name="preset" value={p.key} className="btn btn-sm">+ {p.name}</button>
-                  ))}
-                </div>
-              </form>
-            )}
-            <details>
-              <summary className="cursor-pointer text-sm font-medium">Start from scratch</summary>
-              <form action={createBookingTypeAction} className="mt-3 space-y-3">
-                <TypeFields idp="new" online={online} />
-                <button type="submit" className="btn btn-primary">Add booking type</button>
-              </form>
-            </details>
-          </Card>
-          <p className="text-xs text-muted">
-            New types start at {NEW_TYPE_DEFAULTS.durationMin} minutes on a {NEW_TYPE_DEFAULTS.slotStepMin}-minute grid, {NEW_TYPE_DEFAULTS.noticeMin / 60} hours&apos; notice, up to {NEW_TYPE_DEFAULTS.horizonDays} days ahead, Mon–Fri 8:00–16:00. Change any of it per type.
-          </p>
-        </div>
 
-        <div className="min-w-0 space-y-4">
-          {types.length === 0 && <Card><p className="text-sm text-muted">No booking types yet. Add one on the left.</p></Card>}
-          {types.map((t) => (
-            <TypeCard key={t.id} t={t} online={online} profileSlug={showroom.slug} />
-          ))}
-        </div>
+      <div className="mb-4 flex flex-wrap items-center gap-2 text-sm">
+        <span className="text-muted">Booking page:</span>
+        <a href={`/book/${showroom.slug}`} target="_blank" rel="noreferrer" className="font-medium underline">{root}/book/{showroom.slug}</a>
+        <CopyButton text={`${root}/book/${showroom.slug}`} />
+        <details className="w-full">
+          <summary className="cursor-pointer text-muted">Put it on the website</summary>
+          <p className="mt-2 text-muted">Paste where the booking box should appear (Shopify: a Custom Liquid block). It grows to fit. For one type only, add <code className="text-xs">data-type=&quot;…&quot;</code> with the type&apos;s id, the end of its link.</p>
+          <pre className="mt-2 overflow-x-auto rounded bg-card p-2 text-xs"><code>{`<div data-biktrix-booking="${showroom.slug}"></div>\n<script src="${root}/embed.js" async></script>`}</code></pre>
+        </details>
       </div>
+
+      <ul className="overflow-hidden rounded-xl border border-border bg-card">
+        {types.map((t) => (
+          <TypeRow key={t.id} t={t} profileSlug={showroom.slug} root={root} storeHours={storeHours} selected={editing?.id === t.id} />
+        ))}
+      </ul>
+      <p className="mt-3 text-xs text-muted">Store availability: {hoursSummary(storeHours)} · <Link href="/app/settings/availability" className="underline">change</Link></p>
+
+      {(editing || creating) && (
+        <EditorPanel t={editing} online={online} storeHours={storeHours} profileSlug={showroom.slug} close={close} />
+      )}
     </div>
   );
 }
 
-function TypeCard({ t, online, profileSlug }: { t: BookingType; online: boolean; profileSlug: string }) {
+function TypeRow({ t, profileSlug, root, storeHours, selected }: { t: BookingType; profileSlug: string; root: string; storeHours: WeeklyHours; selected: boolean }) {
   const pickup = t.kind === "pickup";
+  const link = `${root}/book/${profileSlug}/${t.slug}`;
+  const linkable = !pickup && t.access === "public";
+  const meta = pickup
+    ? "Invite only · times from Settings › Capacity"
+    : `${t.durationMin} min · ${LOCATION_LABEL[t.location as BookingLocation]} · ${t.access === "invite" ? "Invite only" : "Public"} · ${t.useStoreHours ? "Store hours" : hoursSummary(effectiveHours(t, storeHours))}`;
   return (
-    <Card
-      title={<span className={t.active ? undefined : "text-muted"}>{t.name}</span>}
-      action={
-        <div className="flex flex-wrap items-center gap-2">
-          {!t.active && <Badge>off</Badge>}
-          <Badge tone={t.access === "invite" ? "warn" : "ok"}>{t.access === "invite" ? "invite only" : "public"}</Badge>
-          {!pickup && (
-            <form action={setBookingTypeActiveAction.bind(null, t.id, !t.active)}>
-              <button type="submit" className="btn btn-sm">{t.active ? "Switch off" : "Switch on"}</button>
-            </form>
-          )}
-        </div>
-      }
-    >
-      {t.description && <p className="mb-2 text-sm">{t.description}</p>}
-      {pickup ? (
-        <p className="text-sm text-muted">
-          Customers book this from the link sent when their bike arrives. Times and how many fit per day: <Link href="/app/settings/capacity" className="underline">Settings › Capacity</Link>.
-        </p>
-      ) : (
-        <p className="text-sm text-muted">
-          {t.access === "public" && t.active && <><a href={`/book/${profileSlug}/${t.slug}`} target="_blank" rel="noreferrer" className="underline">/book/{profileSlug}/{t.slug}</a> · </>}
-          {LOCATION_LABEL[t.location as BookingLocation]} · {t.durationMin} min{t.bufferMin ? ` + ${t.bufferMin} min buffer` : ""} · {hoursSummary(t.hours as WeeklyHours)} · {t.capacityMode === "bench" ? `${t.benchCapacity} at a time` : "one per staff member"} · {t.noticeMin >= 60 ? `${+(t.noticeMin / 60).toFixed(1)} h` : `${t.noticeMin} min`} notice · up to {t.horizonDays} days ahead{t.createsWorkOrder ? " · creates a Lightspeed work order" : ""}
-        </p>
-      )}
-      <details className="mt-3">
-        <summary className="cursor-pointer text-sm font-medium">Edit</summary>
-        <form action={updateBookingTypeAction.bind(null, t.id)} className="mt-3 space-y-3">
-          <input type="hidden" name="kind" value={t.kind} />
-          {pickup ? (
-            <>
-              <Field label="Name" htmlFor={`name_${t.id}`}><input id={`name_${t.id}`} name="name" defaultValue={t.name} required className="input" /></Field>
-              <Field label="Description" htmlFor={`desc_${t.id}`}><textarea id={`desc_${t.id}`} name="description" defaultValue={t.description} rows={2} className="input" /></Field>
-            </>
-          ) : (
-            <TypeFields idp={t.id} online={online} t={t} />
-          )}
-          <button type="submit" className="btn btn-primary btn-sm">Save</button>
-        </form>
-      </details>
-    </Card>
+    <li className={`flex flex-wrap items-center gap-3 border-b border-border px-4 py-3 last:border-b-0 ${t.active ? "" : "bg-background opacity-70"} ${selected ? "ring-2 ring-inset ring-accent" : ""}`}>
+      <span aria-hidden="true" className="h-10 w-1.5 shrink-0 rounded-full" style={{ background: colorOf(t.color).hex }} />
+      <div className="min-w-0 flex-1">
+        <p className="font-semibold">{t.name}{!t.active && <span className="ml-2"><Badge>off</Badge></span>}</p>
+        <p className="truncate text-sm text-muted">{meta}{t.createsWorkOrder ? " · creates a Lightspeed work order" : ""}</p>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        {linkable && t.active && <CopyButton text={link} />}
+        {linkable && t.active && <a href={link} target="_blank" rel="noreferrer" className="btn btn-sm" aria-label={`Open ${t.name} booking page`}>Open ↗</a>}
+        {!pickup && (
+          <form action={setBookingTypeActiveAction.bind(null, t.id, !t.active)}>
+            <button type="submit" className="btn btn-sm">{t.active ? "Turn off" : "Turn on"}</button>
+          </form>
+        )}
+        <Link href={`/app/settings/booking-types?edit=${t.id}`} className="btn btn-sm">Edit</Link>
+      </div>
+    </li>
   );
 }
 
-function TypeFields({ idp, online, t }: { idp: string; online: boolean; t?: BookingType }) {
-  const hours = (t?.hours as WeeklyHours | undefined) ?? WEEKDAY_8_TO_4;
+/** The Calendly-style side panel: name and colour, duration, location, availability; the rest under More options. */
+function EditorPanel({ t, online, storeHours, profileSlug, close }: { t?: BookingType; online: boolean; storeHours: WeeklyHours; profileSlug: string; close: string }) {
+  const pickup = t?.kind === "pickup";
   const locations: BookingLocation[] = online ? ["video", "phone"] : ["in_person", "video", "phone"];
-  const id = (k: string) => `${k}_${idp}`;
+  const duration = t?.durationMin ?? NEW_TYPE_DEFAULTS.durationMin;
+  const custom = !(DURATION_CHOICES as readonly number[]).includes(duration);
+  const useStore = t ? t.useStoreHours : true;
+  const preview = t && !pickup && t.active && t.access === "public" ? `/book/${profileSlug}/${t.slug}` : null;
+  const action = t ? updateBookingTypeAction.bind(null, t.id) : createBookingTypeAction;
+
   return (
-    <>
-      <Field label="Name" htmlFor={id("name")}><input id={id("name")} name="name" defaultValue={t?.name} required className="input" placeholder={online ? "Video call with an expert" : "Test ride"} /></Field>
-      <Field label="Description" htmlFor={id("desc")} hint="Shown to customers on the booking page."><textarea id={id("desc")} name="description" defaultValue={t?.description} rows={2} className="input" /></Field>
-      <div className="grid gap-3 sm:grid-cols-2">
-        <Field label="Where" htmlFor={id("loc")}>
-          <select id={id("loc")} name="location" defaultValue={t?.location ?? locations[0]} className="input">
-            {locations.map((l) => <option key={l} value={l}>{LOCATION_LABEL[l]}</option>)}
-          </select>
-        </Field>
-        <Field label="Who can book" htmlFor={id("access")}>
-          <select id={id("access")} name="access" defaultValue={t?.access ?? "public"} className="input">
-            {(["public", "invite"] as const).map((a) => <option key={a} value={a}>{ACCESS_LABEL[a]}</option>)}
-          </select>
-        </Field>
-        <Field label="Length (minutes)" htmlFor={id("dur")}><input id={id("dur")} name="duration_min" type="number" min={5} max={480} required defaultValue={t?.durationMin ?? NEW_TYPE_DEFAULTS.durationMin} className="input" /></Field>
-        <Field label="Buffer after (minutes)" htmlFor={id("buf")}><input id={id("buf")} name="buffer_min" type="number" min={0} max={240} defaultValue={t?.bufferMin ?? NEW_TYPE_DEFAULTS.bufferMin} className="input" /></Field>
-        <Field label="Start times every (minutes)" htmlFor={id("step")}><input id={id("step")} name="slot_step_min" type="number" min={5} max={240} required defaultValue={t?.slotStepMin ?? NEW_TYPE_DEFAULTS.slotStepMin} className="input" /></Field>
-        <Field label="Minimum notice (hours)" htmlFor={id("notice")}><input id={id("notice")} name="notice_hours" type="number" min={0} step={0.5} required defaultValue={(t?.noticeMin ?? NEW_TYPE_DEFAULTS.noticeMin) / 60} className="input" /></Field>
-        <Field label="Bookable up to (days ahead)" htmlFor={id("horizon")}><input id={id("horizon")} name="horizon_days" type="number" min={1} max={365} required defaultValue={t?.horizonDays ?? NEW_TYPE_DEFAULTS.horizonDays} className="input" /></Field>
-        <Field label="Capacity" htmlFor={id("cap")} hint="Bench is the default: a fixed number of bookings at once for the store.">
-          <select id={id("cap")} name="capacity_mode" defaultValue={t?.capacityMode ?? "bench"} className="input">
-            {(["bench", "staff"] as const).map((c) => <option key={c} value={c}>{CAPACITY_LABEL[c]}</option>)}
-          </select>
-        </Field>
-        <Field label="Bookings at the same time (bench)" htmlFor={id("bench")}><input id={id("bench")} name="bench_capacity" type="number" min={1} max={50} defaultValue={t?.benchCapacity ?? NEW_TYPE_DEFAULTS.benchCapacity} className="input" /></Field>
-      </div>
-      <fieldset className="space-y-2">
-        <legend className="text-sm font-medium">Hours it can be booked</legend>
-        <p className="text-xs text-muted">Like 8:00-16:00, or 9am-12pm, 1pm-5pm. Leave a day blank when it can&apos;t be booked.</p>
-        <div className="grid gap-2 sm:grid-cols-2">
-          {WEEKDAYS.map((d, wd) => (
-            <label key={d} className="flex items-center gap-2 text-sm">
-              <span className="w-9 shrink-0 text-muted">{d}</span>
-              <input name={`hours_${wd}`} defaultValue={formatDayHours(hours[String(wd)])} className="input h-8 py-0 text-sm" aria-label={`${d} hours`} />
-            </label>
-          ))}
+    <div className="fixed inset-0 z-40 flex justify-end bg-black/30" role="dialog" aria-modal="true" aria-label={t ? `Edit ${t.name}` : "New booking type"}>
+      <Link href={close} className="absolute inset-0" aria-label="Close" tabIndex={-1} />
+      {preview && (
+        <div className="relative hidden flex-1 p-6 xl:block">
+          <div className="flex h-full flex-col overflow-hidden rounded-xl bg-card shadow-xl">
+            <p className="border-b border-border bg-foreground px-4 py-2 text-xs text-white"><strong>Preview.</strong> What customers see. Save to update it.</p>
+            <iframe src={preview} title="Preview of the booking page" className="w-full flex-1" />
+          </div>
         </div>
-      </fieldset>
-      {!online && (
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" name="creates_work_order" defaultChecked={t?.createsWorkOrder ?? false} className="h-4 w-4" />
-          Create a Lightspeed work order when booked (service appointments)
-        </label>
       )}
-    </>
+      <form action={action} className="relative flex h-full w-full max-w-md flex-col bg-card shadow-2xl">
+        <input type="hidden" name="kind" value={t?.kind ?? "standard"} />
+        <div className="flex items-start justify-between border-b border-border p-5">
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-medium text-muted">{t ? "Booking type" : "New booking type"}</p>
+            <input name="name" defaultValue={t?.name ?? ""} required placeholder={online ? "Video call with an expert" : "Test ride"} aria-label="Name" className="mt-1 w-full rounded-md border border-transparent bg-transparent px-1 text-2xl font-bold hover:border-border focus:border-accent focus:outline-none" />
+            {!pickup && (
+              <div className="mt-2 flex flex-wrap gap-1.5" role="radiogroup" aria-label="Colour">
+                {Object.entries(BOOKING_COLORS).map(([key, c]) => (
+                  <label key={key} className="cursor-pointer" title={c.label}>
+                    <input type="radio" name="color" value={key} defaultChecked={(t?.color ?? "blue") === key} className="peer sr-only" />
+                    <span className="block h-6 w-6 rounded-full ring-offset-2 peer-checked:ring-2 peer-focus-visible:ring-2" style={{ background: c.hex, ["--tw-ring-color" as string]: c.hex }} />
+                    <span className="sr-only">{c.label}</span>
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
+          <Link href={close} className="rounded p-1 text-2xl leading-none text-muted hover:text-foreground" aria-label="Close">×</Link>
+        </div>
+
+        <div className="flex-1 space-y-6 overflow-y-auto p-5">
+          {pickup ? (
+            <>
+              <Field label="Description" htmlFor="pk_desc"><textarea id="pk_desc" name="description" defaultValue={t?.description} rows={3} className="input" /></Field>
+              <p className="text-sm text-muted">Customers book the pickup from the link sent when their bike arrives. Its times and how many fit per day are set in <Link href="/app/settings/capacity" className="underline">Settings › Capacity</Link>.</p>
+            </>
+          ) : (
+            <>
+              <fieldset>
+                <legend className="mb-2 font-semibold">Duration</legend>
+                <div className="flex flex-wrap gap-2">
+                  {DURATION_CHOICES.map((d) => (
+                    <label key={d} className="cursor-pointer">
+                      <input type="radio" name="duration" value={d} defaultChecked={!custom && duration === d} className="peer sr-only" />
+                      <span className="block rounded-lg border border-border px-3 py-2 text-sm peer-checked:border-accent peer-checked:bg-accent-soft peer-checked:font-semibold peer-focus-visible:ring-2">{d % 60 === 0 ? `${d / 60} hr` : `${d} min`}</span>
+                    </label>
+                  ))}
+                  <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-border px-3 py-1 text-sm has-[:checked]:border-accent has-[:checked]:bg-accent-soft">
+                    <input type="radio" name="duration" value="custom" defaultChecked={custom} className="h-4 w-4" />
+                    Custom
+                    <input type="number" name="duration_custom" min={5} max={480} defaultValue={custom ? duration : ""} aria-label="Custom minutes" className="input h-8 w-20 py-0" /> min
+                  </label>
+                </div>
+              </fieldset>
+
+              <fieldset>
+                <legend className="mb-2 font-semibold">Location</legend>
+                <div className="grid grid-cols-3 gap-2">
+                  {locations.map((l) => (
+                    <label key={l} className="cursor-pointer">
+                      <input type="radio" name="location" value={l} defaultChecked={(t?.location ?? locations[0]) === l} className="peer sr-only" />
+                      <span className="flex h-20 flex-col items-center justify-center gap-1 rounded-lg border border-border text-sm peer-checked:border-accent peer-checked:bg-accent-soft peer-checked:font-semibold peer-focus-visible:ring-2">
+                        <LocationIcon l={l} />
+                        {LOCATION_LABEL[l]}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+
+              <fieldset>
+                <legend className="mb-2 font-semibold">Availability</legend>
+                <label className="flex items-start gap-2 text-sm">
+                  <input type="radio" name="hours_mode" value="store" defaultChecked={useStore} className="mt-1 h-4 w-4" />
+                  <span>Store hours <span className="block text-xs text-muted">{hoursSummary(storeHours)} · <Link href="/app/settings/availability" className="underline">change</Link></span></span>
+                </label>
+                <label className="mt-2 flex items-start gap-2 text-sm">
+                  <input type="radio" name="hours_mode" value="custom" defaultChecked={!useStore} className="mt-1 h-4 w-4" />
+                  <span>Custom hours for this type</span>
+                </label>
+                <details className="mt-2" open={!useStore}>
+                  <summary className="cursor-pointer text-xs text-muted">Set custom hours</summary>
+                  <div className="mt-2"><HoursEditor hours={t && !t.useStoreHours ? (t.hours as WeeklyHours) : Object.keys(storeHours).length ? storeHours : WEEKDAY_8_TO_4} /></div>
+                </details>
+              </fieldset>
+
+              <details className="rounded-lg border border-border p-3">
+                <summary className="cursor-pointer font-semibold">More options</summary>
+                <div className="mt-3 space-y-3">
+                  <Field label="Description" htmlFor="ed_desc" hint="Shown to customers on the booking page."><textarea id="ed_desc" name="description" defaultValue={t?.description} rows={2} className="input" /></Field>
+                  <Field label="Who can book" htmlFor="ed_access">
+                    <select id="ed_access" name="access" defaultValue={t?.access ?? "public"} className="input">
+                      {(["public", "invite"] as const).map((a) => <option key={a} value={a}>{ACCESS_LABEL[a]}</option>)}
+                    </select>
+                  </Field>
+                  <div className="grid grid-cols-2 gap-3">
+                    <Field label="Buffer after (min)" htmlFor="ed_buf"><input id="ed_buf" name="buffer_min" type="number" min={0} max={240} defaultValue={t?.bufferMin ?? NEW_TYPE_DEFAULTS.bufferMin} className="input" /></Field>
+                    <Field label="Start times every (min)" htmlFor="ed_step"><input id="ed_step" name="slot_step_min" type="number" min={5} max={240} defaultValue={t?.slotStepMin ?? NEW_TYPE_DEFAULTS.slotStepMin} className="input" /></Field>
+                    <Field label="Minimum notice (hours)" htmlFor="ed_notice"><input id="ed_notice" name="notice_hours" type="number" min={0} step={0.5} defaultValue={(t?.noticeMin ?? NEW_TYPE_DEFAULTS.noticeMin) / 60} className="input" /></Field>
+                    <Field label="Up to (days ahead)" htmlFor="ed_hz"><input id="ed_hz" name="horizon_days" type="number" min={1} max={365} defaultValue={t?.horizonDays ?? NEW_TYPE_DEFAULTS.horizonDays} className="input" /></Field>
+                  </div>
+                  <Field label="Capacity" htmlFor="ed_cap" hint="Bench: a set number of bookings at once for the store.">
+                    <select id="ed_cap" name="capacity_mode" defaultValue={t?.capacityMode ?? "bench"} className="input">
+                      {(["bench", "staff"] as const).map((c) => <option key={c} value={c}>{CAPACITY_LABEL[c]}</option>)}
+                    </select>
+                  </Field>
+                  <Field label="Bookings at the same time (bench)" htmlFor="ed_bench"><input id="ed_bench" name="bench_capacity" type="number" min={1} max={50} defaultValue={t?.benchCapacity ?? NEW_TYPE_DEFAULTS.benchCapacity} className="input" /></Field>
+                  {!online && (
+                    <label className="flex items-center gap-2 text-sm">
+                      <input type="checkbox" name="creates_work_order" defaultChecked={t?.createsWorkOrder ?? false} className="h-4 w-4" />
+                      Create a Lightspeed work order when booked (in person only)
+                    </label>
+                  )}
+                </div>
+              </details>
+            </>
+          )}
+        </div>
+
+        <div className="flex items-center justify-end gap-2 border-t border-border p-4">
+          {preview && <a href={preview} target="_blank" rel="noreferrer" className="btn btn-sm xl:hidden">Preview ↗</a>}
+          <Link href={close} className="btn">Cancel</Link>
+          <button type="submit" className="btn btn-primary">{t ? "Save changes" : "Create"}</button>
+        </div>
+      </form>
+    </div>
   );
+}
+
+function LocationIcon({ l }: { l: BookingLocation }) {
+  const common = { "aria-hidden": true, width: 22, height: 22, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.8 } as const;
+  if (l === "video") return <svg {...common}><rect x="3" y="6" width="13" height="12" rx="2" /><path d="M16 10l5-3v10l-5-3z" /></svg>;
+  if (l === "phone") return <svg {...common}><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z" /></svg>;
+  return <svg {...common}><path d="M12 21s-7-6.2-7-11a7 7 0 0 1 14 0c0 4.8-7 11-7 11z" /><circle cx="12" cy="10" r="2.5" /></svg>;
 }

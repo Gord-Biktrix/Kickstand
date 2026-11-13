@@ -20,7 +20,7 @@ import { attachUnit, bookableCompanions, bookableSiblings, linkOrdersForPickup, 
 import { currentShowroom } from "@/lib/current-showroom";
 import { createShowroom, importShowroomsFromLightspeed, isProfileKind, setLightspeedLink, updateShowroomDetails } from "@/lib/showroom-admin";
 import { cancelTypeBooking, createTypeBooking, getBookingDetail, rescheduleTypeBooking, setBookingOutcome, syncBookingWorkorder } from "@/lib/type-bookings";
-import { createBookingType, getBookingType, NEW_TYPE_DEFAULTS, parseWeeklyHours, PRESETS, setBookingTypeActive, updateBookingType, updatePickupType, validateBookingType, WEEKDAY_8_TO_4, type BookingTypeInput } from "@/lib/booking-types";
+import { createBookingType, getBookingType, hoursFromForm, NEW_TYPE_DEFAULTS, setBookingTypeActive, setStoreHours, updateBookingType, updatePickupType, validateBookingType, type BookingTypeInput } from "@/lib/booking-types";
 import { LightspeedClient } from "@/lib/lightspeed";
 import { googleEnabled } from "@/lib/google-auth";
 import { mailerKind } from "@/lib/mailer";
@@ -997,65 +997,76 @@ export async function importCsvAction(_prev: ImportState, formData: FormData): P
 
 const BT_PATH = "/app/settings/booking-types";
 
-function bookingTypeFromForm(formData: FormData, profileKind: string): BookingTypeInput {
-  const hours = parseWeeklyHours([0, 1, 2, 3, 4, 5, 6].map((wd) => str(formData, `hours_${wd}`)));
-  const location = str(formData, "location") as BookingTypeInput["location"];
+/**
+ * A type from the side-panel editor: duration chips (or Custom), location tiles, colour, store or custom hours
+ * (the HoursEditor grid), and the More options fields. Custom hours are only read when chosen, so an untouched
+ * grid can't fail a save that uses store hours.
+ */
+function bookingTypeFromForm(formData: FormData, profileKind: string, current?: { hours: unknown }): BookingTypeInput {
+  const useStoreHours = str(formData, "hours_mode") !== "custom";
+  const hours = useStoreHours ? ((current?.hours as BookingTypeInput["hours"]) ?? {}) : hoursFromForm((k) => str(formData, k));
+  const d = str(formData, "duration");
   return validateBookingType({
     name: str(formData, "name"),
     description: str(formData, "description"),
-    location,
+    location: str(formData, "location") as BookingTypeInput["location"],
     access: (str(formData, "access") || "public") as BookingTypeInput["access"],
-    durationMin: num(formData, "duration_min", NaN),
+    durationMin: d === "custom" ? num(formData, "duration_custom", NaN) : num(formData, "duration", NaN),
     bufferMin: num(formData, "buffer_min", 0),
-    slotStepMin: num(formData, "slot_step_min", NaN),
-    noticeMin: Math.round(num(formData, "notice_hours", NaN) * 60),
-    horizonDays: num(formData, "horizon_days", NaN),
+    slotStepMin: num(formData, "slot_step_min", NEW_TYPE_DEFAULTS.slotStepMin),
+    noticeMin: Math.round(num(formData, "notice_hours", NEW_TYPE_DEFAULTS.noticeMin / 60) * 60),
+    horizonDays: num(formData, "horizon_days", NEW_TYPE_DEFAULTS.horizonDays),
     capacityMode: (str(formData, "capacity_mode") || "bench") as BookingTypeInput["capacityMode"],
     benchCapacity: num(formData, "bench_capacity", 1),
     hours,
+    useStoreHours,
+    color: str(formData, "color") || "blue",
     createsWorkOrder: bool(formData, "creates_work_order"),
   }, profileKind);
 }
 
-/** Quick add from a preset (test ride, service, video call…) with the starting values; staff then tune it. */
-export async function addPresetBookingTypeAction(formData: FormData) {
-  return run(BT_PATH, async () => {
-    const user = await requireActor("manager");
-    const showroom = await currentShowroom(user);
-    const preset = PRESETS.find((p) => p.key === str(formData, "preset"));
-    if (!preset) throw new Error("Pick a booking type to add.");
-    const t = await createBookingType(db, showroom.id, validateBookingType({
-      name: preset.name, description: preset.description, location: preset.location, access: "public",
-      durationMin: preset.durationMin, bufferMin: NEW_TYPE_DEFAULTS.bufferMin, slotStepMin: NEW_TYPE_DEFAULTS.slotStepMin,
-      noticeMin: NEW_TYPE_DEFAULTS.noticeMin, horizonDays: NEW_TYPE_DEFAULTS.horizonDays, capacityMode: "bench",
-      benchCapacity: NEW_TYPE_DEFAULTS.benchCapacity, hours: WEEKDAY_8_TO_4, createsWorkOrder: preset.createsWorkOrder,
-    }, showroom.kind));
-    await logEvent(db, { showroomId: showroom.id, type: "booking_type_created", actor: user.id, payload: { booking_type_id: t.id, name: t.name, preset: preset.key } });
-    return `${t.name} added. Check its hours and length below.`;
-  });
-}
-
 export async function createBookingTypeAction(formData: FormData) {
-  return run(BT_PATH, async () => {
+  let target: string;
+  try {
     const user = await requireActor("manager");
     const showroom = await currentShowroom(user);
     const t = await createBookingType(db, showroom.id, bookingTypeFromForm(formData, showroom.kind));
     await logEvent(db, { showroomId: showroom.id, type: "booking_type_created", actor: user.id, payload: { booking_type_id: t.id, name: t.name } });
-    return `${t.name} added.`;
-  });
+    target = withFlash(`${BT_PATH}?edit=${t.id}`, { ok: `${t.name} created.` });
+  } catch (err) {
+    target = withFlash(`${BT_PATH}?new=1`, { error: errorMessage(err) });
+  }
+  redirect(target);
 }
 
+/** Saves and keeps the panel open, so the preview beside it shows the change. */
 export async function updateBookingTypeAction(id: string, formData: FormData) {
-  return run(BT_PATH, async () => {
+  let target: string;
+  try {
     const user = await requireActor("manager");
     const showroom = await currentShowroom(user);
     if (str(formData, "kind") === "pickup") {
       await updatePickupType(db, showroom.id, id, { name: str(formData, "name"), description: str(formData, "description") });
     } else {
-      await updateBookingType(db, showroom.id, id, bookingTypeFromForm(formData, showroom.kind));
+      const current = await getBookingType(db, showroom.id, id);
+      await updateBookingType(db, showroom.id, id, bookingTypeFromForm(formData, showroom.kind, current));
     }
     await logEvent(db, { showroomId: showroom.id, type: "booking_type_updated", actor: user.id, payload: { booking_type_id: id, name: str(formData, "name") } });
-    return "Booking type saved.";
+    target = withFlash(`${BT_PATH}?edit=${id}`, { ok: "Saved." });
+  } catch (err) {
+    target = withFlash(`${BT_PATH}?edit=${id}`, { error: errorMessage(err) });
+  }
+  redirect(target);
+}
+
+/** Settings › Availability: the store's weekly hours that booking types follow by default. */
+export async function setStoreHoursAction(formData: FormData) {
+  return run("/app/settings/availability", async () => {
+    const user = await requireActor("manager");
+    const showroom = await currentShowroom(user);
+    await setStoreHours(db, showroom.id, hoursFromForm((k) => str(formData, k)));
+    await logEvent(db, { showroomId: showroom.id, type: "store_hours_updated", actor: user.id });
+    return "Availability saved. Booking types using store hours follow it now.";
   });
 }
 
