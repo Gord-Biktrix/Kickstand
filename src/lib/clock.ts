@@ -6,6 +6,7 @@ import { customerKey } from "./customers";
 import { syncDeliveryReports } from "./delivery";
 import { inviteStatus, readMessage } from "./invite-status";
 import { formatMoney } from "./format";
+import { sendBookingReminders } from "./type-bookings";
 import { logger } from "./logger";
 import { baseUrl, METRIC, sendUnitMessage, type MessageOutcome } from "./messages";
 import { postSlack, unbookedPingMessage } from "./slack";
@@ -309,6 +310,13 @@ export async function runClockForShowroom(
         }),
       );
     }
+  }
+
+  // Reminders for bookings of booking types (test rides, service, calls…), every profile including the online team.
+  if (runReminders) {
+    const r = await sendBookingReminders(dbx, showroom, addLocalDays(today, 1));
+    counts.messagesSent += r.sent;
+    counts.messagesFailed += r.failed;
   }
 
   return { showroom: showroom.slug, date: today, ranDaily: runDaily, ranReminders: runReminders, counts };

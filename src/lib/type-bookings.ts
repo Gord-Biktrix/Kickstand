@@ -23,6 +23,7 @@ export const BOOKING_METRIC = {
   confirmed: "Booking: Confirmed",
   rescheduled: "Booking: Rescheduled",
   cancelled: "Booking: Cancelled",
+  reminder: "Booking: Reminder Day Before",
 } as const;
 
 export type TypeBookingErrorCode = "SLOT_TAKEN" | "INVALID_SLOT" | "NOT_BOOKABLE" | "NOT_ACTIVE" | "DETAILS" | "TOO_EARLY";
@@ -187,7 +188,7 @@ export function bookingProperties(showroom: ShowroomCtx, type: BookingType, b: B
 async function notifyBooking(
   db: Db,
   args: { showroom: ShowroomCtx; type: BookingType; booking: Booking; metric: string; actor: string; extra?: Record<string, unknown> },
-): Promise<void> {
+): Promise<"sent" | "failed"> {
   const { showroom, type, booking, metric } = args;
   const properties = { ...bookingProperties(showroom, type, booking), ...args.extra };
   const uniqueId = `${booking.id}:${metric}:${booking.rescheduleCount}`;
@@ -200,11 +201,38 @@ async function notifyBooking(
   }
   await db.insert(events).values({
     showroomId: showroom.id,
-    type: `booking_${metric.replace(/^Booking:\s*/, "").toLowerCase()}`,
+    type: `booking_${metric.replace(/^Booking:\s*/, "").toLowerCase().replace(/\s+/g, "_")}`,
     actor: args.actor,
     payload: { booking_id: booking.id, booking_type_id: type.id, booking_type: type.name, starts_at: booking.startsAt.toISOString(), metric },
     klaviyoStatus: status,
   });
+  return status;
+}
+
+/**
+ * Day-before reminders for tomorrow's bookings, run by the clock after the store's reminder hour. One per
+ * booking and start time: a booking moved after its reminder gets a fresh one if it lands on a new tomorrow.
+ */
+export async function sendBookingReminders(db: Db, showroom: ShowroomCtx, tomorrow: string): Promise<{ sent: number; failed: number }> {
+  const rows = await db
+    .select({ booking: bookings, type: bookingTypes })
+    .from(bookings)
+    .innerJoin(bookingTypes, eq(bookingTypes.id, bookings.bookingTypeId))
+    .where(and(eq(bookings.showroomId, showroom.id), eq(bookings.status, "booked"), eq(bookings.onDate, tomorrow)));
+  let sent = 0;
+  let failed = 0;
+  for (const { booking, type } of rows) {
+    const [done] = await db
+      .select({ id: events.id })
+      .from(events)
+      .where(and(eq(events.type, "booking_reminder_day_before"), eq(events.klaviyoStatus, "sent"), sql`${events.payload}->>'booking_id' = ${booking.id}`, sql`${events.payload}->>'starts_at' = ${booking.startsAt.toISOString()}`))
+      .limit(1);
+    if (done) continue;
+    const outcome = await notifyBooking(db, { showroom, type, booking, metric: BOOKING_METRIC.reminder, actor: "clock" });
+    if (outcome === "sent") sent++;
+    else failed++;
+  }
+  return { sent, failed };
 }
 
 // ---- Staff side ---------------------------------------------------------------------------------

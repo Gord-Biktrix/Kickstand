@@ -7,7 +7,7 @@ import { MemoryNotifier, setNotifier } from "@/lib/notifier";
 import type { ShowroomCtx } from "@/lib/showroom";
 import { createShowroom } from "@/lib/showroom-admin";
 import { localToUtc } from "@/lib/time";
-import { BOOKING_METRIC, cancelTypeBooking, cleanDetails, createTypeBooking, getBookingByToken, getBookingDetail, listBookings, rescheduleTypeBooking, setBookingOutcome, TypeBookingError } from "@/lib/type-bookings";
+import { BOOKING_METRIC, cancelTypeBooking, cleanDetails, createTypeBooking, getBookingByToken, getBookingDetail, listBookings, rescheduleTypeBooking, sendBookingReminders, setBookingOutcome, TypeBookingError } from "@/lib/type-bookings";
 import { getTypeAvailability, typeSlots } from "@/lib/type-slots";
 import { resetDb, testDb } from "./helpers";
 
@@ -139,5 +139,43 @@ describe("booking a booking type", () => {
     await cancelTypeBooking(db, { bookingId: b.id, actor: "staff-1", reason: "staff" });
     expect((await listBookings(db, online.id, "2026-11-17", "2026-11-17")).map((r) => r.booking.id)).toEqual([a.id]);
     expect((await listBookings(db, online.id, "2026-11-17", "2026-11-17", { includeCancelled: true })).length).toBe(2);
+  });
+});
+
+describe("day-before booking reminders", () => {
+  let db: Db;
+  let online: ShowroomCtx;
+  let type: BookingType;
+  let notifier: MemoryNotifier;
+  const slot = (d: string, t: string) => localToUtc(d, t, TZ);
+  beforeAll(async () => { db = await testDb(); });
+  afterAll(async () => { setNotifier(null); await db.$client.end(); });
+  beforeEach(async () => {
+    await resetDb(db);
+    notifier = new MemoryNotifier();
+    setNotifier(notifier);
+    online = await createShowroom(db, { slug: "online", name: "Online sales", kind: "online", timezone: TZ, addressLine: "", phone: null });
+    type = await createBookingType(db, online.id, validateBookingType({ name: "Phone call with an expert", description: "", location: "phone", access: "public", ...call, capacityMode: "bench", benchCapacity: 1, createsWorkOrder: false }, "online"));
+  });
+
+  it("reminds tomorrow's bookings once, again only if moved to a new tomorrow, and never cancelled ones", async () => {
+    const d = { name: "Kim", email: "kim@example.com", phone: "", smsConsent: false, note: "" };
+    const a = (await createTypeBooking(db, { showroom: online, type, startsAt: slot("2026-11-17", "10:00"), details: d, createdBy: "customer", now: NOW })).booking;
+    const b = (await createTypeBooking(db, { showroom: online, type, startsAt: slot("2026-11-17", "11:00"), details: { ...d, name: "Lee" }, createdBy: "customer", now: NOW })).booking;
+    await createTypeBooking(db, { showroom: online, type, startsAt: slot("2026-11-18", "10:00"), details: { ...d, name: "Later" }, createdBy: "customer", now: NOW });
+    await cancelTypeBooking(db, { bookingId: b.id, actor: "customer", reason: "customer" });
+    notifier.sent = [];
+    expect(await sendBookingReminders(db, online, "2026-11-17")).toEqual({ sent: 1, failed: 0 });
+    expect(notifier.sent.map((s) => [s.metric, s.properties.customer_name])).toEqual([[BOOKING_METRIC.reminder, "Kim"]]);
+    expect(await sendBookingReminders(db, online, "2026-11-17")).toEqual({ sent: 0, failed: 0 });
+    // Moved to the next day after the reminder: reminded again the day before the new time.
+    await rescheduleTypeBooking(db, { bookingId: a.id, startsAt: slot("2026-11-18", "11:00"), actor: "customer", now: NOW });
+    expect((await sendBookingReminders(db, online, "2026-11-18")).sent).toBe(2);
+    // A failed send is retried on the next tick.
+    const c = (await createTypeBooking(db, { showroom: online, type, startsAt: slot("2026-11-19", "10:00"), details: d, createdBy: "customer", now: NOW })).booking;
+    notifier.failNext = 1;
+    expect(await sendBookingReminders(db, online, "2026-11-19")).toEqual({ sent: 0, failed: 1 });
+    expect(await sendBookingReminders(db, online, "2026-11-19")).toEqual({ sent: 1, failed: 0 });
+    expect(c.status).toBe("booked");
   });
 });

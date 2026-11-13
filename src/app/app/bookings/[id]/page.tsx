@@ -28,6 +28,7 @@ const EVENT_LABEL: Record<string, string> = {
   booking_confirmed: "Booked",
   booking_rescheduled: "Moved to a new time",
   booking_cancelled: "Cancelled",
+  booking_reminder_day_before: "Day-before reminder sent",
   booking_checked_in: "Checked in",
   booking_no_show: "Marked no-show",
   booking_outcome_undone: "Check-in / no-show undone",
