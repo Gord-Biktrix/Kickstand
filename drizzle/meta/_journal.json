@@ -92,6 +92,13 @@
       "when": 1794528675573,
       "tag": "0012_luxuriant_scalphunter",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1794530159761,
+      "tag": "0013_massive_bastion",
+      "breakpoints": true
     }
   ]
 }

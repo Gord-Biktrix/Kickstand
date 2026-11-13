@@ -9,6 +9,7 @@ import type { Db, DbOrTx } from "@/db/client";
 import { bookings, bookingTypes, events, orders, type Booking, type BookingType } from "@/db/schema";
 import { formatInTimeZone } from "date-fns-tz";
 import { LightspeedClient, lightspeedEnabled } from "./lightspeed";
+import { getCalendarWriter } from "./google-calendar";
 import { LOCATION_LABEL, type BookingLocation } from "./booking-types";
 import { logger } from "./logger";
 import { baseUrl } from "./messages";
@@ -116,6 +117,7 @@ export async function createTypeBooking(
   });
   await notifyBooking(db, { showroom, type, booking, metric: BOOKING_METRIC.confirmed, actor: args.createdBy });
   const synced = await syncBookingWorkorder(db, { showroom, type, booking, actor: args.createdBy });
+  await syncBookingCalendar(db, { showroom, type, bookingId: booking.id, actor: args.createdBy });
   return { booking: synced ?? booking, token };
 }
 
@@ -144,6 +146,7 @@ export async function rescheduleTypeBooking(
   });
   await notifyBooking(db, { ...result, metric: BOOKING_METRIC.rescheduled, actor: args.actor, extra: { previous_display: `${formatLongDate(result.from, result.showroom.timezone)} at ${formatTime(result.from, result.showroom.timezone)}` } });
   await syncBookingWorkorder(db, { ...result, actor: args.actor });
+  await syncBookingCalendar(db, { showroom: result.showroom, type: result.type, bookingId: result.booking.id, actor: args.actor });
   return result.booking;
 }
 
@@ -155,6 +158,7 @@ export async function cancelTypeBooking(db: Db, args: { bookingId: string; actor
   const showroom = await getShowroomById(db, current.showroomId);
   await notifyBooking(db, { showroom, type, booking: row, metric: BOOKING_METRIC.cancelled, actor: args.actor });
   await syncBookingWorkorder(db, { showroom, type, booking: row, actor: args.actor });
+  await syncBookingCalendar(db, { showroom, type, bookingId: row.id, actor: args.actor });
   return row;
 }
 
@@ -376,5 +380,47 @@ export async function syncBookingWorkorder(db: Db, args: { showroom: ShowroomCtx
     logger.warn({ err: message, bookingId: b.id }, "booking work order not synced");
     await db.insert(events).values({ showroomId: showroom.id, type: "booking_workorder_failed", actor: args.actor, payload: { booking_id: b.id, error: message.slice(0, 300) } });
     return null;
+  }
+}
+
+// ---- Google Calendar copy -------------------------------------------------------------------------
+
+/**
+ * Keep the booking's copy on its profile's Google Calendar in step: created when booked, moved when
+ * rescheduled, deleted when cancelled. Off when no service account or no calendar id is set. Never throws.
+ */
+export async function syncBookingCalendar(db: Db, args: { showroom: ShowroomCtx; type: BookingType; bookingId: string; actor: string }): Promise<void> {
+  const writer = getCalendarWriter();
+  const { showroom, type } = args;
+  const [b] = await db.select().from(bookings).where(eq(bookings.id, args.bookingId));
+  if (!writer || !b) return;
+  const target = showroom.googleCalendarId;
+  try {
+    // Gone, or the store switched calendars: take it off the old one first.
+    if (b.googleEventId && b.googleCalendarId && (b.status === "cancelled" || b.googleCalendarId !== target)) {
+      await writer.remove(b.googleCalendarId, b.googleEventId);
+      await db.update(bookings).set({ googleEventId: null, googleCalendarId: null }).where(eq(bookings.id, b.id));
+      b.googleEventId = null;
+    }
+    if (b.status === "cancelled" || !target) return;
+    const tz = showroom.timezone;
+    const eventId = await writer.upsert(target, b.googleEventId, {
+      summary: `${type.name} · ${b.customerName}`,
+      description: [
+        `${LOCATION_LABEL[type.location as BookingLocation]} · booked in Kickstand`,
+        [b.customerPhone, b.customerEmail].filter(Boolean).join(" · "),
+        b.customerNote ? `Note: ${b.customerNote}` : "",
+        `Open in Kickstand: ${baseUrl()}/app/bookings/${b.id}`,
+      ].filter(Boolean).join("\n"),
+      location: type.location === "in_person" ? showroom.addressLine : LOCATION_LABEL[type.location as BookingLocation],
+      start: b.startsAt,
+      end: b.endsAt,
+      timeZone: tz,
+    });
+    if (eventId !== b.googleEventId || b.googleCalendarId !== target) await db.update(bookings).set({ googleEventId: eventId, googleCalendarId: target }).where(eq(bookings.id, b.id));
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    logger.warn({ err: message, bookingId: b.id }, "booking calendar copy failed");
+    await db.insert(events).values({ showroomId: showroom.id, type: "booking_calendar_failed", actor: args.actor, payload: { booking_id: b.id, error: message.slice(0, 300) } });
   }
 }

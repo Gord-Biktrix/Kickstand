@@ -5,6 +5,7 @@ import { sp, type SearchParams } from "@/lib/flash";
 import { getConnection, LightspeedClient } from "@/lib/lightspeed";
 import { listShowrooms } from "@/lib/showroom";
 import { listWorkorderStatuses } from "@/lib/workorders";
+import { calendarServiceEmail } from "@/lib/google-calendar";
 import { createShowroomAction, importStoresFromLightspeedAction, refreshLightspeedStatusesAction, setLightspeedLinkAction, updateShowroomAction } from "../../actions";
 
 export const metadata = { title: "Stores" };
@@ -20,6 +21,7 @@ export default async function StoresPage({ searchParams }: { searchParams: Promi
   const q = await searchParams;
   await requireUser("admin");
   const stores = await listShowrooms(db);
+  const calendarEmail = calendarServiceEmail();
   const statuses = await listWorkorderStatuses(db);
   const connected = !!(await getConnection(db));
   let shops: { shopID: string; name: string }[] = [];
@@ -96,6 +98,13 @@ export default async function StoresPage({ searchParams }: { searchParams: Promi
                     </Field>
                     <Field label="Address" htmlFor={`addr_${s.id}`}><input id={`addr_${s.id}`} name="address_line" defaultValue={s.addressLine} className="input" /></Field>
                     <Field label="Phone" htmlFor={`phone_${s.id}`}><input id={`phone_${s.id}`} name="phone" defaultValue={s.phone ?? ""} className="input" /></Field>
+                    <Field
+                      label="Google Calendar id"
+                      htmlFor={`gcal_${s.id}`}
+                      hint={calendarEmail ? <>Bookings are copied to this calendar. Share it with <code className="text-xs">{calendarEmail}</code> (&ldquo;Make changes to events&rdquo;), then paste its id from Calendar settings › Integrate calendar.</> : "Copying bookings to Google Calendar needs the GOOGLE_SERVICE_ACCOUNT_JSON setting on the server first."}
+                    >
+                      <input id={`gcal_${s.id}`} name="google_calendar_id" defaultValue={s.googleCalendarId ?? ""} className="input" placeholder="c_abc123@group.calendar.google.com" />
+                    </Field>
                     <button type="submit" className="btn btn-sm">Save details</button>
                   </form>
 

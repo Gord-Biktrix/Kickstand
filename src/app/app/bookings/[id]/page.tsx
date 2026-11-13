@@ -35,6 +35,7 @@ const EVENT_LABEL: Record<string, string> = {
   booking_workorder_created: "Lightspeed work order created",
   booking_workorder_updated: "Lightspeed work order updated",
   booking_workorder_failed: "Lightspeed work order failed",
+  booking_calendar_failed: "Google Calendar copy failed",
 };
 
 /** One booking: the booking itself with Check in / No-show / Change time / Cancel beside it, then its timeline. */

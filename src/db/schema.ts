@@ -19,6 +19,8 @@ export const showrooms = pgTable("showrooms", {
   slug: text("slug").notNull().unique(),
   name: text("name").notNull(),
   kind: text("kind").notNull().default("showroom"),
+  /** Google Calendar that this profile's bookings are copied to (shared with the service account in GOOGLE_SERVICE_ACCOUNT_JSON). */
+  googleCalendarId: text("google_calendar_id"),
   timezone: text("timezone").notNull(),
   addressLine: text("address_line").notNull(),
   phone: text("phone"),
@@ -398,6 +400,9 @@ export const bookings = pgTable(
     cancelledReason: text("cancelled_reason"),
     rescheduleCount: smallint("reschedule_count").notNull().default(0),
     lsWorkorderId: text("ls_workorder_id"),
+    /** The copy of this booking on the profile's Google Calendar, and which calendar it is on. */
+    googleEventId: text("google_event_id"),
+    googleCalendarId: text("google_calendar_id"),
     ...timestamps,
   },
   (t) => [

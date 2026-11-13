@@ -10,7 +10,7 @@ const rules = [0, 1, 2, 3, 4, 5, 6].map((weekday) => ({ weekday, capacity: weekd
 
 function showroom(mode: "pickup" | "assembly" | "lead", time = "10:00", leadHours = 8): ShowroomCtx {
   return {
-    id: "s", slug: "vancouver", name: "Biktrix Vancouver", kind: "showroom", timezone: TZ, addressLine: "", phone: null,
+    id: "s", slug: "vancouver", name: "Biktrix Vancouver", kind: "showroom", googleCalendarId: null, timezone: TZ, addressLine: "", phone: null,
     createdAt: new Date(), updatedAt: new Date(), rawSettings: {},
     settings: { ...DEFAULT_SETTINGS, lightspeed: { ...DEFAULT_SETTINGS.lightspeed, due_mode: mode, assembly_due_time_local: time, assembly_lead_work_hours: leadHours } },
   };

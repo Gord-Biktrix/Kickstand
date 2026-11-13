@@ -481,7 +481,7 @@ export async function createShowroomAction(formData: FormData) {
 export async function updateShowroomAction(id: string, formData: FormData) {
   return run("/app/settings/stores", async () => {
     await requireActor("admin");
-    await updateShowroomDetails(db, id, { name: str(formData, "name"), timezone: str(formData, "timezone"), addressLine: str(formData, "address_line"), phone: str(formData, "phone") || null });
+    await updateShowroomDetails(db, id, { name: str(formData, "name"), timezone: str(formData, "timezone"), addressLine: str(formData, "address_line"), phone: str(formData, "phone") || null, googleCalendarId: str(formData, "google_calendar_id") });
     return "Store details saved.";
   });
 }

@@ -44,6 +44,16 @@ pnpm lint
 | `CRON_SECRET` | Protects `/api/cron/clock` (`Authorization: Bearer …` or `x-cron-secret`) |
 | `APP_BASE_URL` | Used in customer links and `.ics` URLs |
 | `DEFAULT_SHOWROOM` | Slug the UI is scoped to (`vancouver`) |
+| `GOOGLE_SERVICE_ACCOUNT_JSON` | Optional. A Google service account's key (the whole JSON) that copies bookings onto each store's Google Calendar. Share each store calendar with the account's email ("Make changes to events") and set the calendar id in Settings › Stores |
+| `BOOKING_EMBED_ORIGINS` | Optional, space-separated. Extra sites allowed to embed `/book/*` besides biktrix.ca and Shopify |
+
+## Booking types (Calendly-style bookings)
+
+Each store, and the online sales team (a profile with `kind = "online"`: no address, pickups or Lightspeed shop), has its own booking types in Settings › Booking types. Customers book public ones at `/book/<store>` or `/book/<store>/<type>`, or through the website embed (`<div data-biktrix-booking="<store>" data-type="<type>"></div>` plus `<script src="<APP_BASE_URL>/embed.js" async></script>`). Their confirmation links to `/book/m/<token>` to change, cancel or add to calendar. Staff see bookings beside pickups on Today and Appointments, open one at `/app/bookings/<id>`, and book for phone or walk-in customers at `/app/bookings/new`.
+
+- Bookings live in `bookings`; bike pickups still use `appointments`. The pickup is listed as an invite-only booking type, but its times come from Settings › Capacity.
+- Klaviyo events: `Booking: Confirmed`, `Booking: Rescheduled`, `Booking: Cancelled`, `Booking: Reminder Day Before` (clock, after the store's reminder hour). Check-in and no-show send nothing.
+- Types with "Create a Lightspeed work order" (service) create the work order in the store's new-work-order status with Due = the appointment, reusing the Lightspeed customer of a mirrored order with the same email or phone. Later changes move Due, Hook Out and the note but never the status (see the Ikeono incident). Failures are on the booking's timeline with a retry button.
 
 ## How the pieces map to the spec
 

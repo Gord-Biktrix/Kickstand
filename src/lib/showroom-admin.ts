@@ -67,10 +67,15 @@ export async function createShowroom(dbx: Db, input: NewShowroom): Promise<Showr
   return (await listShowrooms(dbx)).find((s) => s.id === row.id)!;
 }
 
-export async function updateShowroomDetails(dbx: Db, id: string, patch: { name: string; timezone: string; addressLine: string; phone: string | null }): Promise<void> {
+export async function updateShowroomDetails(dbx: Db, id: string, patch: { name: string; timezone: string; addressLine: string; phone: string | null; googleCalendarId?: string | null }): Promise<void> {
   if (!patch.name.trim()) throw new Error("Give the store a name.");
   if (!validTimezone(patch.timezone)) throw new Error(`"${patch.timezone}" is not a valid time zone.`);
-  await dbx.update(showrooms).set({ name: patch.name.trim(), timezone: patch.timezone, addressLine: patch.addressLine.trim(), phone: patch.phone?.trim() || null }).where(eq(showrooms.id, id));
+  const cal = patch.googleCalendarId?.trim() || null;
+  if (cal && !/^[^\s@]+@[^\s@]+$/.test(cal)) throw new Error("A Google Calendar id looks like an email address (Calendar settings › Integrate calendar › Calendar ID).");
+  await dbx
+    .update(showrooms)
+    .set({ name: patch.name.trim(), timezone: patch.timezone, addressLine: patch.addressLine.trim(), phone: patch.phone?.trim() || null, ...(patch.googleCalendarId !== undefined ? { googleCalendarId: cal } : {}) })
+    .where(eq(showrooms.id, id));
 }
 
 export type LightspeedLink = {
