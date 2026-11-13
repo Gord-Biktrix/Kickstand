@@ -1,3 +1,4 @@
+import { Fragment } from "react";
 import Link from "next/link";
 import { db } from "@/db/client";
 import { StatusBadge } from "@/components/status-badge";
@@ -5,7 +6,8 @@ import { Badge, Card, Empty, Flash, PageHeader } from "@/components/ui";
 import { getCurrentUser } from "@/lib/auth";
 import { formatMoney } from "@/lib/format";
 import { sp, type SearchParams } from "@/lib/flash";
-import { todayAppointments } from "@/lib/queries";
+import { todayAppointments, weekSchedule } from "@/lib/queries";
+import { automationSummary } from "@/lib/day-summary";
 import { addLocalDays, formatLongDateFromLocal, formatTime, toLocalDate } from "@/lib/time";
 import { checkInBookingAction, collectPartsAction, noShowBookingAction, recordNoShowAction } from "./actions";
 import { colorOf, LOCATION_LABEL, type BookingLocation } from "@/lib/booking-types";
@@ -22,7 +24,14 @@ export default async function TodayPage({ searchParams }: { searchParams: Promis
   const now = new Date();
   const today = toLocalDate(now, showroom.timezone);
   const date = /^\d{4}-\d{2}-\d{2}$/.test(sp(q.date) ?? "") ? sp(q.date)! : today;
-  const [rows, bookingRows] = await Promise.all([todayAppointments(db, showroom, date, now), listBookings(db, showroom.id, date, date)]);
+  const store = showroom.kind !== "online";
+  const [rows, bookingRows, sched, done] = await Promise.all([
+    todayAppointments(db, showroom, date, now),
+    listBookings(db, showroom.id, date, date),
+    store ? weekSchedule(db, showroom, date, date) : Promise.resolve([]),
+    automationSummary(db, showroom, date),
+  ]);
+  const buildsDue = sched[0]?.builds ?? [];
   // One card per visit: bikes collected together share a group id.
   const visits: (typeof rows)[] = [];
   for (const r of rows) {
@@ -50,7 +59,6 @@ export default async function TodayPage({ searchParams }: { searchParams: Promis
         subtitle={`${formatLongDateFromLocal(date)} · ${counts} · ${showroom.name}`}
         action={
           <div className="flex flex-wrap gap-2 text-sm">
-            <Link className="btn btn-primary btn-sm" href="/app/bookings/new">+ Book for a customer</Link>
             <Link className="btn btn-sm" href={`/app?date=${addLocalDays(date, -1)}`}>← Prev</Link>
             <Link className="btn btn-sm" href="/app">Today</Link>
             <Link className="btn btn-sm" href={`/app?date=${addLocalDays(date, 1)}`}>Next →</Link>
@@ -58,11 +66,18 @@ export default async function TodayPage({ searchParams }: { searchParams: Promis
         }
       />
       <Flash ok={sp(q.ok)} error={denied ? "You don't have permission for that page." : sp(q.error)} />
+      <div className="flex flex-wrap items-start gap-6">
+      <div className="min-w-0 flex-[999_1_560px]">
       {items.length === 0 ? (
         <Empty>Nothing booked for this day.</Empty>
       ) : (
         <div className="space-y-3">
-          {items.map((item) => {
+          {items.map((item, idx) => {
+            // A red "now" line before the first visit that hasn't started yet (today only).
+            const nowLine = date === today && item.at > now.getTime() && (idx === 0 || items[idx - 1].at <= now.getTime())
+              ? <div key="now" role="separator" aria-label={`Now, ${formatTime(now, showroom.timezone)}`} className="flex items-center gap-2 text-xs font-bold text-danger"><span>NOW {formatTime(now, showroom.timezone)}</span><span aria-hidden="true" className="h-0.5 flex-1 bg-danger" /></div>
+              : null;
+            const card = (() => {
             if (item.kind === "booking") return <BookingCard key={item.row.booking.id} row={item.row} tz={showroom.timezone} now={now} back={back} />;
             const visit = item.visit;
             const first = visit[0];
@@ -117,9 +132,54 @@ export default async function TodayPage({ searchParams }: { searchParams: Promis
                 </div>
               </Card>
             );
+            })();
+            return <Fragment key={item.kind === "booking" ? item.row.booking.id : (item.visit[0].appointment.groupId ?? item.visit[0].appointment.id)}>{nowLine}{card}</Fragment>;
           })}
         </div>
       )}
+      </div>
+
+      <aside className="min-w-0 flex-[1_1_280px] space-y-4">
+        {store && (
+          <section className="card" aria-label="Workshop today">
+            <div className="flex items-baseline justify-between">
+              <h2 className="text-sm font-semibold uppercase tracking-wide">Workshop {date === today ? "today" : "this day"}</h2>
+              <Link href="/app/bikes?filter=booked" className="text-xs underline">Open</Link>
+            </div>
+            {buildsDue.length === 0 ? (
+              <p className="mt-2 text-sm text-muted">No builds due.</p>
+            ) : (
+              <ul className="mt-3 space-y-2 text-sm">
+                {buildsDue.map((r) => {
+                  const late = r.unit.status === "booked" && !!r.buildAt && r.buildAt < now;
+                  return (
+                    <li key={r.appointment.id} className="flex justify-between gap-2">
+                      <Link href={`/app/units/${r.unit.id}`} className="min-w-0 truncate hover:text-accent">{r.unit.model} <span className="text-muted">· {r.order?.customerName ?? "—"}</span></Link>
+                      <span className={`shrink-0 ${late ? "font-semibold text-danger" : r.unit.status === "ready" ? "text-ok" : "text-muted"}`}>
+                        {r.unit.status === "ready" ? "ready" : r.unit.status === "building" ? "building" : r.buildAt ? `by ${formatTime(r.buildAt, showroom.timezone)}` : "today"}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </section>
+        )}
+        <section className="card" aria-label="Done for you" style={{ background: "#f5f4f1" }}>
+          <h2 className="text-sm font-semibold uppercase tracking-wide">Done for you {date === today ? "today" : "this day"}</h2>
+          {done.invites + done.reminders + done.otherMessages + done.failed === 0 ? (
+            <p className="mt-2 text-sm text-muted">Nothing sent yet.</p>
+          ) : (
+            <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-muted">
+              {done.invites > 0 && <li>{done.invites} pickup invite{done.invites === 1 ? "" : "s"} sent</li>}
+              {done.reminders > 0 && <li>{done.reminders} reminder{done.reminders === 1 ? "" : "s"} sent</li>}
+              {done.otherMessages > 0 && <li>{done.otherMessages} other message{done.otherMessages === 1 ? "" : "s"} sent</li>}
+              {done.failed > 0 && <li className="text-danger">{done.failed} didn&apos;t send · <Link href="/app/watchlist" className="underline">see Alerts</Link></li>}
+            </ul>
+          )}
+        </section>
+      </aside>
+      </div>
     </div>
   );
 }

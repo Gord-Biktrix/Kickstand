@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 /** `match` widens the active test to a path prefix different from the link target (Settings → /app/settings/*). */
-export type NavItem = { href: string; label: string; exact?: boolean; match?: string };
+export type NavItem = { href: string; label: string; exact?: boolean; match?: string; also?: string[] };
 
 /**
  * Nav links with an active state. `exact` matches the path alone (for "/app" so it does not
@@ -12,7 +12,9 @@ export type NavItem = { href: string; label: string; exact?: boolean; match?: st
  */
 export function NavLinks({ items, variant = "top" }: { items: NavItem[]; variant?: "top" | "tabs" | "chrome" }) {
   const pathname = usePathname();
+  const under = (p: string) => pathname === p || pathname.startsWith(p + "/");
   const isActive = (i: NavItem) => {
+    if (i.also?.some(under)) return true;
     if (i.exact) return pathname === i.href;
     if (i.match) return pathname === i.match || pathname.startsWith(i.match + "/");
     return pathname === i.href || pathname.startsWith(i.href + "/");

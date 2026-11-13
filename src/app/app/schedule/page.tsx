@@ -229,7 +229,6 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
         subtitle={`${title} · ${mode === "builds" ? `${totalBuilds} build${totalBuilds === 1 ? "" : "s"} due` : [online ? "" : `${totalPickups} pickup${totalPickups === 1 ? "" : "s"}`, `${totalBookings} booking${totalBookings === 1 ? "" : "s"}`].filter(Boolean).join(" · ")} · ${showroom.name}`}
         action={
           <div className="flex flex-wrap items-center gap-2 text-sm">
-            <Link className="btn btn-primary btn-sm" href="/app/bookings/new">+ Book</Link>
             {!online && (
               <div className="flex rounded-lg border border-border bg-card p-0.5" role="tablist" aria-label="Who is this for">
                 <Link role="tab" aria-selected={mode === "pickups"} href={href(date, view, "pickups")} className={`rounded-md px-3 py-1 ${mode === "pickups" ? "bg-accent text-white" : "hover:text-accent"}`}>Customers</Link>
