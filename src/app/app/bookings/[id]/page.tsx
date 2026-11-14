@@ -1,4 +1,6 @@
+import { Fragment } from "react";
 import Link from "next/link";
+import { readAnswers } from "@/lib/booking-questions";
 import { notFound } from "next/navigation";
 import { db } from "@/db/client";
 import { ConfirmButton } from "@/components/confirm-button";
@@ -77,6 +79,7 @@ export default async function BookingPage({ params, searchParams }: { params: Pr
             <dt className="text-muted">What</dt><dd>{type.name} · {LOCATION_LABEL[type.location as BookingLocation]}</dd>
             <dt className="text-muted">Phone</dt><dd>{b.customerPhone ? <a href={`tel:${b.customerPhone}`} className="underline">{b.customerPhone}</a> : "—"}{b.smsConsent && <span className="ml-2 text-xs text-muted">texts OK</span>}</dd>
             <dt className="text-muted">Email</dt><dd>{b.customerEmail ? <a href={`mailto:${b.customerEmail}`} className="underline">{b.customerEmail}</a> : "—"}</dd>
+            {readAnswers(b.answers).map((a, i) => <Fragment key={i}><dt className="text-muted">{a.question}</dt><dd className="font-medium">{a.answer}</dd></Fragment>)}
             {b.customerNote && <><dt className="text-muted">Note</dt><dd>{b.customerNote}</dd></>}
             <dt className="text-muted">Booked by</dt><dd>{who(b.createdBy)}</dd>
             {type.createsWorkOrder && (

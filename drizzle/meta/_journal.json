@@ -127,6 +127,13 @@
       "when": 1794633430201,
       "tag": "0017_worthless_sprite",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1794635889264,
+      "tag": "0018_glorious_the_hunter",
+      "breakpoints": true
     }
   ]
 }

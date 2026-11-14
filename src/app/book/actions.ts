@@ -30,6 +30,7 @@ export async function bookTypeAction(profileSlug: string, typeSlug: string, form
       startsAt,
       createdBy: "customer",
       details: { name: str(formData, "name"), email: str(formData, "email"), phone: str(formData, "phone"), smsConsent: bool(formData, "sms_consent"), note: str(formData, "note") },
+      answers: (field) => str(formData, field),
     }));
   } catch (err) {
     const date = str(formData, "date");

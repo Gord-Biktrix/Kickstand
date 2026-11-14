@@ -12,6 +12,8 @@ import { formatLongDateFromLocal, formatTime } from "@/lib/time";
 import { getTypeAvailability } from "@/lib/type-slots";
 import { bookTypeAction } from "../../actions";
 import { zoneLabel } from "../../zone";
+import { QuestionFields } from "@/components/question-fields";
+import { readQuestions } from "@/lib/booking-questions";
 
 export const metadata = { title: "Pick a time" };
 
@@ -75,6 +77,7 @@ export default async function BookTypePage({ params, searchParams }: { params: P
                 <input type="checkbox" name="sms_consent" className="mt-1 h-4 w-4 rounded border-border accent-accent" />
                 <span>Text me about this appointment. Standard rates apply; reply STOP to opt out.</span>
               </label>
+              <QuestionFields questions={readQuestions(type.questions)} idPrefix="bk" />
               <Field label="Anything we should know? (optional)" htmlFor="bk_note"><textarea id="bk_note" name="note" rows={3} className="input" /></Field>
               <button type="submit" className="btn btn-block text-white" style={{ background: accent, borderColor: accent }}>Schedule</button>
             </form>

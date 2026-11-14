@@ -3,6 +3,8 @@ import { db } from "@/db/client";
 import type { BookingType } from "@/db/schema";
 import { CopyButton } from "@/components/copy-button";
 import { HoursEditor } from "@/components/hours-editor";
+import { QuestionsEditor } from "@/components/questions-editor";
+import { readQuestions } from "@/lib/booking-questions";
 import { Badge, Field, Flash, PageHeader } from "@/components/ui";
 import { requireUser } from "@/lib/auth";
 import {
@@ -215,6 +217,12 @@ function EditorPanel({ t, online, storeHours, profileSlug, close }: { t?: Bookin
                   <summary className="cursor-pointer text-xs text-muted">Set custom hours</summary>
                   <div className="mt-2"><HoursEditor hours={t && !t.useStoreHours ? (t.hours as WeeklyHours) : Object.keys(storeHours).length ? storeHours : WEEKDAY_8_TO_4} /></div>
                 </details>
+              </fieldset>
+
+              <fieldset>
+                <legend className="mb-1 font-semibold">Booking form</legend>
+                <p className="mb-2 text-xs text-muted">Name, email, phone and a note are always asked. Add questions to know why they&apos;re booking; answers show in Slack, on the booking and in Klaviyo.</p>
+                <QuestionsEditor initial={readQuestions(t?.questions)} />
               </fieldset>
 
               <details className="rounded-lg border border-border p-3">

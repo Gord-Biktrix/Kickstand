@@ -10,6 +10,8 @@ import { sp, type SearchParams } from "@/lib/flash";
 import { formatLongDateFromLocal, formatTime } from "@/lib/time";
 import { getTypeAvailability } from "@/lib/type-slots";
 import { staffCreateTypeBookingAction } from "../../actions";
+import { QuestionFields } from "@/components/question-fields";
+import { readQuestions } from "@/lib/booking-questions";
 
 export const metadata = { title: "Book for a customer" };
 
@@ -68,6 +70,7 @@ export default async function NewBookingPage({ searchParams }: { searchParams: P
                   <Field label="Email" htmlFor="nb_email"><input id="nb_email" name="email" type="email" className="input" /></Field>
                 </div>
                 <label className="flex items-center gap-2 text-sm"><input type="checkbox" name="sms_consent" className="h-4 w-4" /> Customer agrees to text messages about this booking</label>
+                <QuestionFields questions={readQuestions(type.questions)} idPrefix="nb" />
                 <Field label="Note" htmlFor="nb_note"><textarea id="nb_note" name="note" rows={2} className="input" /></Field>
                 <div className="flex gap-2">
                   <button type="submit" className="btn btn-primary">Book</button>

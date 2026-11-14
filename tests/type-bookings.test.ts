@@ -4,6 +4,8 @@ import type { Db } from "@/db/client";
 import { bookings, events, type BookingType } from "@/db/schema";
 import { createBookingType, validateBookingType, WEEKDAY_8_TO_4, type BookingTypeInput } from "@/lib/booking-types";
 import { MemoryNotifier, setNotifier } from "@/lib/notifier";
+import { MemorySlack, setSlackPoster } from "@/lib/slack";
+import { SUGGESTED_CALL_QUESTIONS } from "@/lib/booking-questions";
 import type { ShowroomCtx } from "@/lib/showroom";
 import { createShowroom } from "@/lib/showroom-admin";
 import { localToUtc } from "@/lib/time";
@@ -58,6 +60,27 @@ describe("booking a booking type", () => {
     setNotifier(notifier);
     online = await createShowroom(db, { slug: "online", name: "Online sales", kind: "online", timezone: TZ, addressLine: "", phone: null });
     type = await createBookingType(db, online.id, validateBookingType(input, "online"));
+  });
+
+  it("keeps the booking form's answers and pings the store's Slack channel", async () => {
+    const slack = new MemorySlack();
+    setSlackPoster(slack);
+    try {
+      const withQs = await createBookingType(db, online.id, validateBookingType({ ...input, name: "Sales call", questions: SUGGESTED_CALL_QUESTIONS }, "online"));
+      const hooked = { ...online, settings: { ...online.settings, slack_webhook_url: "https://hooks.slack.com/services/T/B/x" } };
+      const answers = (f: string) => ({ q_topic: "Financing", q_bikes: "" } as Record<string, string>)[f] ?? "";
+      await expect(createTypeBooking(db, { showroom: hooked, type: withQs, startsAt: slot("11:00"), details, createdBy: "customer", now: NOW, answers: () => "" })).rejects.toThrow(/Please answer/);
+      const { booking } = await createTypeBooking(db, { showroom: hooked, type: withQs, startsAt: slot("11:00"), details, createdBy: "customer", now: NOW, answers });
+      expect(booking.answers).toEqual([{ question: "What would you like to talk about?", answer: "Financing" }]);
+      expect(notifier.sent.at(-1)!.properties).toMatchObject({ answers: [{ question: "What would you like to talk about?", answer: "Financing" }] });
+      expect(slack.posted).toHaveLength(1);
+      expect(slack.posted[0].message.text).toContain("New booking: Sales call");
+      // No webhook on the store: no ping, booking still fine.
+      await createTypeBooking(db, { showroom: online, type: withQs, startsAt: slot("12:00"), details, createdBy: "customer", now: NOW, answers });
+      expect(slack.posted).toHaveLength(1);
+    } finally {
+      setSlackPoster(null);
+    }
   });
 
   it("checks the customer's details", () => {

@@ -5,6 +5,8 @@
  * "Cancelled"); the flow in Klaviyo owns the wording and channel, as for pickups.
  */
 import { and, asc, between, desc, eq, isNotNull, ne, or, sql } from "drizzle-orm";
+import { bookingSlackMessage, postSlack, type BookingSlackPing } from "./slack";
+import { collectAnswers, readAnswers, readQuestions } from "./booking-questions";
 import type { Db, DbOrTx } from "@/db/client";
 import { bookings, bookingTypes, events, orders, type Booking, type BookingType } from "@/db/schema";
 import { formatInTimeZone } from "date-fns-tz";
@@ -83,12 +85,15 @@ export async function getBookingByToken(dbx: DbOrTx, token: string): Promise<{ b
 
 export async function createTypeBooking(
   db: Db,
-  args: { showroom: ShowroomCtx; type: BookingType; startsAt: Date; details: CustomerDetails; createdBy: string; now?: Date },
+  args: { showroom: ShowroomCtx; type: BookingType; startsAt: Date; details: CustomerDetails; createdBy: string; now?: Date; answers?: (field: string) => string },
 ): Promise<{ booking: Booking; token: string }> {
   const { showroom, type } = args;
   if (type.kind !== "standard" || type.showroomId !== showroom.id) throw new TypeBookingError("NOT_BOOKABLE");
   if (!type.active || (type.access !== "public" && args.createdBy === "customer")) throw new TypeBookingError("NOT_BOOKABLE");
   const details = cleanDetails(args.details);
+  const answers = collectAnswers(readQuestions(type.questions), args.answers ?? (() => ""), (m) => {
+    throw new TypeBookingError("DETAILS", m);
+  });
   const token = generateToken();
   const booking = await db.transaction(async (tx) => {
     await lockType(tx, type.id);
@@ -108,6 +113,7 @@ export async function createTypeBooking(
         customerPhone: details.phone,
         smsConsent: details.smsConsent,
         customerNote: details.note,
+        answers,
         tokenHash: hashToken(token),
         tokenEnc: encryptToken(token),
         createdBy: args.createdBy,
@@ -162,6 +168,38 @@ export async function cancelTypeBooking(db: Db, args: { bookingId: string; actor
   return row;
 }
 
+const SLACK_KIND: Record<string, BookingSlackPing["kind"]> = {
+  [BOOKING_METRIC.confirmed]: "new",
+  [BOOKING_METRIC.rescheduled]: "rescheduled",
+  [BOOKING_METRIC.cancelled]: "cancelled",
+};
+
+/** Tell the store's Slack channel (Settings › Program › Slack) about a booking made, moved or cancelled. Never throws. */
+async function pingSlack(showroom: ShowroomCtx, type: BookingType, b: Booking, metric: string, extra?: Record<string, unknown>) {
+  const kind = SLACK_KIND[metric];
+  const hook = showroom.settings.slack_webhook_url;
+  if (!kind || !hook) return;
+  const tz = showroom.timezone;
+  await postSlack(hook, bookingSlackMessage({
+    kind,
+    store: showroom.name,
+    type: type.name,
+    when: `${formatLongDate(b.startsAt, tz)}, ${formatTime(b.startsAt, tz)}–${formatTime(b.endsAt, tz)}`,
+    previous: typeof extra?.previous_display === "string" ? extra.previous_display : undefined,
+    customer: b.customerName,
+    phone: b.customerPhone,
+    email: b.customerEmail,
+    answers: readAnswers(b.answers),
+    note: b.customerNote,
+    url: `${baseUrl()}/app/bookings/${b.id}`,
+  }));
+}
+
+/** "Question: answer" lines, then the free-text note, for Slack and plain-text templates. */
+export function answersText(b: Pick<Booking, "answers" | "customerNote">): string {
+  return [...readAnswers(b.answers).map((a) => `${a.question} ${a.answer}`), b.customerNote ? `Note: ${b.customerNote}` : ""].filter(Boolean).join("\n");
+}
+
 /** Klaviyo properties for a booking event. Times are in the profile's time zone. */
 export function bookingProperties(showroom: ShowroomCtx, type: BookingType, b: Booking): Record<string, unknown> {
   const tz = showroom.timezone;
@@ -180,6 +218,9 @@ export function bookingProperties(showroom: ShowroomCtx, type: BookingType, b: B
     starts_at: b.startsAt.toISOString(),
     duration_min: type.durationMin,
     customer_note: b.customerNote,
+    // The booking form's answers: a list for flows that loop, and one line per answer for plain templates.
+    answers: readAnswers(b.answers),
+    answers_text: answersText(b),
     sms_consent: b.smsConsent,
     ...bookingUrls(b),
   };
@@ -203,6 +244,7 @@ async function notifyBooking(
     status = "failed";
     logger.warn({ err: err instanceof Error ? err.message : String(err), metric, bookingId: booking.id }, "booking event not sent");
   }
+  await pingSlack(showroom, type, booking, metric, args.extra);
   await db.insert(events).values({
     showroomId: showroom.id,
     type: `booking_${metric.replace(/^Booking:\s*/, "").toLowerCase().replace(/\s+/g, "_")}`,
@@ -325,6 +367,7 @@ function workorderNote(showroom: ShowroomCtx, type: BookingType, b: Booking): st
     b.status === "cancelled" ? `CANCELLED (${b.cancelledReason === "customer" ? "by the customer" : "by staff"}) · was booked for ${when}` : "",
     `${type.name.toUpperCase()} · booked in Kickstand`,
     b.status === "cancelled" ? "" : `CUSTOMER BOOKED: ${when}`,
+    ...readAnswers(b.answers).map((a) => `${a.question} ${a.answer}`),
     b.customerNote ? `Customer says: ${b.customerNote}` : "",
     [b.customerName, b.customerPhone, b.customerEmail].filter(Boolean).join(" · "),
     `Manage: ${bookingUrls(b).manage_url}`,
@@ -409,7 +452,7 @@ export async function syncBookingCalendar(db: Db, args: { showroom: ShowroomCtx;
       description: [
         `${LOCATION_LABEL[type.location as BookingLocation]} · booked in Kickstand`,
         [b.customerPhone, b.customerEmail].filter(Boolean).join(" · "),
-        b.customerNote ? `Note: ${b.customerNote}` : "",
+        answersText(b),
         `Open in Kickstand: ${baseUrl()}/app/bookings/${b.id}`,
       ].filter(Boolean).join("\n"),
       location: type.location === "in_person" ? showroom.addressLine : LOCATION_LABEL[type.location as BookingLocation],

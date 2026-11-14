@@ -5,6 +5,7 @@
  * still come from Settings › Capacity, so only its name, description and on/off switch are edited here.
  */
 import { and, asc, eq, sql } from "drizzle-orm";
+import { SUGGESTED_CALL_QUESTIONS, type BookingQuestion } from "./booking-questions";
 import type { DbOrTx } from "@/db/client";
 import { bookingTypes, capacityRules, showrooms, type BookingType, type CapacityRule } from "@/db/schema";
 
@@ -183,6 +184,8 @@ export type BookingTypeInput = {
   /** Follow the profile's availability instead of `hours`. */
   useStoreHours?: boolean;
   color?: string;
+  /** Booking form questions (src/lib/booking-questions.ts); left as is when omitted. */
+  questions?: BookingQuestion[];
 };
 
 /** The weekly hours a type is actually bookable in: the profile's availability, or its own custom hours. */
@@ -307,6 +310,8 @@ export function defaultTypes(kind: string, hours: WeeklyHours): (BookingTypeInpu
     createsWorkOrder: p.createsWorkOrder,
     useStoreHours: true,
     color: p.color,
+    // Calls with the online team ask what it's about, like the old YCBM form.
+    questions: kind === "online" ? SUGGESTED_CALL_QUESTIONS : [],
   }));
 }
 

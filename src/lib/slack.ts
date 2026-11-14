@@ -90,6 +90,38 @@ export function unbookedPingMessage(p: UnbookedPing): SlackMessage {
   };
 }
 
+export type BookingSlackPing = {
+  kind: "new" | "rescheduled" | "cancelled";
+  store: string;
+  type: string;
+  when: string;
+  previous?: string;
+  customer: string;
+  phone: string | null;
+  email: string | null;
+  answers: { question: string; answer: string }[];
+  note: string;
+  url: string;
+};
+
+/** A booking made, moved or cancelled, for the store's channel (Biktrix Online: #callback-request). */
+export function bookingSlackMessage(p: BookingSlackPing): SlackMessage {
+  const e = slackEscape;
+  const head = { new: "📅 New booking", rescheduled: "🔁 Booking moved", cancelled: "❌ Booking cancelled" }[p.kind];
+  const lines = [
+    `*${head}: ${e(p.type)}* · ${e(p.store)}`,
+    `*When:* ${e(p.when)}${p.previous ? ` _(was ${e(p.previous)})_` : ""}`,
+    `*Customer:* ${e(p.customer)}${p.phone ? ` · <tel:${p.phone}|${e(p.phone)}>` : ""}${p.email ? ` · <mailto:${p.email}|${e(p.email)}>` : ""}`,
+    ...p.answers.map((a) => `*${e(a.question)}* ${e(a.answer)}`),
+    p.note ? `*Note:* ${e(p.note)}` : "",
+    `<${p.url}|Open in Kickstand>`,
+  ].filter(Boolean);
+  return {
+    text: `${head}: ${p.type} · ${p.customer} · ${p.when}`,
+    blocks: [{ type: "section", text: { type: "mrkdwn", text: lines.join("\n") } }],
+  };
+}
+
 /** Post, logging instead of throwing. Returns the error message on failure. */
 export async function postSlack(webhookUrl: string, message: SlackMessage): Promise<string | null> {
   try {

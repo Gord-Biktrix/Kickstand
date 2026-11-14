@@ -1,6 +1,7 @@
 "use server";
 
 import { and, eq, inArray, ne } from "drizzle-orm";
+import { validateQuestions } from "@/lib/booking-questions";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { db } from "@/db/client";
@@ -1002,6 +1003,10 @@ const BT_PATH = "/app/settings/booking-types";
  * (the HoursEditor grid), and the More options fields. Custom hours are only read when chosen, so an untouched
  * grid can't fail a save that uses store hours.
  */
+function parseJson(v: string): unknown {
+  try { return JSON.parse(v || "[]"); } catch { return null; }
+}
+
 function bookingTypeFromForm(formData: FormData, profileKind: string, current?: { hours: unknown }): BookingTypeInput {
   const useStoreHours = str(formData, "hours_mode") !== "custom";
   const hours = useStoreHours ? ((current?.hours as BookingTypeInput["hours"]) ?? {}) : hoursFromForm((k) => str(formData, k));
@@ -1020,8 +1025,9 @@ function bookingTypeFromForm(formData: FormData, profileKind: string, current?: 
     benchCapacity: num(formData, "bench_capacity", 1),
     hours,
     useStoreHours,
-    color: str(formData, "color") || "blue",
+    color: str(formData, "color") || "orange",
     createsWorkOrder: bool(formData, "creates_work_order"),
+    ...(formData.has("questions") ? { questions: validateQuestions(parseJson(str(formData, "questions"))) } : {}),
   }, profileKind);
 }
 
@@ -1147,6 +1153,7 @@ export async function staffCreateTypeBookingAction(typeId: string, formData: For
       startsAt,
       createdBy: user.id,
       details: { name: str(formData, "name"), email: str(formData, "email"), phone: str(formData, "phone"), smsConsent: bool(formData, "sms_consent"), note: str(formData, "note") },
+      answers: (field) => str(formData, field),
     });
     target = withFlash(`/app/bookings/${booking.id}`, { ok: `Booked. ${booking.customerEmail || booking.customerPhone ? "The customer gets a confirmation through Klaviyo." : ""}` });
   } catch (err) {

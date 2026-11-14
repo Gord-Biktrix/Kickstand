@@ -361,6 +361,8 @@ export const bookingTypes = pgTable(
     /** Colour key (see BOOKING_COLORS) for the type's row, the booking page and calendar blocks. */
     color: text("color").notNull().default("orange"),
     createsWorkOrder: boolean("creates_work_order").notNull().default(false),
+    /** Questions on the booking form (src/lib/booking-questions.ts). */
+    questions: jsonb("questions").notNull().default([]),
     active: boolean("active").notNull().default(true),
     sortOrder: smallint("sort_order").notNull().default(0),
     ...timestamps,
@@ -400,6 +402,8 @@ export const bookings = pgTable(
     customerPhone: text("customer_phone"),
     smsConsent: boolean("sms_consent").notNull().default(false),
     customerNote: text("customer_note").notNull().default(""),
+    /** The booking form's questions as asked, with the customer's answers: [{ question, answer }]. */
+    answers: jsonb("answers").notNull().default([]),
     tokenHash: text("token_hash").notNull().unique(),
     tokenEnc: text("token_enc").notNull(),
     createdBy: text("created_by").notNull(),
