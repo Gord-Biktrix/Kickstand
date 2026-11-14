@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { BOOKING_CDN_CACHE, cacheableBookingPage } from "@/lib/booking-cache";
 
 const WINDOW_MS = 60_000;
 const LIMIT = 60;
@@ -29,7 +30,9 @@ export function proxy(request: NextRequest) {
     if (hits.size > 10_000) {
       for (const [k, v] of hits) if (v.resetAt < now) hits.delete(k);
     }
-    return NextResponse.next();
+    const res = NextResponse.next();
+    if (cacheableBookingPage(request)) res.headers.set("Vercel-CDN-Cache-Control", BOOKING_CDN_CACHE);
+    return res;
   }
 
   if (pathname.startsWith("/app")) {
