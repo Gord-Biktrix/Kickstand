@@ -172,12 +172,13 @@ const SPOKES = [0, 45, 90, 135, 180, 225, 270, 315];
  */
 function Wheel({ accent, selected }: { accent: string; selected: boolean }) {
   const face = selected ? accent : `${accent}1a`;
-  const tyre = selected ? "rgba(0,0,0,0.22)" : `${accent}66`;
+  // The tyre: a dark rubber ring round the outside, the same on every open day.
+  const tyre = "#17181a";
   const spoke = selected ? "rgba(255,255,255,0.5)" : `${accent}4d`;
   return (
     <svg aria-hidden="true" viewBox="0 0 40 40" className="absolute inset-0 h-full w-full">
-      <circle cx="20" cy="20" r="19" fill={face} />
-      <circle cx="20" cy="20" r="17" fill="none" stroke={tyre} strokeWidth="2.5" />
+      <circle cx="20" cy="20" r="18" fill={face} />
+      <circle cx="20" cy="20" r="18" fill="none" stroke={tyre} strokeWidth="2.5" />
       <g stroke={spoke} strokeWidth="1" className="origin-center transition-transform duration-500 motion-safe:group-hover:rotate-45" style={{ transformBox: "fill-box" }}>
         {SPOKES.map((a) => {
           const r = (a * Math.PI) / 180;
