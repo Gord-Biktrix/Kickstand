@@ -83,10 +83,11 @@ export function BookingCalendar({
                       href={href({ month: shown, date: c })}
                       aria-label={`${formatLongDateFromLocal(c)}, ${day.slots.length} times`}
                       aria-current={isSel ? "date" : undefined}
-                      className="mx-auto flex h-10 w-10 items-center justify-center rounded-full font-semibold transition-colors"
-                      style={isSel ? { background: accent, color: "#fff" } : { background: `${accent}1a`, color: accent }}
+                      className="group relative mx-auto flex h-10 w-10 items-center justify-center rounded-full font-semibold"
+                      style={{ color: isSel ? "#fff" : accent }}
                     >
-                      {n}
+                      <Wheel accent={accent} selected={isSel} />
+                      <span className="relative">{n}</span>
                     </Link>
                   );
                 })}
@@ -161,4 +162,29 @@ export function monthCells(ym: string): (string | null)[] {
   const lead = new Date(Date.UTC(y, m - 1, 1)).getUTCDay();
   const count = new Date(Date.UTC(y, m, 0)).getUTCDate();
   return [...Array<null>(lead).fill(null), ...Array.from({ length: count }, (_, i) => `${ym}-${String(i + 1).padStart(2, "0")}`)];
+}
+
+const SPOKES = [0, 45, 90, 135, 180, 225, 270, 315];
+
+/**
+ * An open day drawn as a bike wheel (tyre, spokes, hub) in the booking type's colour; the date sits in the
+ * hub. The chosen day is the same wheel filled in. Spokes turn a little on hover, unless motion is reduced.
+ */
+function Wheel({ accent, selected }: { accent: string; selected: boolean }) {
+  const face = selected ? accent : `${accent}1a`;
+  const tyre = selected ? "rgba(0,0,0,0.22)" : `${accent}66`;
+  const spoke = selected ? "rgba(255,255,255,0.5)" : `${accent}4d`;
+  return (
+    <svg aria-hidden="true" viewBox="0 0 40 40" className="absolute inset-0 h-full w-full">
+      <circle cx="20" cy="20" r="19" fill={face} />
+      <circle cx="20" cy="20" r="17" fill="none" stroke={tyre} strokeWidth="2.5" />
+      <g stroke={spoke} strokeWidth="1" className="origin-center transition-transform duration-500 motion-safe:group-hover:rotate-45" style={{ transformBox: "fill-box" }}>
+        {SPOKES.map((a) => {
+          const r = (a * Math.PI) / 180;
+          return <line key={a} x1={20 + 11.5 * Math.cos(r)} y1={20 + 11.5 * Math.sin(r)} x2={20 + 15.5 * Math.cos(r)} y2={20 + 15.5 * Math.sin(r)} />;
+        })}
+      </g>
+      <circle cx="20" cy="20" r="11.5" fill="none" stroke={spoke} strokeWidth="1" />
+    </svg>
+  );
 }
