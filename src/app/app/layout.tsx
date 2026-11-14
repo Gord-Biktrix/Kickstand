@@ -10,6 +10,8 @@ import { db } from "@/db/client";
 import { canSwitchShowroom, currentShowroom, readOnlyReason } from "@/lib/current-showroom";
 import { listShowrooms } from "@/lib/showroom";
 import { hasRole, PASSWORD_NUDGE_COOKIE, requireUser, roleLabel } from "@/lib/auth";
+import { HeaderMenu } from "@/components/header-menu";
+import { colorOf, ensureDefaultBookingTypes, listBookingTypes, LOCATION_LABEL, type BookingLocation } from "@/lib/booking-types";
 import { signOutAction } from "./actions";
 
 // Three places, one question each (redesign 2026-11): who's coming in (Schedule), what's on the bench (Workshop),
@@ -32,6 +34,10 @@ export default async function StaffLayout({ children }: { children: React.ReactN
   const viewOnly = readOnlyReason(user, showroom, all.find((s) => s.id === user.showroomId) ?? null);
   const homeSlug = all.find((s) => s.id === user.showroomId)?.slug;
   // First-run nudge: people land here via Google/link and don't know a password is optional and where it lives.
+  // "+ New" lists what can be booked here, like Calendly's Create menu, so staff pick the type in one click.
+  await ensureDefaultBookingTypes(db, showroom);
+  const visitTypes = (await listBookingTypes(db, showroom.id)).filter((t) => t.kind === "standard" && t.active);
+  const manager = hasRole(user.role, "manager");
   const nudgePassword = !user.passwordHash && !(await cookies()).get(PASSWORD_NUDGE_COOKIE);
   return (
     <div className="flex flex-1 flex-col">
@@ -59,24 +65,60 @@ export default async function StaffLayout({ children }: { children: React.ReactN
             <form action="/app/search" role="search">
               <input name="q" type="search" placeholder="Search people, bikes, sale #" aria-label="Search customers" className="h-9 w-44 rounded-md border border-chrome-line bg-chrome-2 px-3 text-sm text-white placeholder:text-chrome-muted focus:outline-2 focus:outline-offset-1 focus:outline-action sm:w-64" />
             </form>
-            <Link href="/app/bookings/new" className="btn btn-primary h-9 py-0">+ New</Link>
-            <details className="relative">
-              <summary aria-label="Your menu" className="flex h-9 w-9 cursor-pointer list-none items-center justify-center rounded-md border border-chrome-line bg-chrome-2 text-xs font-semibold text-white hover:bg-chrome-line [&::-webkit-details-marker]:hidden">
-                {initials(user.name)}
-              </summary>
-              <div className="absolute right-0 z-50 mt-2 w-56 overflow-hidden rounded-lg border border-border bg-card text-sm text-foreground shadow-lg">
-                <div className="border-b border-border px-4 py-3">
-                  <p className="font-semibold">{user.name}</p>
-                  <p className="text-xs text-muted">{roleLabel(user.role)} · {showroom.name}</p>
+            <Suspense fallback={<Link href="/app/bookings/new" className="btn btn-primary h-9 py-0">+ New</Link>}>
+              <HeaderMenu label="New" summary={<>+ New <span aria-hidden="true" className="text-xs">▾</span></>} summaryClassName="btn btn-primary h-9 gap-1.5 py-0">
+                <div className="absolute right-0 z-50 mt-2 w-80 max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border border-border bg-card text-sm text-foreground shadow-lg">
+                  <p className="px-4 pt-3 pb-1 text-xs font-bold tracking-wider text-muted uppercase">Book a visit</p>
+                  <nav aria-label="Book a visit" className="flex flex-col pb-2">
+                    {visitTypes.map((t) => (
+                      <Link key={t.id} href={`/app/bookings/new?type=${t.id}`} className="flex gap-3 px-4 py-2.5 hover:bg-background">
+                        <span aria-hidden="true" className="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-[2px]" style={{ background: colorOf(t.color).hex }} />
+                        <span>
+                          <span className="block font-semibold">{t.name}</span>
+                          <span className="block text-xs text-muted">{t.durationMin} min · {LOCATION_LABEL[t.location as BookingLocation]}{t.access === "invite" ? " · invite only" : ""}</span>
+                        </span>
+                      </Link>
+                    ))}
+                    {visitTypes.length === 0 && <p className="px-4 py-2 text-muted">Nothing can be booked here yet.</p>}
+                  </nav>
+                  {showroom.kind !== "online" && (
+                    <div className="border-t border-border py-2">
+                      <Link href="/app/bikes?filter=not_booked" className="flex gap-3 px-4 py-2.5 hover:bg-background">
+                        <span aria-hidden="true" className="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-[2px] bg-[#0f766e]" />
+                        <span>
+                          <span className="block font-semibold">Bike pickup</span>
+                          <span className="block text-xs text-muted">Pick the bike, then a time. Bikes not booked yet.</span>
+                        </span>
+                      </Link>
+                    </div>
+                  )}
+                  {manager && (
+                    <div className="border-t border-border bg-background/60 py-2">
+                      <Link href="/app/settings/booking-types?new=1" className="block px-4 py-2 hover:bg-background">
+                        <span className="block font-semibold">New visit type</span>
+                        <span className="block text-xs text-muted">Something customers can book, with its own rules</span>
+                      </Link>
+                    </div>
+                  )}
                 </div>
-                <nav aria-label="Your menu" className="flex flex-col py-1">
-                  {hasRole(user.role, "manager") && <Link href="/app/settings/booking-types" className="px-4 py-2 hover:bg-background">Settings</Link>}
-                  {hasRole(user.role, "admin") && <Link href="/app/reports" className="px-4 py-2 hover:bg-background">Reports</Link>}
-                  <Link href="/app/account" className="px-4 py-2 hover:bg-background">Your account</Link>
-                  <form action={signOutAction} className="border-t border-border"><button type="submit" className="w-full px-4 py-2 text-left hover:bg-background">Sign out</button></form>
-                </nav>
-              </div>
-            </details>
+              </HeaderMenu>
+            </Suspense>
+            <Suspense fallback={null}>
+              <HeaderMenu label="Your menu" summary={initials(user.name)} summaryClassName="flex h-9 w-9 items-center justify-center rounded-md border border-chrome-line bg-chrome-2 text-xs font-semibold text-white hover:bg-chrome-line">
+                <div className="absolute right-0 z-50 mt-2 w-56 overflow-hidden rounded-lg border border-border bg-card text-sm text-foreground shadow-lg">
+                  <div className="border-b border-border px-4 py-3">
+                    <p className="font-semibold">{user.name}</p>
+                    <p className="text-xs text-muted">{roleLabel(user.role)} · {showroom.name}</p>
+                  </div>
+                  <nav aria-label="Your menu" className="flex flex-col py-1">
+                    {manager && <Link href="/app/settings/booking-types" className="px-4 py-2 hover:bg-background">Settings</Link>}
+                    {hasRole(user.role, "admin") && <Link href="/app/reports" className="px-4 py-2 hover:bg-background">Reports</Link>}
+                    <Link href="/app/account" className="px-4 py-2 hover:bg-background">Your account</Link>
+                    <form action={signOutAction} className="border-t border-border"><button type="submit" className="w-full px-4 py-2 text-left hover:bg-background">Sign out</button></form>
+                  </nav>
+                </div>
+              </HeaderMenu>
+            </Suspense>
           </div>
         </div>
       </header>
