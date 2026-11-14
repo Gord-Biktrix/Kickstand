@@ -54,9 +54,11 @@ export function BookingCalendar({
   const cells = monthCells(shown);
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
-      <div className={`grid ${selected ? "lg:grid-cols-[minmax(240px,300px)_minmax(0,1fr)_220px]" : "lg:grid-cols-[minmax(240px,300px)_minmax(0,1fr)]"}`}>
-        <div className="border-b border-border p-6 lg:border-b-0 lg:border-r">{info}</div>
+    // Columns follow the width of the card, not the window (container queries), so the calendar also lays out
+    // properly inside a narrower staff page: three columns only when there is room for them.
+    <div className="@container overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
+      <div className={`grid ${selected ? "@4xl:grid-cols-[minmax(240px,300px)_minmax(0,1fr)_220px]" : "@3xl:grid-cols-[minmax(240px,300px)_minmax(0,1fr)]"}`}>
+        <div className={`border-b border-border p-6 ${selected ? "@4xl:border-b-0 @4xl:border-r" : "@3xl:border-b-0 @3xl:border-r"}`}>{info}</div>
 
         <div className="p-6">
           <h2 className="text-lg font-semibold">Select a date &amp; time</h2>
@@ -98,7 +100,7 @@ export function BookingCalendar({
         </div>
 
         {selected && (
-          <div className="border-t border-border p-6 lg:border-l lg:border-t-0">
+          <div className="border-t border-border p-6 @4xl:border-l @4xl:border-t-0">
             <p className="mb-3 font-medium">{formatLongDateFromLocal(selected.date)}</p>
             <ul className="max-h-[420px] space-y-2 overflow-y-auto pr-1" aria-label="Available times">
               {selected.slots.map((s) => (

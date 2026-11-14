@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { db } from "@/db/client";
+import { zoneLabel } from "@/app/book/zone";
 import { BookingCalendar, BookingInfo } from "@/components/booking-calendar";
 import { Card, Field, Flash, PageHeader } from "@/components/ui";
 import { requireUser } from "@/lib/auth";
@@ -87,7 +88,7 @@ export default async function NewBookingPage({ searchParams }: { searchParams: P
               date={date}
               time={time}
               accent={colorOf(type.color).hex}
-              zone={tz}
+              zone={zoneLabel(tz)}
               info={<BookingInfo brand={showroom.name} title={type.name} durationMin={type.durationMin} location={LOCATION_LABEL[type.location as BookingLocation]} description={type.access === "invite" ? "Invite only: customers can't book this online." : undefined} />}
             />
           )}

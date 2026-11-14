@@ -4,6 +4,7 @@ import { readAnswers } from "@/lib/booking-questions";
 import { notFound } from "next/navigation";
 import { db } from "@/db/client";
 import { ConfirmButton } from "@/components/confirm-button";
+import { zoneLabel } from "@/app/book/zone";
 import { BookingCalendar, BookingInfo } from "@/components/booking-calendar";
 import { Badge, Card, Flash, PageHeader } from "@/components/ui";
 import { listStaff, requireUser } from "@/lib/auth";
@@ -138,7 +139,7 @@ export default async function BookingPage({ params, searchParams }: { params: Pr
               date={date}
               time={time}
               accent={colorOf(type.color).hex}
-              zone={tz}
+              zone={zoneLabel(tz)}
               info={<BookingInfo brand={showroom.name} title={`Move ${b.customerName}`} durationMin={type.durationMin} location={type.name} extra={<p className="text-sm">Now: {formatLongDate(b.startsAt, tz)} {formatTime(b.startsAt, tz)}</p>} />}
             />
           )}
