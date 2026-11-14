@@ -44,7 +44,7 @@ export function embedScript(origin: string): string {
     var store=clean(el.getAttribute("data-biktrix-booking"));
     if(!store)return;
     var f=frame(url(store,el.getAttribute("data-type"),pre(el)));
-    f.style.cssText="width:100%;border:0;min-height:480px;height:620px;display:block;color-scheme:normal;position:absolute;top:0;visibility:hidden";
+    f.style.cssText="width:100%;border:0;outline:none !important;min-height:480px;height:620px;display:block;color-scheme:normal;position:absolute;top:0;visibility:hidden";
     var ph=skeleton("620px");
     el.innerHTML="";
     if(getComputedStyle(el).position==="static")el.style.position="relative";
@@ -69,7 +69,7 @@ export function embedScript(origin: string): string {
     var box=document.createElement("div");
     box.style.cssText="position:relative;width:100%;max-width:1000px;height:min(760px,calc(100vh - 32px));background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 20px 50px rgba(0,0,0,.35)";
     var f=frame(url(store,type,p));
-    f.style.cssText="width:100%;height:100%;border:0;display:block;color-scheme:normal;position:absolute;top:0;visibility:hidden";
+    f.style.cssText="width:100%;height:100%;border:0;outline:none !important;display:block;color-scheme:normal;position:absolute;top:0;visibility:hidden";
     var ph=skeleton("100%");
     var x=document.createElement("button");
     x.type="button";x.setAttribute("aria-label","Close");x.textContent="\\u00d7";
