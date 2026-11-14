@@ -1,0 +1,1 @@
+ALTER TABLE "booking_types" ALTER COLUMN "color" SET DEFAULT 'orange';

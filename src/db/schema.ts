@@ -359,7 +359,7 @@ export const bookingTypes = pgTable(
     /** true = follow the profile's availability (showrooms.booking_hours); false = this type's own `hours`. */
     useStoreHours: boolean("use_store_hours").notNull().default(false),
     /** Colour key (see BOOKING_COLORS) for the type's row, the booking page and calendar blocks. */
-    color: text("color").notNull().default("blue"),
+    color: text("color").notNull().default("orange"),
     createsWorkOrder: boolean("creates_work_order").notNull().default(false),
     active: boolean("active").notNull().default(true),
     sortOrder: smallint("sort_order").notNull().default(0),

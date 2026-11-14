@@ -40,7 +40,7 @@ export const BOOKING_COLORS = {
 export type BookingColor = keyof typeof BOOKING_COLORS;
 export const isBookingColor = (v: string): v is BookingColor => v in BOOKING_COLORS;
 export function colorOf(key: string | null | undefined) {
-  return BOOKING_COLORS[key && isBookingColor(key) ? key : "blue"];
+  return BOOKING_COLORS[key && isBookingColor(key) ? key : "orange"];
 }
 
 /** Lengths offered as one click in the editor (Calendly-style); any other number goes in "Custom". */
@@ -217,7 +217,7 @@ export function validateBookingType(raw: BookingTypeInput, profileKind: string):
     benchCapacity: int(raw.benchCapacity, 1, 50, "Bookings at the same time"),
     createsWorkOrder: raw.location === "in_person" && raw.createsWorkOrder,
     useStoreHours: !!raw.useStoreHours,
-    color: raw.color && isBookingColor(raw.color) ? raw.color : "blue",
+    color: raw.color && isBookingColor(raw.color) ? raw.color : "orange",
   };
   if (!out.useStoreHours && !Object.keys(out.hours).length) throw new Error("Set the hours it can be booked on at least one day, or use the store's availability.");
   return out;

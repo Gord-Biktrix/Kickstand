@@ -20,7 +20,7 @@ describe("hours editor and calendar helpers", () => {
     const store = { "6": [["10:00", "14:00"]] as [string, string][] };
     expect(effectiveHours({ useStoreHours: true, hours: WEEKDAY_8_TO_4 }, store)).toEqual(store);
     expect(effectiveHours({ useStoreHours: false, hours: WEEKDAY_8_TO_4 }, store)).toEqual(WEEKDAY_8_TO_4);
-    expect(colorOf("nope").hex).toBe(colorOf("blue").hex);
+    expect(colorOf("nope").hex).toBe(colorOf("orange").hex);
   });
 
   it("lays a month out from Sunday", () => {

@@ -35,10 +35,14 @@ export function BookingCalendar({
   const join = base.includes("?") ? "&" : "?";
   const open = new Map(days.map((d) => [d.date, d]));
   const first = days[0]?.date;
+  // Like Calendly: with no day picked, open on the next day that has times, with its times showing. Only in
+  // that day's month, so paging to another month doesn't jump back.
+  const nextOpen = days.find((d) => d.slots.length > 0)?.date;
+  const picked = date ?? (nextOpen && (!month || month === nextOpen.slice(0, 7)) ? nextOpen : undefined);
   const last = days.at(-1)?.date;
-  const thisMonth = (date ?? first ?? new Date().toISOString().slice(0, 10)).slice(0, 7);
+  const thisMonth = (date ?? nextOpen ?? first ?? new Date().toISOString().slice(0, 10)).slice(0, 7);
   const shown = month && /^\d{4}-\d{2}$/.test(month) ? month : thisMonth;
-  const selected = date ? open.get(date) : undefined;
+  const selected = picked ? open.get(picked) : undefined;
   const href = (q: Record<string, string | undefined>) => {
     const parts = Object.entries(q).filter(([, v]) => v).map(([k, v]) => `${k}=${encodeURIComponent(v!)}`);
     return parts.length ? `${base}${join}${parts.join("&")}` : base;
@@ -70,7 +74,7 @@ export function BookingCalendar({
                 {cells.map((c, i) => {
                   if (!c) return <div key={`e${i}`} />;
                   const day = open.get(c);
-                  const isSel = c === date;
+                  const isSel = c === picked;
                   const n = Number(c.slice(8));
                   if (!day) return <div key={c} className="mx-auto flex h-10 w-10 items-center justify-center text-muted/60">{n}</div>;
                   return (

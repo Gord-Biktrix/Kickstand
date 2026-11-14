@@ -150,7 +150,7 @@ function EditorPanel({ t, online, storeHours, profileSlug, close }: { t?: Bookin
               <div className="mt-2 flex flex-wrap gap-1.5" role="radiogroup" aria-label="Colour">
                 {Object.entries(BOOKING_COLORS).map(([key, c]) => (
                   <label key={key} className="cursor-pointer" title={c.label}>
-                    <input type="radio" name="color" value={key} defaultChecked={(t?.color ?? "blue") === key} className="peer sr-only" />
+                    <input type="radio" name="color" value={key} defaultChecked={(t?.color ?? "orange") === key} className="peer sr-only" />
                     <span className="block h-6 w-6 rounded-full ring-offset-2 peer-checked:ring-2 peer-focus-visible:ring-2" style={{ background: c.hex, ["--tw-ring-color" as string]: c.hex }} />
                     <span className="sr-only">{c.label}</span>
                   </label>
