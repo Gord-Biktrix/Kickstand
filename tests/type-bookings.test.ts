@@ -84,7 +84,7 @@ describe("booking a booking type", () => {
     }
   });
 
-  it("with the Slack bot, a booking is one message: changes reply in its thread and update it", async () => {
+  it("with the Slack bot, a booking is one message and changes reply in its thread", async () => {
     const bot = new MemorySlackBot();
     const hook = new MemorySlack();
     setSlackBot(bot);
@@ -102,13 +102,12 @@ describe("booking a booking type", () => {
       expect(bot.posts).toHaveLength(2);
       expect(bot.posts[1].threadTs).toBe(bot.posts[0].ts);
       expect(bot.posts[1].message.text).toMatch(/^🔁 Moved to Tuesday 17 November, 10:30 am/);
-      expect(bot.updates.at(-1)).toMatchObject({ channel: "C07TEST01", ts: bot.posts[0].ts });
-      expect(bot.updates.at(-1)!.message.text).toContain("10:30 am");
 
       await cancelTypeBooking(db, { bookingId: booking.id, actor: "customer", reason: "customer", now: NOW });
       expect(bot.posts[2].threadTs).toBe(bot.posts[0].ts);
       expect(bot.posts[2].message.text).toMatch(/^❌ Cancelled/);
-      expect(bot.updates.at(-1)!.message.text).toMatch(/^❌ Cancelled: Video call/);
+      // The original message is left as posted.
+      expect(bot.updates).toHaveLength(0);
       // Nothing went through the webhook while the bot worked.
       expect(hook.posted).toHaveLength(0);
 

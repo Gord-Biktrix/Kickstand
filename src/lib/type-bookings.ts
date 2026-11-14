@@ -176,8 +176,8 @@ const SLACK_KIND: Record<string, BookingSlackPing["kind"]> = {
 
 /**
  * Tell the store's Slack channel (Settings › Program › Slack) about a booking made, moved or cancelled. With the
- * Slack bot and a channel ID, a booking is one message: changes reply in its thread and the original is updated
- * to show where things stand. Otherwise each change is its own webhook message. Never throws.
+ * Slack bot and a channel ID, a booking is one message and its changes are replies in its thread (the original
+ * is left as it was posted). Otherwise each change is its own webhook message. Never throws.
  */
 async function pingSlack(db: Db, showroom: ShowroomCtx, type: BookingType, b: Booking, metric: string, extra?: Record<string, unknown>) {
   const kind = SLACK_KIND[metric];
@@ -194,8 +194,6 @@ async function pingSlack(db: Db, showroom: ShowroomCtx, type: BookingType, b: Bo
     try {
       if (kind !== "new" && b.slackTs && b.slackChannel) {
         await bot.post(b.slackChannel, bookingThreadReply({ kind, when, previous, url }), b.slackTs);
-        const heading = kind === "cancelled" ? "❌ Cancelled" : `📅 Booking (moved ${b.rescheduleCount > 1 ? `${b.rescheduleCount} times` : "once"})`;
-        await bot.update(b.slackChannel, b.slackTs, bookingSlackMessage({ ...ping, kind, heading }));
         return;
       }
       const ts = await bot.post(channel, bookingSlackMessage({ ...ping, kind, previous }));

@@ -120,7 +120,7 @@ export default async function ProgramPage({ searchParams }: { searchParams: Prom
             <h3 className="text-sm font-semibold">Booking messages in threads</h3>
             <p className="mt-1 mb-3 text-sm text-muted">
               {s.slack_channel_id
-                ? <>Each booking is one message in channel {s.slack_channel_id}; moves and cancellations reply in its thread and update it.{botReady ? "" : " Waiting for SLACK_BOT_TOKEN on the server — until then they go through the webhook."}</>
+                ? <>Each booking is one message in channel {s.slack_channel_id}; moves and cancellations reply in its thread.{botReady ? "" : " Waiting for SLACK_BOT_TOKEN on the server — until then they go through the webhook."}</>
                 : <>Off — each booking change is a new message. To thread them, invite the Slack app to the channel (<code>/invite @BookIt Connect</code>) and paste the channel ID (channel details, at the bottom, starts with C).</>}
             </p>
             {admin && (

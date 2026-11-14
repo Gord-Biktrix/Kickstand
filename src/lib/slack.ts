@@ -6,7 +6,7 @@ import { logger } from "./logger";
  *
  * Booking messages can instead go through the Slack bot (SLACK_BOT_TOKEN, scope chat:write, invited to the
  * channel; the store's channel ID in Settings › Program › Slack). The bot gets each message's id back, so a
- * booking is one message: later moves and cancellations reply in its thread and the original is updated to match.
+ * booking is one message and later moves and cancellations reply in its thread.
  */
 export type SlackMessage = { text: string; blocks?: unknown[] };
 
