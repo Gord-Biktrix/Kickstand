@@ -6,7 +6,7 @@ import { Alert, Card, Field, Flash, PageHeader } from "@/components/ui";
 import { hasRole, requireUser } from "@/lib/auth";
 import { sp, type SearchParams } from "@/lib/flash";
 import { FLAG_KEYS, type ProgramSettings } from "@/lib/settings";
-import { saveProgramSettingsAction, saveSlackWebhookAction, testSlackAction } from "../../actions";
+import { saveProgramSettingsAction, saveSlackChannelAction, saveSlackWebhookAction, testSlackAction } from "../../actions";
 import { currentShowroom } from "@/lib/current-showroom";
 
 export const metadata = { title: "Program settings" };
@@ -47,6 +47,7 @@ export default async function ProgramPage({ searchParams }: { searchParams: Prom
   const q = await searchParams;
   const user = await requireUser("manager");
   const admin = hasRole(user.role, "admin");
+  const botReady = !!process.env.SLACK_BOT_TOKEN;
   const showroom = await currentShowroom();
   const s = showroom.settings;
   const log = await db
@@ -115,6 +116,23 @@ export default async function ProgramPage({ searchParams }: { searchParams: Prom
               {s.slack_webhook_url && <form action={testSlackAction}><button type="submit" className="btn">Send a test message</button></form>}
             </div>
           )}
+          <div className="mt-5 border-t border-border pt-4">
+            <h3 className="text-sm font-semibold">Booking messages in threads</h3>
+            <p className="mt-1 mb-3 text-sm text-muted">
+              {s.slack_channel_id
+                ? <>Each booking is one message in channel {s.slack_channel_id}; moves and cancellations reply in its thread and update it.{botReady ? "" : " Waiting for SLACK_BOT_TOKEN on the server — until then they go through the webhook."}</>
+                : <>Off — each booking change is a new message. To thread them, invite the Slack app to the channel (<code>/invite @BookIt Connect</code>) and paste the channel ID (channel details, at the bottom, starts with C).</>}
+            </p>
+            {admin && (
+              <form action={saveSlackChannelAction} className="flex flex-wrap items-end gap-2">
+                <Field label="Channel ID" htmlFor="slack_channel_id">
+                  <input id="slack_channel_id" name="slack_channel_id" defaultValue={s.slack_channel_id ?? ""} placeholder="C0123ABCD" className="input w-48 font-mono" autoComplete="off" />
+                </Field>
+                <button type="submit" className="btn">Save</button>
+                {s.slack_channel_id && <button type="submit" name="clear" value="1" className="btn btn-danger" formNoValidate>Turn off</button>}
+              </form>
+            )}
+          </div>
         </Card>
         <Card title="Change log">
           <Timeline events={log} tz={showroom.timezone} />

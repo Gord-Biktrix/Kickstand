@@ -3,6 +3,10 @@ import { logger } from "./logger";
 /**
  * Staff pings go to each store's Slack channel through an incoming webhook (Slack app → Incoming
  * Webhooks → Add to channel). One-way: people act in Kickstand from the link in the message.
+ *
+ * Booking messages can instead go through the Slack bot (SLACK_BOT_TOKEN, scope chat:write, invited to the
+ * channel; the store's channel ID in Settings › Program › Slack). The bot gets each message's id back, so a
+ * booking is one message: later moves and cancellations reply in its thread and the original is updated to match.
  */
 export type SlackMessage = { text: string; blocks?: unknown[] };
 
@@ -33,6 +37,66 @@ export class MemorySlack implements SlackPoster {
     }
     this.posted.push({ webhookUrl, message });
   }
+}
+
+/** Posting as the Slack bot: returns the message's ts (its id), which thread replies and updates need. */
+export interface SlackBot {
+  post(channel: string, message: SlackMessage, threadTs?: string): Promise<string>;
+  update(channel: string, ts: string, message: SlackMessage): Promise<void>;
+}
+
+class ApiBot implements SlackBot {
+  constructor(private token: string) {}
+  private async call(method: string, body: Record<string, unknown>) {
+    const res = await fetch(`https://slack.com/api/${method}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json; charset=utf-8", Authorization: `Bearer ${this.token}` },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(10_000),
+    });
+    const json = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; ts?: string };
+    if (!res.ok || !json.ok) throw new Error(`Slack ${method}: ${json.error ?? res.status}`);
+    return json;
+  }
+  async post(channel: string, message: SlackMessage, threadTs?: string) {
+    const json = await this.call("chat.postMessage", { channel, ...message, ...(threadTs ? { thread_ts: threadTs } : {}), unfurl_links: false });
+    return json.ts ?? "";
+  }
+  async update(channel: string, ts: string, message: SlackMessage) {
+    await this.call("chat.update", { channel, ts, ...message });
+  }
+}
+
+export class MemorySlackBot implements SlackBot {
+  posts: { channel: string; message: SlackMessage; threadTs?: string; ts: string }[] = [];
+  updates: { channel: string; ts: string; message: SlackMessage }[] = [];
+  failNext = 0;
+  private n = 0;
+  async post(channel: string, message: SlackMessage, threadTs?: string) {
+    if (this.failNext > 0) {
+      this.failNext--;
+      throw new Error("simulated Slack failure");
+    }
+    const ts = `1700000000.${String(++this.n).padStart(6, "0")}`;
+    this.posts.push({ channel, message, threadTs, ts });
+    return ts;
+  }
+  async update(channel: string, ts: string, message: SlackMessage) {
+    this.updates.push({ channel, ts, message });
+  }
+}
+
+let botOverride: SlackBot | null | undefined;
+
+/** Tests: a fake bot, or null for "no bot configured". */
+export function setSlackBot(b: SlackBot | null | undefined) {
+  botOverride = b;
+}
+
+export function getSlackBot(): SlackBot | null {
+  if (botOverride !== undefined) return botOverride;
+  const token = process.env.SLACK_BOT_TOKEN;
+  return token ? new ApiBot(token) : null;
 }
 
 let override: SlackPoster | null = null;
@@ -92,6 +156,8 @@ export function unbookedPingMessage(p: UnbookedPing): SlackMessage {
 
 export type BookingSlackPing = {
   kind: "new" | "rescheduled" | "cancelled";
+  /** Replaces the heading, e.g. on the original message once the booking has moved or been cancelled. */
+  heading?: string;
   store: string;
   type: string;
   when: string;
@@ -107,7 +173,7 @@ export type BookingSlackPing = {
 /** A booking made, moved or cancelled, for the store's channel (Biktrix Online: #callback-request). */
 export function bookingSlackMessage(p: BookingSlackPing): SlackMessage {
   const e = slackEscape;
-  const head = { new: "📅 New booking", rescheduled: "🔁 Booking moved", cancelled: "❌ Booking cancelled" }[p.kind];
+  const head = p.heading ?? { new: "📅 New booking", rescheduled: "🔁 Booking moved", cancelled: "❌ Booking cancelled" }[p.kind];
   const lines = [
     `*${head}: ${e(p.type)}* · ${e(p.store)}`,
     `*When:* ${e(p.when)}${p.previous ? ` _(was ${e(p.previous)})_` : ""}`,
@@ -120,6 +186,16 @@ export function bookingSlackMessage(p: BookingSlackPing): SlackMessage {
     text: `${head}: ${p.type} · ${p.customer} · ${p.when}`,
     blocks: [{ type: "section", text: { type: "mrkdwn", text: lines.join("\n") } }],
   };
+}
+
+/** The short reply in a booking's thread when it moves or is cancelled (the original carries the details). */
+export function bookingThreadReply(p: { kind: "rescheduled" | "cancelled"; when: string; previous?: string; url: string; by?: string }): SlackMessage {
+  const e = slackEscape;
+  const line = p.kind === "rescheduled"
+    ? `🔁 *Moved to ${e(p.when)}*${p.previous ? ` _(was ${e(p.previous)})_` : ""}`
+    : `❌ *Cancelled* (was ${e(p.when)})`;
+  const text = `${line}${p.by ? ` · ${e(p.by)}` : ""} · <${p.url}|Open in Kickstand>`;
+  return { text: line.replace(/[*_]/g, ""), blocks: [{ type: "section", text: { type: "mrkdwn", text } }] };
 }
 
 /** Post, logging instead of throwing. Returns the error message on failure. */

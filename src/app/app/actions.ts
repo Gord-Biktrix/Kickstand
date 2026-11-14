@@ -13,7 +13,7 @@ import { validateImport } from "@/lib/csv";
 import { logEvent } from "@/lib/events";
 import { bool, dollarsToCents, errorMessage, num, str, withFlash } from "@/lib/flash";
 import { normalizePhone } from "@/lib/phone";
-import { isSlackWebhookUrl, postSlack } from "@/lib/slack";
+import { getSlackBot, isSlackWebhookUrl, postSlack } from "@/lib/slack";
 import { FLAG_KEYS, PROGRAM_KEYS, settingsSchema, validateSettings, type ProgramSettings } from "@/lib/settings";
 import { getCapacityConfig, patchShowroomSettings } from "@/lib/showroom";
 import { formatDateTime, normalizeTime } from "@/lib/time";
@@ -936,6 +936,28 @@ export async function saveSlackWebhookAction(formData: FormData) {
     // Log that it changed, never the URL itself (it lets anyone post to the channel).
     await logEvent(db, { showroomId: showroom.id, type: "settings_changed", actor: user.id, payload: { area: "program", changes: { slack_webhook_url: { from: showroom.settings.slack_webhook_url ? "set" : null, to: url ? "set" : null } } } });
     return url ? "Slack connected. Send a test message to check the channel." : "Slack disconnected.";
+  });
+}
+
+/** The channel ID the Slack bot posts booking messages to (threaded). Needs SLACK_BOT_TOKEN on the server. */
+export async function saveSlackChannelAction(formData: FormData) {
+  return run("/app/settings/program", async () => {
+    const user = await requireActor("admin");
+    const showroom = await currentShowroom();
+    const raw = bool(formData, "clear") ? "" : str(formData, "slack_channel_id").trim().toUpperCase();
+    if (raw && !/^[CG][A-Z0-9]{6,}$/.test(raw)) throw new Error("That isn't a Slack channel ID. In Slack, open the channel's details: the ID (starting with C) is at the bottom.");
+    const id = raw || null;
+    await patchShowroomSettings(db, showroom.id, { slack_channel_id: id });
+    await logEvent(db, { showroomId: showroom.id, type: "settings_changed", actor: user.id, payload: { area: "program", changes: { slack_channel_id: { from: showroom.settings.slack_channel_id, to: id } } } });
+    if (!id) return "Booking messages go through the webhook again.";
+    const bot = getSlackBot();
+    if (!bot) return "Saved. Booking messages will thread once SLACK_BOT_TOKEN is set on the server.";
+    try {
+      await bot.post(id, { text: `Kickstand test: ${showroom.name} booking messages will post here, with changes in each booking's thread.` });
+    } catch (err) {
+      throw new Error(`Saved, but Slack didn't accept a test message (${err instanceof Error ? err.message : String(err)}). Invite the app to the channel: /invite @BookIt Connect.`);
+    }
+    return "Saved, and a test message went to the channel.";
   });
 }
 

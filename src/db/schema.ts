@@ -419,6 +419,9 @@ export const bookings = pgTable(
     customerNote: text("customer_note").notNull().default(""),
     /** The booking form's questions as asked, with the customer's answers: [{ question, answer }]. */
     answers: jsonb("answers").notNull().default([]),
+    /** The booking's message in the store's Slack channel (bot posting), so later changes reply in its thread. */
+    slackChannel: text("slack_channel"),
+    slackTs: text("slack_ts"),
     tokenHash: text("token_hash").notNull().unique(),
     tokenEnc: text("token_enc").notNull(),
     createdBy: text("created_by").notNull(),

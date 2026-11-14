@@ -141,6 +141,13 @@
       "when": 1794638013464,
       "tag": "0019_normal_lethal_legion",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1794698820711,
+      "tag": "0020_opposite_the_spike",
+      "breakpoints": true
     }
   ]
 }

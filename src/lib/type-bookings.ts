@@ -5,7 +5,7 @@
  * "Cancelled"); the flow in Klaviyo owns the wording and channel, as for pickups.
  */
 import { and, asc, between, desc, eq, isNotNull, ne, or, sql } from "drizzle-orm";
-import { bookingSlackMessage, postSlack, type BookingSlackPing } from "./slack";
+import { bookingSlackMessage, bookingThreadReply, getSlackBot, postSlack, type BookingSlackPing } from "./slack";
 import { collectAnswers, readAnswers, readQuestions } from "./booking-questions";
 import type { Db, DbOrTx } from "@/db/client";
 import { bookings, bookingTypes, events, orders, type Booking, type BookingType } from "@/db/schema";
@@ -174,25 +174,39 @@ const SLACK_KIND: Record<string, BookingSlackPing["kind"]> = {
   [BOOKING_METRIC.cancelled]: "cancelled",
 };
 
-/** Tell the store's Slack channel (Settings › Program › Slack) about a booking made, moved or cancelled. Never throws. */
-async function pingSlack(showroom: ShowroomCtx, type: BookingType, b: Booking, metric: string, extra?: Record<string, unknown>) {
+/**
+ * Tell the store's Slack channel (Settings › Program › Slack) about a booking made, moved or cancelled. With the
+ * Slack bot and a channel ID, a booking is one message: changes reply in its thread and the original is updated
+ * to show where things stand. Otherwise each change is its own webhook message. Never throws.
+ */
+async function pingSlack(db: Db, showroom: ShowroomCtx, type: BookingType, b: Booking, metric: string, extra?: Record<string, unknown>) {
   const kind = SLACK_KIND[metric];
-  const hook = showroom.settings.slack_webhook_url;
-  if (!kind || !hook) return;
+  if (!kind) return;
   const tz = showroom.timezone;
-  await postSlack(hook, bookingSlackMessage({
-    kind,
-    store: showroom.name,
-    type: type.name,
-    when: `${formatLongDate(b.startsAt, tz)}, ${formatTime(b.startsAt, tz)}–${formatTime(b.endsAt, tz)}`,
-    previous: typeof extra?.previous_display === "string" ? extra.previous_display : undefined,
-    customer: b.customerName,
-    phone: b.customerPhone,
-    email: b.customerEmail,
-    answers: readAnswers(b.answers),
-    note: b.customerNote,
-    url: `${baseUrl()}/app/bookings/${b.id}`,
-  }));
+  const when = `${formatLongDate(b.startsAt, tz)}, ${formatTime(b.startsAt, tz)}–${formatTime(b.endsAt, tz)}`;
+  const previous = typeof extra?.previous_display === "string" ? extra.previous_display : undefined;
+  const url = `${baseUrl()}/app/bookings/${b.id}`;
+  const ping = { store: showroom.name, type: type.name, when, customer: b.customerName, phone: b.customerPhone, email: b.customerEmail, answers: readAnswers(b.answers), note: b.customerNote, url };
+
+  const bot = getSlackBot();
+  const channel = showroom.settings.slack_channel_id;
+  if (bot && channel) {
+    try {
+      if (kind !== "new" && b.slackTs && b.slackChannel) {
+        await bot.post(b.slackChannel, bookingThreadReply({ kind, when, previous, url }), b.slackTs);
+        const heading = kind === "cancelled" ? "❌ Cancelled" : `📅 Booking (moved ${b.rescheduleCount > 1 ? `${b.rescheduleCount} times` : "once"})`;
+        await bot.update(b.slackChannel, b.slackTs, bookingSlackMessage({ ...ping, kind, heading }));
+        return;
+      }
+      const ts = await bot.post(channel, bookingSlackMessage({ ...ping, kind, previous }));
+      if (ts) await db.update(bookings).set({ slackChannel: channel, slackTs: ts }).where(eq(bookings.id, b.id));
+      return;
+    } catch (err) {
+      logger.warn({ err: err instanceof Error ? err.message : String(err), bookingId: b.id }, "slack bot post failed; trying the webhook");
+    }
+  }
+  const hook = showroom.settings.slack_webhook_url;
+  if (hook) await postSlack(hook, bookingSlackMessage({ ...ping, kind, previous }));
 }
 
 /** "Question: answer" lines, then the free-text note, for Slack and plain-text templates. */
@@ -246,7 +260,7 @@ async function notifyBooking(
     status = "failed";
     logger.warn({ err: err instanceof Error ? err.message : String(err), metric, bookingId: booking.id }, "booking event not sent");
   }
-  await pingSlack(showroom, type, booking, metric, args.extra);
+  await pingSlack(db, showroom, type, booking, metric, args.extra);
   await db.insert(events).values({
     showroomId: showroom.id,
     type: `booking_${metric.replace(/^Booking:\s*/, "").toLowerCase().replace(/\s+/g, "_")}`,

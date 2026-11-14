@@ -34,6 +34,8 @@ export const settingsSchema = z.object({
   staff_ping_days: z.number().int().min(0).max(60).default(7),
   /** Slack incoming-webhook URL for this store's channel (admin only). Null = no Slack pings. */
   slack_webhook_url: z.string().url().nullable().default(null),
+  /** Channel ID (C…) the Kickstand Slack bot posts booking messages to, threading later changes. Needs SLACK_BOT_TOKEN. */
+  slack_channel_id: z.string().regex(/^[CG][A-Z0-9]{6,}$/).nullable().default(null),
   clock_run_hour_local: z.number().int().min(0).max(23).default(7),
   terms_v2_effective_date: z
     .string()

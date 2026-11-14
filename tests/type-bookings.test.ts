@@ -4,7 +4,8 @@ import type { Db } from "@/db/client";
 import { bookings, events, type BookingType } from "@/db/schema";
 import { createBookingType, validateBookingType, WEEKDAY_8_TO_4, type BookingTypeInput } from "@/lib/booking-types";
 import { MemoryNotifier, setNotifier } from "@/lib/notifier";
-import { MemorySlack, setSlackPoster } from "@/lib/slack";
+import { MemorySlack, MemorySlackBot, setSlackBot, setSlackPoster } from "@/lib/slack";
+import { getShowroomById, patchShowroomSettings } from "@/lib/showroom";
 import { SUGGESTED_CALL_QUESTIONS } from "@/lib/booking-questions";
 import type { ShowroomCtx } from "@/lib/showroom";
 import { createShowroom } from "@/lib/showroom-admin";
@@ -79,6 +80,44 @@ describe("booking a booking type", () => {
       await createTypeBooking(db, { showroom: online, type: withQs, startsAt: slot("12:00"), details, createdBy: "customer", now: NOW, answers });
       expect(slack.posted).toHaveLength(1);
     } finally {
+      setSlackPoster(null);
+    }
+  });
+
+  it("with the Slack bot, a booking is one message: changes reply in its thread and update it", async () => {
+    const bot = new MemorySlackBot();
+    const hook = new MemorySlack();
+    setSlackBot(bot);
+    setSlackPoster(hook);
+    try {
+      await patchShowroomSettings(db, online.id, { slack_channel_id: "C07TEST01", slack_webhook_url: "https://hooks.slack.com/services/T/B/x" });
+      const store = (await getShowroomById(db, online.id))!;
+      const { booking } = await createTypeBooking(db, { showroom: store, type, startsAt: slot("10:00"), details, createdBy: "customer", now: NOW });
+      expect(bot.posts).toHaveLength(1);
+      expect(bot.posts[0]).toMatchObject({ channel: "C07TEST01", threadTs: undefined });
+      const [saved] = await db.select().from(bookings).where(eq(bookings.id, booking.id));
+      expect(saved).toMatchObject({ slackChannel: "C07TEST01", slackTs: bot.posts[0].ts });
+
+      await rescheduleTypeBooking(db, { bookingId: booking.id, startsAt: slot("10:30"), actor: "customer", now: NOW });
+      expect(bot.posts).toHaveLength(2);
+      expect(bot.posts[1].threadTs).toBe(bot.posts[0].ts);
+      expect(bot.posts[1].message.text).toMatch(/^🔁 Moved to Tuesday 17 November, 10:30 am/);
+      expect(bot.updates.at(-1)).toMatchObject({ channel: "C07TEST01", ts: bot.posts[0].ts });
+      expect(bot.updates.at(-1)!.message.text).toContain("10:30 am");
+
+      await cancelTypeBooking(db, { bookingId: booking.id, actor: "customer", reason: "customer", now: NOW });
+      expect(bot.posts[2].threadTs).toBe(bot.posts[0].ts);
+      expect(bot.posts[2].message.text).toMatch(/^❌ Cancelled/);
+      expect(bot.updates.at(-1)!.message.text).toMatch(/^❌ Cancelled: Video call/);
+      // Nothing went through the webhook while the bot worked.
+      expect(hook.posted).toHaveLength(0);
+
+      // The bot failing falls back to the webhook, so the channel still hears about it.
+      bot.failNext = 1;
+      await createTypeBooking(db, { showroom: store, type, startsAt: slot("11:00"), details, createdBy: "customer", now: NOW });
+      expect(hook.posted).toHaveLength(1);
+    } finally {
+      setSlackBot(undefined);
       setSlackPoster(null);
     }
   });
