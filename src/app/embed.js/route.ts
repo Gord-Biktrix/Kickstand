@@ -1,41 +1,28 @@
+import { embedScript } from "@/lib/embed-script";
 import { baseUrl } from "@/lib/messages";
 
 /**
- * The website embed. On any page of an allowed site (see BOOKING_EMBED_ORIGINS in next.config.ts):
+ * The website embed, three ways (like Calendly), on any page of an allowed site (BOOKING_EMBED_ORIGINS in
+ * next.config.ts). Load the script once per page:
  *
- *   <div data-biktrix-booking="vancouver" data-type="test-ride"></div>
  *   <script src="https://<kickstand>/embed.js" async></script>
  *
- * Each div becomes an iframe of /book/<store>[/<type>] that grows to its content's height (the booking
- * pages post their height to the parent). data-type is optional: without it the store's list of types shows.
+ * Inline — the booking calendar in the page, growing to fit:
+ *   <div data-biktrix-booking="vancouver" data-type="test-ride"></div>
+ *
+ * Popup button — a floating button in the bottom-right corner that opens the calendar over the page:
+ *   <div data-biktrix-popup-button="vancouver" data-type="test-ride" data-text="Book a test ride"
+ *        data-color="#ff6b1a" data-text-color="#17181a"></div>
+ *
+ * Popup link — any element; clicking it opens the calendar over the page:
+ *   <a href="https://<kickstand>/book/vancouver/test-ride" data-biktrix-popup="vancouver" data-type="test-ride">Book a test ride</a>
+ *
+ * Every form takes data-name / data-email / data-phone to fill in the customer's details, and data-type is
+ * optional (without it the store's list of types shows). Scripts can also call
+ * window.BiktrixBooking.open("vancouver", "test-ride", { name, email, phone }).
  */
 export function GET() {
-  const origin = baseUrl();
-  const js = `(function(){
-  var ORIGIN=${JSON.stringify(origin)};
-  function mount(el){
-    if(el.getAttribute("data-biktrix-mounted"))return;
-    var store=(el.getAttribute("data-biktrix-booking")||"").replace(/[^a-z0-9-]/gi,"");
-    if(!store)return;
-    var type=(el.getAttribute("data-type")||"").replace(/[^a-z0-9-]/gi,"");
-    var f=document.createElement("iframe");
-    f.src=ORIGIN+"/book/"+store+(type?"/"+type:"");
-    f.title="Book an appointment";
-    f.loading="lazy";
-    f.style.cssText="width:100%;border:0;min-height:480px;display:block;color-scheme:normal";
-    f.setAttribute("allow","clipboard-write");
-    el.setAttribute("data-biktrix-mounted","1");
-    el.appendChild(f);
-  }
-  function all(){var els=document.querySelectorAll("[data-biktrix-booking]");for(var i=0;i<els.length;i++)mount(els[i]);}
-  window.addEventListener("message",function(e){
-    if(e.origin!==ORIGIN||!e.data||e.data.type!=="biktrix-booking:height")return;
-    var frames=document.querySelectorAll("[data-biktrix-booking] iframe");
-    for(var i=0;i<frames.length;i++){if(frames[i].contentWindow===e.source){frames[i].style.height=Math.max(320,Math.ceil(e.data.height))+"px";}}
-  });
-  if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",all);else all();
-})();`;
-  return new Response(js, {
+  return new Response(embedScript(baseUrl()), {
     headers: { "Content-Type": "application/javascript; charset=utf-8", "Cache-Control": "public, max-age=300", "Access-Control-Allow-Origin": "*" },
   });
 }

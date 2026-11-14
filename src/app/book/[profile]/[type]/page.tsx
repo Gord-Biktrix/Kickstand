@@ -29,7 +29,11 @@ export default async function BookTypePage({ params, searchParams }: { params: P
   const time = sp(q.time);
   const month = sp(q.month);
   const slot = date && time ? days.find((d) => d.date === date)?.slots.find((s) => s.time === time) : undefined;
-  const base = `/book/${showroom.slug}/${type.slug}`;
+  // Details passed in by a share link or the website embed (data-name / data-email / data-phone) fill the form.
+  const prefill = { name: sp(q.name)?.slice(0, 200), email: sp(q.email)?.slice(0, 200), phone: sp(q.phone)?.slice(0, 40) };
+  const prefillQuery = new URLSearchParams(Object.entries(prefill).filter((e): e is [string, string] => !!e[1])).toString();
+  const base = `/book/${showroom.slug}/${type.slug}${prefillQuery ? `?${prefillQuery}` : ""}`;
+  const join = prefillQuery ? "&" : "?";
   const error = sp(q.error);
   const accent = colorOf(type.color).hex;
   const where = type.location === "in_person" && showroom.addressLine ? showroom.addressLine : LOCATION_LABEL[type.location as BookingLocation];
@@ -46,7 +50,7 @@ export default async function BookTypePage({ params, searchParams }: { params: P
 
   return (
     <div className="space-y-4">
-      <Link href={`/book/${showroom.slug}`} className="text-sm text-accent underline">← All appointment types</Link>
+      <Link href={`/book/${showroom.slug}${prefillQuery ? `?${prefillQuery}` : ""}`} className="text-sm text-accent underline">← All appointment types</Link>
       {error && <Alert tone="danger">{error}</Alert>}
       {date && time && !slot && <Alert tone="danger">That time was just taken or is no longer open. Please pick another.</Alert>}
       {slot && sp(q.confirm) === "1" ? (
@@ -56,16 +60,16 @@ export default async function BookTypePage({ params, searchParams }: { params: P
             <p className="mt-3 text-xs text-muted">{zoneLabel(tz)}</p>
           </div>
           <div className="p-6">
-            <Link href={`${base}?month=${date!.slice(0, 7)}&date=${date}&time=${time}`} className="text-sm text-accent underline">← Back</Link>
+            <Link href={`${base}${join}month=${date!.slice(0, 7)}&date=${date}&time=${time}`} className="text-sm text-accent underline">← Back</Link>
             <h2 className="mt-2 text-lg font-semibold">Enter details</h2>
             <form action={bookTypeAction.bind(null, showroom.slug, type.slug)} className="mt-4 max-w-md space-y-3">
               <input type="hidden" name="starts_at" value={slot.startsAt.toISOString()} />
               <input type="hidden" name="date" value={date} />
               <input type="hidden" name="time" value={time} />
-              <Field label="Name" htmlFor="bk_name"><input id="bk_name" name="name" required autoComplete="name" className="input" /></Field>
-              <Field label="Email" htmlFor="bk_email"><input id="bk_email" name="email" type="email" autoComplete="email" className="input" required={type.location === "video"} /></Field>
+              <Field label="Name" htmlFor="bk_name"><input id="bk_name" name="name" required autoComplete="name" defaultValue={prefill.name} className="input" /></Field>
+              <Field label="Email" htmlFor="bk_email"><input id="bk_email" name="email" type="email" autoComplete="email" defaultValue={prefill.email} className="input" required={type.location === "video"} /></Field>
               <Field label="Phone" htmlFor="bk_phone" hint={type.location === "phone" ? "We'll call you on this number." : "Email, phone or both, so we can confirm."}>
-                <input id="bk_phone" name="phone" type="tel" autoComplete="tel" className="input" required={type.location === "phone"} />
+                <input id="bk_phone" name="phone" type="tel" autoComplete="tel" defaultValue={prefill.phone} className="input" required={type.location === "phone"} />
               </Field>
               <label className="flex items-start gap-3 text-sm">
                 <input type="checkbox" name="sms_consent" className="mt-1 h-4 w-4 rounded border-border accent-accent" />

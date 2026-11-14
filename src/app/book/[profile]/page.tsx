@@ -11,7 +11,10 @@ export async function generateMetadata({ params }: { params: Promise<{ profile: 
 }
 
 /** A profile's public booking page, Calendly-style: one card per public, switched-on type. Bike pickup is invite-only, so never listed. */
-export default async function ProfileBookingPage({ params }: { params: Promise<{ profile: string }> }) {
+export default async function ProfileBookingPage({ params, searchParams }: { params: Promise<{ profile: string }>; searchParams: Promise<Record<string, string | string[] | undefined>> }) {
+  // Keep a share link's / embed's prefilled details (name, email, phone) when the customer picks a type.
+  const sq = await searchParams;
+  const keep = new URLSearchParams(["name", "email", "phone"].flatMap((k) => (typeof sq[k] === "string" && sq[k] ? [[k, (sq[k] as string).slice(0, 200)]] : []))).toString();
   const { profile } = await params;
   const showroom = await getShowroom(db, profile).catch(() => null);
   if (!showroom) notFound();
@@ -31,7 +34,7 @@ export default async function ProfileBookingPage({ params }: { params: Promise<{
         <ul className="grid gap-4 sm:grid-cols-2">
           {types.map((t) => (
             <li key={t.id}>
-              <Link href={`/book/${showroom.slug}/${t.slug}`} className="block h-full rounded-xl border border-border bg-card p-5 shadow-sm hover:shadow-md focus-visible:outline-2 focus-visible:outline-accent" style={{ borderTop: `6px solid ${colorOf(t.color).hex}` }}>
+              <Link href={`/book/${showroom.slug}/${t.slug}${keep ? `?${keep}` : ""}`} className="block h-full rounded-xl border border-border bg-card p-5 shadow-sm hover:shadow-md focus-visible:outline-2 focus-visible:outline-accent" style={{ borderTop: `6px solid ${colorOf(t.color).hex}` }}>
                 <div className="text-lg font-semibold">{t.name}</div>
                 <div className="mt-1 text-sm text-muted">{t.durationMin} min · {LOCATION_LABEL[t.location as BookingLocation]}</div>
                 {t.description && <p className="mt-2 text-sm">{t.description}</p>}

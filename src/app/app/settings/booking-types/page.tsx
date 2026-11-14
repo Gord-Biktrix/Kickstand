@@ -25,6 +25,8 @@ import {
 import { currentShowroom } from "@/lib/current-showroom";
 import { sp, type SearchParams } from "@/lib/flash";
 import { baseUrl } from "@/lib/messages";
+import { EMBED_HOWS, type EmbedHow } from "@/lib/embed-script";
+import { SharePanel } from "./share-panel";
 import { createBookingTypeAction, setBookingTypeActiveAction, updateBookingTypeAction } from "../../actions";
 
 export const metadata = { title: "Booking types" };
@@ -45,6 +47,9 @@ export default async function BookingTypesPage({ searchParams }: { searchParams:
   const online = showroom.kind === "online";
   const editing = sp(q.edit) ? types.find((t) => t.id === sp(q.edit)) : undefined;
   const creating = sp(q.new) === "1";
+  const shareId = sp(q.share);
+  const sharing = shareId === "all" ? null : shareId ? types.find((t) => t.id === shareId && t.kind === "standard") : undefined;
+  const how = (EMBED_HOWS.some((h) => h.key === sp(q.how)) ? sp(q.how) : "inline") as EmbedHow;
   const root = baseUrl();
   const close = "/app/settings/booking-types";
 
@@ -66,11 +71,7 @@ export default async function BookingTypesPage({ searchParams }: { searchParams:
         <span className="text-muted">Booking page:</span>
         <a href={`/book/${showroom.slug}`} target="_blank" rel="noreferrer" className="font-medium underline">{root}/book/{showroom.slug}</a>
         <CopyButton text={`${root}/book/${showroom.slug}`} />
-        <details className="w-full">
-          <summary className="cursor-pointer text-muted">Put it on the website</summary>
-          <p className="mt-2 text-muted">Paste where the booking box should appear (Shopify: a Custom Liquid block). It grows to fit. For one type only, add <code className="text-xs">data-type=&quot;…&quot;</code> with the type&apos;s id, the end of its link.</p>
-          <pre className="mt-2 overflow-x-auto rounded bg-card p-2 text-xs"><code>{`<div data-biktrix-booking="${showroom.slug}"></div>\n<script src="${root}/embed.js" async></script>`}</code></pre>
-        </details>
+        <Link href={`${close}?share=all`} className="btn btn-sm">Share / embed</Link>
       </div>
 
       <ul className="overflow-hidden rounded-xl border border-border bg-card">
@@ -80,6 +81,9 @@ export default async function BookingTypesPage({ searchParams }: { searchParams:
       </ul>
       <p className="mt-3 text-xs text-muted">Store availability: {hoursSummary(storeHours)} · <Link href="/app/settings/availability" className="underline">change</Link></p>
 
+      {sharing !== undefined && (
+        <SharePanel t={sharing} storeSlug={showroom.slug} storeName={showroom.name} root={root} close={close} how={how} text={sp(q.text)} color={sp(q.color)} textColor={sp(q.text_color)} />
+      )}
       {(editing || creating) && (
         <EditorPanel t={editing} online={online} storeHours={storeHours} profileSlug={showroom.slug} close={close} />
       )}
@@ -102,7 +106,7 @@ function TypeRow({ t, profileSlug, root, storeHours, selected }: { t: BookingTyp
         <p className="truncate text-sm text-muted">{meta}{t.createsWorkOrder ? " · creates a Lightspeed work order" : ""}</p>
       </div>
       <div className="flex flex-wrap items-center gap-2">
-        {linkable && t.active && <CopyButton text={link} />}
+        {linkable && t.active && <Link href={`/app/settings/booking-types?share=${t.id}`} className="btn btn-sm">Share</Link>}
         {linkable && t.active && <a href={link} target="_blank" rel="noreferrer" className="btn btn-sm" aria-label={`Open ${t.name} booking page`}>Open ↗</a>}
         {!pickup && (
           <form action={setBookingTypeActiveAction.bind(null, t.id, !t.active)}>
