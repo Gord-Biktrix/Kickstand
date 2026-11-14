@@ -17,15 +17,40 @@ export function embedScript(origin: string): string {
     f.setAttribute("allow","clipboard-write");
     return f;
   }
+  // A grey placeholder calendar that pulses until the booking page is ready, so the space never sits blank.
+  var css=null;
+  function skeleton(h){
+    if(!css){css=document.createElement("style");css.textContent="@keyframes bkpulse{50%{opacity:.45}}";document.head.appendChild(css);}
+    var bar=function(w,hh,mt){return '<div style="width:'+w+';height:'+hh+'px;margin-top:'+mt+'px;border-radius:6px;background:#e7e5e4"></div>';};
+    var dots="";for(var i=0;i<28;i++)dots+='<span style="width:30px;height:30px;border-radius:50%;background:'+(i%7>0&&i%7<6&&i>8?"#fde4d3":"#f1f0ee")+';justify-self:center"></span>';
+    var d=document.createElement("div");
+    d.setAttribute("role","status");d.setAttribute("aria-label","Loading available times");
+    d.style.cssText="box-sizing:border-box;height:"+h+";padding:16px;font-family:system-ui,-apple-system,sans-serif";
+    d.innerHTML='<div style="display:flex;flex-wrap:wrap;gap:24px;height:100%;box-sizing:border-box;border:1px solid #e7e5e4;border-radius:16px;background:#fff;padding:24px;animation:bkpulse 1.4s ease-in-out infinite">'
+      +'<div style="flex:1 1 200px">'+bar("30%",12,0)+bar("50%",12,14)+bar("80%",26,18)+bar("40%",12,18)+bar("60%",12,12)+'</div>'
+      +'<div style="flex:2 1 300px">'+bar("45%",18,0)+'<div style="display:grid;grid-template-columns:repeat(7,1fr);row-gap:14px;margin-top:28px">'+dots+'</div>'
+      +'<p style="margin:24px 0 0;color:#78716c;font-size:14px">Loading available times…</p></div></div>';
+    return d;
+  }
+  // Show the frame once the booking page has rendered (it posts its height) or finished loading, whichever is first.
+  function reveal(f,ph){
+    var done=false;
+    function show(){if(done)return;done=true;if(ph&&ph.parentNode)ph.parentNode.removeChild(ph);f.style.position="";f.style.visibility="";f.style.top="";}
+    f.addEventListener("load",show);
+    f._bkShow=show;
+  }
   function mount(el){
     if(el.getAttribute("data-biktrix-mounted"))return;
     var store=clean(el.getAttribute("data-biktrix-booking"));
     if(!store)return;
     var f=frame(url(store,el.getAttribute("data-type"),pre(el)));
-    f.loading="lazy";
-    f.style.cssText="width:100%;border:0;min-height:480px;display:block;color-scheme:normal";
+    f.style.cssText="width:100%;border:0;min-height:480px;height:620px;display:block;color-scheme:normal;position:absolute;top:0;visibility:hidden";
+    var ph=skeleton("620px");
+    el.innerHTML="";
+    if(getComputedStyle(el).position==="static")el.style.position="relative";
     el.setAttribute("data-biktrix-mounted","1");
-    el.appendChild(f);
+    el.appendChild(ph);el.appendChild(f);
+    reveal(f,ph);
   }
   var overlay=null,lastFocus=null;
   function close(){
@@ -44,12 +69,14 @@ export function embedScript(origin: string): string {
     var box=document.createElement("div");
     box.style.cssText="position:relative;width:100%;max-width:1000px;height:min(760px,calc(100vh - 32px));background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 20px 50px rgba(0,0,0,.35)";
     var f=frame(url(store,type,p));
-    f.style.cssText="width:100%;height:100%;border:0;display:block;color-scheme:normal";
+    f.style.cssText="width:100%;height:100%;border:0;display:block;color-scheme:normal;position:absolute;top:0;visibility:hidden";
+    var ph=skeleton("100%");
     var x=document.createElement("button");
     x.type="button";x.setAttribute("aria-label","Close");x.textContent="\\u00d7";
     x.style.cssText="position:absolute;top:8px;right:8px;z-index:1;width:40px;height:40px;border:0;border-radius:50%;background:#17181a;color:#fff;font:600 22px/1 system-ui,sans-serif;cursor:pointer";
     x.onclick=close;
-    box.appendChild(x);box.appendChild(f);overlay.appendChild(box);
+    box.appendChild(x);box.appendChild(ph);box.appendChild(f);overlay.appendChild(box);
+    reveal(f,ph);
     overlay.addEventListener("click",function(e){if(e.target===overlay)close();});
     document.body.appendChild(overlay);
     document.documentElement.style.overflow="hidden";
@@ -80,8 +107,13 @@ export function embedScript(origin: string): string {
   document.addEventListener("keydown",function(e){if(e.key==="Escape")close();});
   window.addEventListener("message",function(e){
     if(e.origin!==ORIGIN||!e.data||e.data.type!=="biktrix-booking:height")return;
-    var frames=document.querySelectorAll("[data-biktrix-booking] iframe");
-    for(var i=0;i<frames.length;i++){if(frames[i].contentWindow===e.source){frames[i].style.height=Math.max(320,Math.ceil(e.data.height))+"px";}}
+    var frames=document.querySelectorAll("[data-biktrix-booking] iframe, [role=dialog] iframe");
+    for(var i=0;i<frames.length;i++){
+      var f=frames[i];
+      if(f.contentWindow!==e.source)continue;
+      if(f._bkShow)f._bkShow();
+      if(f.parentNode&&f.parentNode.hasAttribute("data-biktrix-booking"))f.style.height=Math.max(320,Math.ceil(e.data.height))+"px";
+    }
   });
   window.BiktrixBooking={open:open,close:close};
   if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",all);else all();
@@ -102,7 +134,7 @@ export function embedSnippet(args: { root: string; store: string; type: string |
   const { root, store, type, how } = args;
   const typeAttr = type ? ` data-type="${attr(type)}"` : "";
   const script = `<script src="${root}/embed.js" async></script>`;
-  if (how === "inline") return `<div data-biktrix-booking="${attr(store)}"${typeAttr}></div>\n${script}`;
+  if (how === "inline") return `<div data-biktrix-booking="${attr(store)}"${typeAttr} style="min-height:620px"></div>\n${script}`;
   if (how === "button") {
     return `<div data-biktrix-popup-button="${attr(store)}"${typeAttr} data-text="${attr(args.text)}" data-color="${attr(args.color)}" data-text-color="${attr(args.textColor)}"></div>\n${script}`;
   }
