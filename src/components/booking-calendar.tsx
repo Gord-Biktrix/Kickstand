@@ -173,21 +173,19 @@ const SPOKES = [0, 45, 90, 135, 180, 225, 270, 315];
  * hub. The chosen day is the same wheel filled in. Spokes turn a little on hover, unless motion is reduced.
  */
 function Wheel({ accent, selected }: { accent: string; selected: boolean }) {
-  const face = selected ? accent : `${accent}1a`;
-  // The tyre: a dark rubber ring round the outside, the same on every open day.
-  const tyre = "#17181a";
-  const spoke = selected ? "rgba(255,255,255,0.5)" : `${accent}4d`;
+  // A bike wheel seen side-on: a thick black tyre with tread marks, and the hub (in the type's colour) where the
+  // date sits. The picked day gets a solid hub; the others a light one.
+  const hub = selected ? accent : `color-mix(in srgb, ${accent} 12%, white)`;
   return (
     <svg aria-hidden="true" viewBox="0 0 40 40" className="absolute inset-0 h-full w-full">
-      <circle cx="20" cy="20" r="18" fill={face} />
-      <circle cx="20" cy="20" r="18" fill="none" stroke={tyre} strokeWidth="2.5" />
-      <g stroke={spoke} strokeWidth="1" className="origin-center transition-transform duration-500 motion-safe:group-hover:rotate-45" style={{ transformBox: "fill-box" }}>
+      <circle cx="20" cy="20" r="19.5" fill="#17181a" />
+      <g stroke="rgba(255,255,255,0.28)" strokeWidth="1.2" strokeLinecap="round" className="origin-center transition-transform duration-500 motion-safe:group-hover:rotate-45" style={{ transformBox: "fill-box" }}>
         {SPOKES.map((a) => {
           const r = (a * Math.PI) / 180;
-          return <line key={a} x1={20 + 11.5 * Math.cos(r)} y1={20 + 11.5 * Math.sin(r)} x2={20 + 15.5 * Math.cos(r)} y2={20 + 15.5 * Math.sin(r)} />;
+          return <line key={a} x1={20 + 15.2 * Math.cos(r)} y1={20 + 15.2 * Math.sin(r)} x2={20 + 17.6 * Math.cos(r)} y2={20 + 17.6 * Math.sin(r)} />;
         })}
       </g>
-      <circle cx="20" cy="20" r="11.5" fill="none" stroke={spoke} strokeWidth="1" />
+      <circle cx="20" cy="20" r="13.5" fill={hub} stroke={selected ? "rgba(255,255,255,0.35)" : accent} strokeOpacity={selected ? 1 : 0.35} strokeWidth="1" />
     </svg>
   );
 }
