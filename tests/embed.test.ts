@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { embedScript, embedSnippet } from "@/lib/embed-script";
+import { INLINE_PLACEHOLDER, embedScript, embedSnippet } from "@/lib/embed-script";
 
 const base = { root: "https://k.example", store: "vancouver", type: "test-ride", text: "Book a test ride", color: "#ff6b1a", textColor: "#17181a" } as const;
 
 describe("embed snippets", () => {
   it("inline", () => {
-    expect(embedSnippet({ ...base, how: "inline" })).toBe('<div data-biktrix-booking="vancouver" data-type="test-ride" style="min-height:620px"></div>\n<script src="https://k.example/embed.js" async></script>');
+    expect(embedSnippet({ ...base, how: "inline" })).toBe(`<link rel="preconnect" href="https://k.example">\n<div data-biktrix-booking="vancouver" data-type="test-ride" style="min-height:620px">${INLINE_PLACEHOLDER}</div>\n<script src="https://k.example/embed.js" async></script>`);
+    expect(INLINE_PLACEHOLDER).toContain("Loading available times");
   });
 
   it("whole store leaves out data-type", () => {

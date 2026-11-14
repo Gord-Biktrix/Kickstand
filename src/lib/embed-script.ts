@@ -44,7 +44,7 @@ export function embedScript(origin: string): string {
     var store=clean(el.getAttribute("data-biktrix-booking"));
     if(!store)return;
     var f=frame(url(store,el.getAttribute("data-type"),pre(el)));
-    f.style.cssText="width:100%;border:0;outline:none !important;min-height:480px;height:620px;display:block;color-scheme:normal;position:absolute;top:0;visibility:hidden";
+    f.style.cssText="width:100%;border:0;outline:none !important;min-height:320px;height:620px;display:block;color-scheme:normal;position:absolute;top:0;visibility:hidden";
     var ph=skeleton("620px");
     el.innerHTML="";
     if(getComputedStyle(el).position==="static")el.style.position="relative";
@@ -105,14 +105,28 @@ export function embedScript(origin: string): string {
     open(el.getAttribute("data-biktrix-popup"),el.getAttribute("data-type"),pre(el));
   });
   document.addEventListener("keydown",function(e){if(e.key==="Escape")close();});
+  // The frame grows to fit its page, so the page scrolls, not the frame. When the booking moves on to a new step
+  // (the form, the confirmation, an error) and the top of the frame is off screen, bring it back into view;
+  // otherwise on a phone the customer is left looking at the bottom of a page that has changed above them.
+  function scrollTo(f){
+    var top=f.getBoundingClientRect().top,off=parseInt(f.parentNode.getAttribute("data-offset")||"80",10)||0;
+    if(top<off){
+      var y=top+(window.pageYOffset||document.documentElement.scrollTop)-off;
+      try{window.scrollTo({top:y,behavior:"smooth"});}catch(_){window.scrollTo(0,y);}
+    }
+  }
   window.addEventListener("message",function(e){
-    if(e.origin!==ORIGIN||!e.data||e.data.type!=="biktrix-booking:height")return;
+    if(e.origin!==ORIGIN||!e.data)return;
+    var t=e.data.type;
+    if(t!=="biktrix-booking:height"&&t!=="biktrix-booking:step")return;
     var frames=document.querySelectorAll("[data-biktrix-booking] iframe, [role=dialog] iframe");
     for(var i=0;i<frames.length;i++){
       var f=frames[i];
       if(f.contentWindow!==e.source)continue;
+      var inline=f.parentNode&&f.parentNode.hasAttribute("data-biktrix-booking");
+      if(t==="biktrix-booking:step"){if(inline)scrollTo(f);continue;}
       if(f._bkShow)f._bkShow();
-      if(f.parentNode&&f.parentNode.hasAttribute("data-biktrix-booking"))f.style.height=Math.max(320,Math.ceil(e.data.height))+"px";
+      if(inline)f.style.height=Math.max(320,Math.ceil(e.data.height))+"px";
     }
   });
   window.BiktrixBooking={open:open,close:close};
@@ -127,6 +141,10 @@ export const EMBED_HOWS: { key: EmbedHow; label: string; hint: string }[] = [
   { key: "link", label: "Popup link", hint: "Any text or button you choose opens the calendar over the page." },
 ];
 
+/** What the inline snippet shows until embed.js takes over: a soft box saying it's loading. */
+export const INLINE_PLACEHOLDER =
+  '<div role="status" style="box-sizing:border-box;height:588px;margin:16px;border:1px solid #e7e5e4;border-radius:16px;background:#fafaf9;display:flex;align-items:center;justify-content:center;font:14px system-ui,-apple-system,sans-serif;color:#78716c">Loading available times…</div>';
+
 const attr = (v: string) => v.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 /** The code to paste on the website for one booking type (or a store's whole list when `type` is null). */
@@ -134,7 +152,12 @@ export function embedSnippet(args: { root: string; store: string; type: string |
   const { root, store, type, how } = args;
   const typeAttr = type ? ` data-type="${attr(type)}"` : "";
   const script = `<script src="${root}/embed.js" async></script>`;
-  if (how === "inline") return `<div data-biktrix-booking="${attr(store)}"${typeAttr} style="min-height:620px"></div>\n${script}`;
+  // The placeholder inside the div shows the moment the page's HTML arrives, before embed.js has even loaded
+  // (which on a phone, behind the theme's own scripts, can take a second); embed.js replaces it. The preconnect
+  // starts the connection to Kickstand early so the calendar itself arrives sooner.
+  if (how === "inline") {
+    return `<link rel="preconnect" href="${root}">\n<div data-biktrix-booking="${attr(store)}"${typeAttr} style="min-height:620px">${INLINE_PLACEHOLDER}</div>\n${script}`;
+  }
   if (how === "button") {
     return `<div data-biktrix-popup-button="${attr(store)}"${typeAttr} data-text="${attr(args.text)}" data-color="${attr(args.color)}" data-text-color="${attr(args.textColor)}"></div>\n${script}`;
   }

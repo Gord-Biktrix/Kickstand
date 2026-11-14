@@ -145,3 +145,5 @@ button[aria-busy="true"]::after {
 /* Booking pages inside the website embed: the host page has its own header. */
 .in-embed .booking-header { display: none; }
 .in-embed body { background: transparent; }
+/* In the embed the frame is sized to the page, so the page must not stretch to the frame (or it could never shrink). */
+.in-embed, .in-embed body { height: auto; min-height: 0; }
