@@ -222,6 +222,8 @@ export function bookingProperties(showroom: ShowroomCtx, type: BookingType, b: B
     answers: readAnswers(b.answers),
     answers_text: answersText(b),
     sms_consent: b.smsConsent,
+    // The type's public booking page, for "Book another time" after a cancellation.
+    book_again_url: `${baseUrl()}/book/${showroom.slug}/${type.slug}`,
     ...bookingUrls(b),
   };
 }

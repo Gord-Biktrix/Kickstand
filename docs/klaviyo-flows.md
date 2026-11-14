@@ -171,3 +171,36 @@ item names, quantity suffixed, e.g. "Fat Bike Inner Tube 20x4 ×2"); `event.bike
 **Email**: template "Parts: Order ready to collect (Kickstand)" — subject `Your order is ready to collect`.
 
 (Booked / Rescheduled / Cancelled for parts: the shared bike flows — no separate flow needed.)
+
+---
+
+# Klaviyo flows for booking types (test rides, service, calls)
+
+Four metrics, one flow each: **Booking: Confirmed**, **Booking: Rescheduled**, **Booking: Cancelled**,
+**Booking: Reminder Day Before** (sent by the daily clock the day before). A metric only appears in Klaviyo
+after its first event, so make a test booking, move it, cancel it, and the first three will show up.
+
+Email templates already in Klaviyo (Content › Templates), source in `docs/klaviyo-email-booking-*.html`:
+`Kickstand · Booking confirmed` (TDGFA3), `Kickstand · Booking moved` (SwU6T4),
+`Kickstand · Booking cancelled` (RTT4gr), `Kickstand · Booking reminder (day before)` (TGiVLU).
+
+**Event properties** (`{{ event.<name> }}`): `booking_type`, `booking_type_slug`, `location_kind`
+(in_person / video / phone), `location_label`, `showroom`, `showroom_kind`, `showroom_address`,
+`showroom_phone`, `customer_name`, `date_display`, `time_display`, `starts_at`, `duration_min`,
+`customer_note`, `answers` (list of `{question, answer}`), `answers_text`, `sms_consent`, `manage_url`,
+`reschedule_url`, `ics_url`, `book_again_url`; Rescheduled adds `previous_display`.
+
+**Each flow:** Flows › Create flow › Build your own › name it like the metric › Trigger: Metric › pick the
+metric › Email action › "Use template" › pick the template above › subject below › Smart Sending **off**,
+mark **Transactional** if Klaviyo allows → Save → set the email and flow **Live**.
+Optional SMS after the email (quiet hours off for Confirmed/Moved/Cancelled):
+
+| Flow | Subject | SMS |
+|---|---|---|
+| Booking: Confirmed | `You're booked: {{ event.booking_type }}, {{ event.date_display }}` | `You're booked: {{ event.booking_type }} on {{ event.date_display }}, {{ event.time_display }}. Change or cancel: {{ event.manage_url }}` |
+| Booking: Rescheduled | `Your booking has moved to {{ event.date_display }}` | `Your {{ event.booking_type }} has moved to {{ event.date_display }}, {{ event.time_display }}. Manage: {{ event.manage_url }}` |
+| Booking: Cancelled | `Your booking is cancelled` | `Your {{ event.booking_type }} on {{ event.date_display }} is cancelled. Book another time: {{ event.book_again_url }}` |
+| Booking: Reminder Day Before | `See you tomorrow: {{ event.booking_type }}` | `Reminder: {{ event.booking_type }} tomorrow, {{ event.time_display }}. Can't make it? {{ event.manage_url }}` |
+
+Video calls: the emails say "we'll send you the link before your call", so whoever takes video bookings
+sends the meeting link (Kickstand doesn't create one yet).
