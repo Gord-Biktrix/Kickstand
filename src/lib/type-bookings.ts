@@ -430,10 +430,11 @@ export async function syncBookingWorkorder(db: Db, args: { showroom: ShowroomCtx
 
 /**
  * Keep the booking's copy on its profile's Google Calendar in step: created when booked, moved when
- * rescheduled, deleted when cancelled. Off when no service account or no calendar id is set. Never throws.
+ * rescheduled, deleted when cancelled. Off when no Google account is connected (or service account set) or the
+ * store has no calendar picked. Never throws.
  */
 export async function syncBookingCalendar(db: Db, args: { showroom: ShowroomCtx; type: BookingType; bookingId: string; actor: string }): Promise<void> {
-  const writer = getCalendarWriter();
+  const writer = await getCalendarWriter(db);
   const { showroom, type } = args;
   const [b] = await db.select().from(bookings).where(eq(bookings.id, args.bookingId));
   if (!writer || !b) return;

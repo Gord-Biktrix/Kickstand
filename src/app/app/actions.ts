@@ -2,6 +2,7 @@
 
 import { and, eq, inArray, ne } from "drizzle-orm";
 import { validateQuestions } from "@/lib/booking-questions";
+import { removeGoogleConnection } from "@/lib/google-connection";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { db } from "@/db/client";
@@ -1063,6 +1064,15 @@ export async function updateBookingTypeAction(id: string, formData: FormData) {
     target = withFlash(`${BT_PATH}?edit=${id}`, { error: errorMessage(err) });
   }
   redirect(target);
+}
+
+/** Settings › Stores › Google Calendar › Disconnect: forget the account (and revoke it at Google). */
+export async function disconnectGoogleCalendarAction() {
+  return run("/app/settings/stores", async () => {
+    await requireActor("admin", { anyStore: true });
+    await removeGoogleConnection(db);
+    return "Google Calendar disconnected. Bookings are no longer copied.";
+  });
 }
 
 /** Settings › Availability: the store's weekly hours that booking types follow by default. */

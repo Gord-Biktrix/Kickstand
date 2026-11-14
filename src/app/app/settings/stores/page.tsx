@@ -6,7 +6,8 @@ import { getConnection, LightspeedClient } from "@/lib/lightspeed";
 import { listShowrooms } from "@/lib/showroom";
 import { listWorkorderStatuses } from "@/lib/workorders";
 import { calendarServiceEmail } from "@/lib/google-calendar";
-import { createShowroomAction, importStoresFromLightspeedAction, refreshLightspeedStatusesAction, setLightspeedLinkAction, updateShowroomAction } from "../../actions";
+import { calendarConnectEnabled, calendarRedirectUri, getGoogleConnection, listWritableCalendars } from "@/lib/google-connection";
+import { createShowroomAction, disconnectGoogleCalendarAction, importStoresFromLightspeedAction, refreshLightspeedStatusesAction, setLightspeedLinkAction, updateShowroomAction } from "../../actions";
 
 export const metadata = { title: "Stores" };
 
@@ -22,6 +23,8 @@ export default async function StoresPage({ searchParams }: { searchParams: Promi
   await requireUser("admin");
   const stores = await listShowrooms(db);
   const calendarEmail = calendarServiceEmail();
+  const google = await getGoogleConnection(db);
+  const calendars = google ? await listWritableCalendars(db) : null;
   const statuses = await listWorkorderStatuses(db);
   const connected = !!(await getConnection(db));
   let shops: { shopID: string; name: string }[] = [];
@@ -44,6 +47,37 @@ export default async function StoresPage({ searchParams }: { searchParams: Promi
       <Flash ok={sp(q.ok)} error={sp(q.error)} />
       {!connected && <div className="mb-4"><Alert tone="warn">Lightspeed isn&apos;t connected on this server yet, so shop and employee lists can&apos;t be loaded. Ids can still be typed in.</Alert></div>}
       {lsError && <div className="mb-4"><Alert tone="danger">Couldn&apos;t load shops from Lightspeed: {lsError}</Alert></div>}
+
+      <Card title="Google Calendar" className="mb-6">
+        {google ? (
+          <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
+            <p>
+              Connected as <strong>{google.email}</strong>. Bookings are copied onto the calendar each store picks below, and kept in step when they move or are cancelled.
+              {google.lastError && <span className="mt-1 block text-red-700">{google.lastError}</span>}
+              {!calendars && !google.lastError && <span className="mt-1 block text-red-700">Couldn&apos;t load the calendar list from Google right now.</span>}
+            </p>
+            <div className="flex gap-2">
+              <a href="/auth/google/calendar" className="btn btn-sm">Reconnect</a>
+              <form action={disconnectGoogleCalendarAction}><button type="submit" className="btn btn-sm">Disconnect</button></form>
+            </div>
+          </div>
+        ) : calendarConnectEnabled() ? (
+          <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
+            <p className="max-w-2xl">Copy every booking onto Google Calendar, like BookIt did. Sign in once with a Biktrix Google account (a shared one like bookings@ is best, so it doesn&apos;t depend on one person), then pick each store&apos;s calendar.</p>
+            <a href="/auth/google/calendar" className="btn btn-primary btn-sm">Connect Google Calendar</a>
+          </div>
+        ) : (
+          <p className="text-sm text-muted">Google sign-in isn&apos;t set up on this server (GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET).</p>
+        )}
+        <details className="mt-3 text-xs text-muted">
+          <summary className="cursor-pointer">Google Cloud setup (once)</summary>
+          <ol className="mt-2 list-decimal space-y-1 pl-5">
+            <li>In the Google Cloud project used for Kickstand sign-in: APIs &amp; Services › Library › enable <strong>Google Calendar API</strong>.</li>
+            <li>OAuth consent screen › Data access › Add scopes: <code>calendar.events</code> and <code>calendar.calendarlist.readonly</code>.</li>
+            <li>Credentials › the Kickstand OAuth client › Authorised redirect URIs › add <code>{calendarRedirectUri()}</code>.</li>
+          </ol>
+        </details>
+      </Card>
 
       <div className="grid gap-6 lg:grid-cols-[340px_minmax(0,1fr)]">
         <Card title="Add a store">
@@ -98,13 +132,23 @@ export default async function StoresPage({ searchParams }: { searchParams: Promi
                     </Field>
                     <Field label="Address" htmlFor={`addr_${s.id}`}><input id={`addr_${s.id}`} name="address_line" defaultValue={s.addressLine} className="input" /></Field>
                     <Field label="Phone" htmlFor={`phone_${s.id}`}><input id={`phone_${s.id}`} name="phone" defaultValue={s.phone ?? ""} className="input" /></Field>
-                    <Field
-                      label="Google Calendar id"
-                      htmlFor={`gcal_${s.id}`}
-                      hint={calendarEmail ? <>Bookings are copied to this calendar. Share it with <code className="text-xs">{calendarEmail}</code> (&ldquo;Make changes to events&rdquo;), then paste its id from Calendar settings › Integrate calendar.</> : "Copying bookings to Google Calendar needs the GOOGLE_SERVICE_ACCOUNT_JSON setting on the server first."}
-                    >
-                      <input id={`gcal_${s.id}`} name="google_calendar_id" defaultValue={s.googleCalendarId ?? ""} className="input" placeholder="c_abc123@group.calendar.google.com" />
-                    </Field>
+                    {calendars ? (
+                      <Field label="Google Calendar" htmlFor={`gcal_${s.id}`} hint={`Bookings are copied here, written by ${google?.email}.`}>
+                        <select id={`gcal_${s.id}`} name="google_calendar_id" defaultValue={s.googleCalendarId ?? ""} className="input">
+                          <option value="">Don&apos;t copy bookings</option>
+                          {s.googleCalendarId && !calendars.some((c) => c.id === s.googleCalendarId) && <option value={s.googleCalendarId}>{s.googleCalendarId} (not in this account)</option>}
+                          {calendars.map((c) => <option key={c.id} value={c.id}>{c.name}{c.primary ? " (main calendar)" : ""}</option>)}
+                        </select>
+                      </Field>
+                    ) : (
+                      <Field
+                        label="Google Calendar id"
+                        htmlFor={`gcal_${s.id}`}
+                        hint={google ? "Couldn't load the calendar list; paste the id from Calendar settings › Integrate calendar." : calendarEmail ? <>Bookings are copied to this calendar. Share it with <code className="text-xs">{calendarEmail}</code> (&ldquo;Make changes to events&rdquo;), then paste its id from Calendar settings › Integrate calendar.</> : "Connect Google Calendar above to pick a calendar."}
+                      >
+                        <input id={`gcal_${s.id}`} name="google_calendar_id" defaultValue={s.googleCalendarId ?? ""} className="input" placeholder="c_abc123@group.calendar.google.com" />
+                      </Field>
+                    )}
                     <button type="submit" className="btn btn-sm">Save details</button>
                   </form>
 

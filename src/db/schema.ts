@@ -282,7 +282,22 @@ export const lightspeedConnections = pgTable("lightspeed_connections", {
   ...timestamps,
 });
 
+/**
+ * The Google account Kickstand writes calendar events as (Settings › Stores › Connect Google Calendar), like
+ * BookIt did. One row at most; reconnecting replaces it. The refresh token is encrypted (src/lib/tokens.ts).
+ */
+export const googleConnections = pgTable("google_connections", {
+  id: id(),
+  email: text("email").notNull(),
+  refreshTokenEnc: text("refresh_token_enc").notNull(),
+  scope: text("scope"),
+  connectedBy: text("connected_by").notNull(),
+  lastError: text("last_error"),
+  ...timestamps,
+});
+
 export type Showroom = typeof showrooms.$inferSelect;
+export type GoogleConnection = typeof googleConnections.$inferSelect;
 export type LightspeedConnection = typeof lightspeedConnections.$inferSelect;
 export type StaffUser = typeof staffUsers.$inferSelect;
 export type CapacityRule = typeof capacityRules.$inferSelect;
