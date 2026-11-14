@@ -13,6 +13,7 @@ export const metadata = { title: "Program settings" };
 
 const NUMBER_FIELDS: { key: keyof ProgramSettings; label: string; hint?: string; step?: string }[] = [
   { key: "slot_minutes", label: "Slot length (minutes)" },
+  { key: "build_minutes", label: "Bike build time (minutes)", hint: "The Workshop board starts each build this long before it must be ready." },
   { key: "min_lead_hours", label: "Minimum lead time (hours)", hint: "Earliest bookable slot is this far from now.", step: "0.5" },
   { key: "booking_horizon_days", label: "Booking horizon (days after invite)", hint: "Must be ≥ pick-up-by days." },
   { key: "book_by_days", label: "Book-by (days after invite)" },

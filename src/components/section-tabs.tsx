@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 
 /**
  * The sub-pages of each top-level place, as a tab row under the header. Schedule: the day list and the
- * calendar. Workshop: bikes, parts and Lightspeed work orders (until the Workshop board replaces them).
+ * calendar. Workshop: the job board, bikes, parts and Lightspeed work orders.
  * Shown only on those pages; detail pages (a bike, an order, a booking) keep the row for their place.
  */
 const GROUPS: { tabs: { href: string; label: string; also?: string[] }[]; under: string[]; store?: boolean }[] = [
@@ -18,8 +18,9 @@ const GROUPS: { tabs: { href: string; label: string; also?: string[] }[]; under:
   },
   {
     store: true,
-    under: ["/app/bikes", "/app/parts", "/app/workorders", "/app/arrivals", "/app/watchlist", "/app/build"],
+    under: ["/app/workshop", "/app/bikes", "/app/parts", "/app/workorders", "/app/arrivals", "/app/watchlist", "/app/build"],
     tabs: [
+      { href: "/app/workshop", label: "Board" },
       { href: "/app/bikes", label: "Bikes", also: ["/app/arrivals", "/app/watchlist", "/app/build"] },
       { href: "/app/parts", label: "Parts" },
       { href: "/app/workorders", label: "Work orders" },

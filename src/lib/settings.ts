@@ -2,6 +2,8 @@ import { z } from "zod";
 
 export const settingsSchema = z.object({
   slot_minutes: z.number().int().min(5).max(240).default(45),
+  /** Workshop board: how long a bike build takes, so the board can show when to start it (ready-by − this). */
+  build_minutes: z.number().int().min(15).max(600).default(120),
   min_lead_hours: z.number().min(0).default(48),
   booking_horizon_days: z.number().int().min(1).default(42),
   book_by_days: z.number().int().min(1).default(14),
@@ -74,6 +76,7 @@ export const DEFAULT_SETTINGS: ProgramSettings = settingsSchema.parse({});
 /** Keys a manager may edit; flags are admin-only (see FLAG_KEYS). */
 export const PROGRAM_KEYS = [
   "slot_minutes",
+  "build_minutes",
   "min_lead_hours",
   "booking_horizon_days",
   "book_by_days",

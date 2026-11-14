@@ -18,7 +18,7 @@ import { signOutAction } from "./actions";
 // `store: true`: physical stock and the workshop, hidden for the online team.
 const NAV = [
   { href: "/app", label: "Schedule", exact: true, also: ["/app/schedule", "/app/bookings"] },
-  { href: "/app/bikes", label: "Workshop", store: true, also: ["/app/bikes", "/app/parts", "/app/workorders", "/app/units", "/app/orders", "/app/arrivals", "/app/build", "/app/watchlist", "/app/book"] },
+  { href: "/app/workshop", label: "Workshop", store: true, also: ["/app/workshop", "/app/bikes", "/app/parts", "/app/workorders", "/app/units", "/app/orders", "/app/arrivals", "/app/build", "/app/watchlist", "/app/book"] },
   { href: "/app/search", label: "Customers", also: ["/app/search", "/app/customers"] },
 ] as const;
 

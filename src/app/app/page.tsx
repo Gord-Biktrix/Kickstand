@@ -160,7 +160,7 @@ export default async function TodayPage({ searchParams }: { searchParams: Promis
           <section className="card" aria-label="Workshop today">
             <div className="flex items-baseline justify-between">
               <h2 className="text-sm font-semibold uppercase tracking-wide">Workshop {date === today ? "today" : "this day"}</h2>
-              <Link href="/app/bikes?filter=booked" className="text-xs underline">Open</Link>
+              <Link href="/app/workshop" className="text-xs underline">Open</Link>
             </div>
             {buildsDue.length === 0 ? (
               <p className="mt-2 text-sm text-muted">No builds due.</p>
