@@ -12,7 +12,7 @@ import { getShowroom } from "@/lib/showroom";
 import { formatLongDateFromLocal, formatTime } from "@/lib/time";
 import { getTypeAvailability } from "@/lib/type-slots";
 import { bookTypeAction } from "../../actions";
-import { zoneChoices, zoneLabel } from "../../zone";
+import { zoneLabel } from "../../zone";
 import { ZonePicker } from "@/components/zone-picker";
 import { daysInZone, viewZone } from "@/lib/view-tz";
 import { QuestionFields } from "@/components/question-fields";
@@ -92,7 +92,7 @@ export default async function BookTypePage({ params, searchParams }: { params: P
           </div>
         </div>
       ) : (
-        <BookingCalendar days={days} tz={tz} base={base} month={month} date={date} time={time} accent={accent} info={info} zone={<ZonePicker current={tz} storeTz={storeTz} choices={zoneChoices(tz, storeTz)} />} />
+        <BookingCalendar days={days} tz={tz} base={base} month={month} date={date} time={time} accent={accent} info={info} zone={<ZonePicker current={tz} storeTz={storeTz} />} />
       )}
     </div>
   );

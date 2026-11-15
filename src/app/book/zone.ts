@@ -1,5 +1,3 @@
-import { ZONE_CHOICES } from "@/lib/view-tz";
-
 const ZONE_LABEL: Record<string, string> = {
   "America/Vancouver": "Pacific time",
   "America/Edmonton": "Mountain time",
@@ -20,9 +18,3 @@ export function zoneLabel(tz: string): string {
   return ZONE_LABEL[tz] ?? tz.replace(/^.*\//, "").replace(/_/g, " ") + " time";
 }
 
-/** The picker's options: the usual zones, plus the store's and the current one if they aren't among them. */
-export function zoneChoices(current: string, storeTz: string): { tz: string; label: string }[] {
-  const list = [...ZONE_CHOICES];
-  for (const tz of [storeTz, current]) if (!list.includes(tz)) list.unshift(tz);
-  return list.map((tz) => ({ tz, label: zoneLabel(tz) }));
-}

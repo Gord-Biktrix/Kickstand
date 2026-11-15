@@ -10,7 +10,7 @@ import { formatLongDate, formatLongDateFromLocal, formatTime } from "@/lib/time"
 import { getBookingByToken } from "@/lib/type-bookings";
 import { getTypeAvailability } from "@/lib/type-slots";
 import { rescheduleTypeAction } from "../../../actions";
-import { zoneChoices, zoneLabel } from "../../../zone";
+import { zoneLabel } from "../../../zone";
 import { ZonePicker } from "@/components/zone-picker";
 import { daysInZone, viewZone } from "@/lib/view-tz";
 
@@ -62,7 +62,7 @@ export default async function RescheduleBookingPage({ params, searchParams }: { 
           </Card>
         </div>
       ) : (
-        <BookingCalendar days={days} tz={tz} base={base} month={sp(q.month)} date={date} time={time} accent={accent} info={info} zone={<ZonePicker current={tz} storeTz={storeTz} choices={zoneChoices(tz, storeTz)} />} />
+        <BookingCalendar days={days} tz={tz} base={base} month={sp(q.month)} date={date} time={time} accent={accent} info={info} zone={<ZonePicker current={tz} storeTz={storeTz} />} />
       )}
     </div>
   );

@@ -45,17 +45,3 @@ export function daysInZone(days: TypeDay[], storeTz: string, viewTz: string): Ty
     .map(([date, slots]) => ({ date, slots: slots.sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime()) }));
 }
 
-/** Zones offered in the picker (Canada first), plus whatever the browser reported if it isn't one of them. */
-export const ZONE_CHOICES = [
-  "America/Vancouver",
-  "America/Edmonton",
-  "America/Regina",
-  "America/Winnipeg",
-  "America/Toronto",
-  "America/Halifax",
-  "America/St_Johns",
-  "America/Los_Angeles",
-  "America/Denver",
-  "America/Chicago",
-  "America/New_York",
-];
