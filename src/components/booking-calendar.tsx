@@ -1,8 +1,21 @@
 import type { ReactNode } from "react";
 import type { Host } from "@/lib/staff-photos";
+import type { TypeDay } from "@/lib/type-slots";
+import { formatTime } from "@/lib/time";
 import { Avatar } from "./avatar";
+import { BookingCalendarPicker } from "./booking-calendar-picker";
 
-export { BookingCalendar, monthCells } from "./booking-calendar-picker";
+export { monthCells } from "./booking-calendar-picker";
+
+/**
+ * The booking calendar. Time labels are formatted here, on the server, and handed to the picker as text: if the
+ * browser formatted them it could use older time-zone data than the server (B.C. stayed on UTC-7 in 2026) and
+ * show a different time than the one being booked.
+ */
+export function BookingCalendar({ days, tz, ...rest }: Omit<React.ComponentProps<typeof BookingCalendarPicker>, "days"> & { days: TypeDay[]; tz: string }) {
+  const labeled = days.map((d) => ({ date: d.date, slots: d.slots.map((s) => ({ time: s.time, label: formatTime(s.startsAt, tz) })) }));
+  return <BookingCalendarPicker days={labeled} {...rest} />;
+}
 
 /** The left panel: brand, who, what, how long, where. */
 export function BookingInfo({ brand, title, durationMin, location, description, extra, hosts }: { brand: string; title: string; durationMin: number; location: string; description?: string; extra?: ReactNode; hosts?: Host[] }) {

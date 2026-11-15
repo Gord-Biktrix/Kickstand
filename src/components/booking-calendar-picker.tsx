@@ -2,8 +2,10 @@
 
 import Link from "next/link";
 import { useState, type MouseEvent, type ReactNode } from "react";
-import type { TypeDay } from "@/lib/type-slots";
-import { formatLongDateFromLocal, formatTime } from "@/lib/time";
+import { formatLongDateFromLocal } from "@/lib/time";
+
+/** A day's open times with their labels already formatted on the server (see BookingCalendar). */
+export type PickerDay = { date: string; slots: { time: string; label: string }[] };
 
 /**
  * The Calendly-style picker: a panel about the appointment on the left, a month calendar with the open days
@@ -13,9 +15,8 @@ import { formatLongDateFromLocal, formatTime } from "@/lib/time";
  * the page, so asking the server again on each click only added lag. "Next" (adds &confirm=1) is a real
  * navigation to the page's own next step.
  */
-export function BookingCalendar({
+export function BookingCalendarPicker({
   days,
-  tz,
   base,
   month: urlMonth,
   date: urlDate,
@@ -24,8 +25,7 @@ export function BookingCalendar({
   info,
   zone,
 }: {
-  days: TypeDay[];
-  tz: string;
+  days: PickerDay[];
   /** Page URL without month/date/time (may already have a query string). */
   base: string;
   month?: string;
@@ -129,14 +129,14 @@ export function BookingCalendar({
                 <li key={s.time}>
                   {s.time === time ? (
                     <div className="flex">
-                      <span className="flex h-11 min-w-0 flex-1 items-center justify-center whitespace-nowrap rounded-lg text-sm font-semibold text-white" style={{ background: "#475569" }}>{formatTime(s.startsAt, tz)}</span>
+                      <span className="flex h-11 min-w-0 flex-1 items-center justify-center whitespace-nowrap rounded-lg text-sm font-semibold text-white" style={{ background: "#475569" }}>{s.label}</span>
                       <div className="slot-next">
                         <Link href={href({ month: shown, date: selected.date, time: s.time, confirm: "1" })} className="flex h-11 w-full items-center justify-center whitespace-nowrap rounded-lg text-sm font-semibold text-white" style={{ background: accent }}>Next</Link>
                       </div>
                     </div>
                   ) : (
                     <a href={href({ month: shown, date: selected.date, time: s.time })} onClick={go({ month: shown, date: selected.date, time: s.time })} className="flex h-11 items-center justify-center rounded-lg border text-sm font-semibold hover:border-2" style={{ borderColor: accent, color: accent }}>
-                      {formatTime(s.startsAt, tz)}
+                      {s.label}
                     </a>
                   )}
                 </li>
