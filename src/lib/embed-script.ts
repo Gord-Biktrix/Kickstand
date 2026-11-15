@@ -1,8 +1,11 @@
+import { EMBED_SKELETON } from "./booking-skeleton-html";
+
 /** The /embed.js source (see src/app/embed.js/route.ts for the three ways to use it). */
 export function embedScript(origin: string): string {
   return `(function(){
   if(window.BiktrixBooking)return;
   var ORIGIN=${JSON.stringify(origin)};
+  var SK=${JSON.stringify(EMBED_SKELETON)};
   function clean(v){return (v||"").replace(/[^a-z0-9-]/gi,"");}
   function url(store,type,pre){
     var u=ORIGIN+"/book/"+clean(store)+(clean(type)?"/"+clean(type):"");
@@ -35,21 +38,26 @@ export function embedScript(origin: string): string {
   // Show the frame once the booking page has rendered (it posts its height) or finished loading, whichever is first.
   function reveal(f,ph){
     var done=false;
-    function show(){if(done)return;done=true;if(ph&&ph.parentNode)ph.parentNode.removeChild(ph);f.style.position="";f.style.visibility="";f.style.top="";}
+    function show(){if(done)return;done=true;if(ph&&ph.parentNode)ph.parentNode.removeChild(ph);f.style.position="";f.style.visibility="";f.style.top="";f.style.left="";}
     f.addEventListener("load",show);
     f._bkShow=show;
   }
+  // Inline: the card-shaped outline holds the space (from the embed code itself, or added here for older embed
+  // codes); the frame loads hidden at the outline's height and takes its place once the calendar is ready, so
+  // the page around it doesn't move.
   function mount(el){
     if(el.getAttribute("data-biktrix-mounted"))return;
     var store=clean(el.getAttribute("data-biktrix-booking"));
     if(!store)return;
-    var f=frame(url(store,el.getAttribute("data-type"),pre(el)));
-    f.style.cssText="width:100%;border:0;outline:none !important;min-height:320px;height:620px;display:block;color-scheme:normal;position:absolute;top:0;visibility:hidden";
-    var ph=skeleton("620px");
-    el.innerHTML="";
+    var ph=el.querySelector(".bkx-sk");
+    if(!ph){el.innerHTML=SK;ph=el.querySelector(".bkx-sk");}
+    el.style.minHeight="";
     if(getComputedStyle(el).position==="static")el.style.position="relative";
+    var h=ph.offsetHeight||620;
+    var f=frame(url(store,el.getAttribute("data-type"),pre(el)));
+    f.style.cssText="width:100%;border:0;outline:none !important;min-height:320px;height:"+h+"px;display:block;color-scheme:normal;position:absolute;top:0;left:0;visibility:hidden;transition:height .2s ease";
     el.setAttribute("data-biktrix-mounted","1");
-    el.appendChild(ph);el.appendChild(f);
+    el.appendChild(f);
     reveal(f,ph);
   }
   var overlay=null,lastFocus=null;
@@ -141,9 +149,8 @@ export const EMBED_HOWS: { key: EmbedHow; label: string; hint: string }[] = [
   { key: "link", label: "Popup link", hint: "Any text or button you choose opens the calendar over the page." },
 ];
 
-/** What the inline snippet shows until embed.js takes over: a soft box saying it's loading. */
-export const INLINE_PLACEHOLDER =
-  '<div role="status" style="box-sizing:border-box;height:588px;margin:16px;border:1px solid #e7e5e4;border-radius:16px;background:#fafaf9;display:flex;align-items:center;justify-content:center;font:14px system-ui,-apple-system,sans-serif;color:#78716c">Loading available times…</div>';
+/** What the inline snippet shows until embed.js takes over: the card's outline, at the card's size. */
+export const INLINE_PLACEHOLDER = EMBED_SKELETON;
 
 const attr = (v: string) => v.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
@@ -156,7 +163,7 @@ export function embedSnippet(args: { root: string; store: string; type: string |
   // (which on a phone, behind the theme's own scripts, can take a second); embed.js replaces it. The preconnect
   // starts the connection to Kickstand early so the calendar itself arrives sooner.
   if (how === "inline") {
-    return `<link rel="preconnect" href="${root}">\n<div data-biktrix-booking="${attr(store)}"${typeAttr} style="min-height:620px">${INLINE_PLACEHOLDER}</div>\n${script}`;
+    return `<link rel="preconnect" href="${root}">\n<div data-biktrix-booking="${attr(store)}"${typeAttr}>${INLINE_PLACEHOLDER}</div>\n${script}`;
   }
   if (how === "button") {
     return `<div data-biktrix-popup-button="${attr(store)}"${typeAttr} data-text="${attr(args.text)}" data-color="${attr(args.color)}" data-text-color="${attr(args.textColor)}"></div>\n${script}`;

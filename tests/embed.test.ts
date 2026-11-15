@@ -5,7 +5,7 @@ const base = { root: "https://k.example", store: "vancouver", type: "test-ride",
 
 describe("embed snippets", () => {
   it("inline", () => {
-    expect(embedSnippet({ ...base, how: "inline" })).toBe(`<link rel="preconnect" href="https://k.example">\n<div data-biktrix-booking="vancouver" data-type="test-ride" style="min-height:620px">${INLINE_PLACEHOLDER}</div>\n<script src="https://k.example/embed.js" async></script>`);
+    expect(embedSnippet({ ...base, how: "inline" })).toBe(`<link rel="preconnect" href="https://k.example">\n<div data-biktrix-booking="vancouver" data-type="test-ride">${INLINE_PLACEHOLDER}</div>\n<script src="https://k.example/embed.js" async></script>`);
     expect(INLINE_PLACEHOLDER).toContain("Loading available times");
   });
 
