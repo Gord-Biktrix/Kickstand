@@ -35,15 +35,17 @@ export default async function NewBookingPage({ searchParams }: { searchParams: P
   const base = type ? `/app/bookings/new?type=${type.id}` : "/app/bookings/new";
 
   return (
-    <div className="max-w-2xl">
+    // Full width so the calendar can lay out in three columns (details · month · times), like the customer page;
+    // the type picker and the details form stay at a readable width.
+    <div>
       <PageHeader title="Book for a customer" subtitle={`${showroom.name} · for a customer who phoned or walked in. They get the usual confirmation.`} />
       <Flash ok={sp(q.ok)} error={sp(q.error)} />
       {!type ? (
         types.length === 0 ? (
           <Card><p className="text-sm">No booking types are set up here yet. A manager can add them in <Link href="/app/settings/booking-types" className="underline">Settings › Booking types</Link>. Bike pickups are booked from the bike&apos;s page.</p></Card>
         ) : (
-          <Card title="What are they booking?">
-            <ul className="grid gap-2 sm:grid-cols-2">
+          <Card title="What are they booking?" className="max-w-4xl">
+            <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
               {types.map((t) => (
                 <li key={t.id}>
                   <Link href={`/app/bookings/new?type=${t.id}`} className="block rounded-lg border border-border p-3 hover:border-accent">
@@ -60,7 +62,7 @@ export default async function NewBookingPage({ searchParams }: { searchParams: P
         <div className="space-y-4">
           <p className="text-sm"><Link href="/app/bookings/new" className="text-accent underline">← Another type</Link> · <span className="font-medium">{type.name}</span> <span className="text-muted">({type.durationMin} min)</span></p>
           {slot ? (
-            <Card title={`${formatLongDateFromLocal(date!)} · ${formatTime(slot.startsAt, tz)} – ${formatTime(slot.endsAt, tz)}`}>
+            <Card title={`${formatLongDateFromLocal(date!)} · ${formatTime(slot.startsAt, tz)} – ${formatTime(slot.endsAt, tz)}`} className="max-w-2xl">
               <form action={staffCreateTypeBookingAction.bind(null, type.id)} className="space-y-3">
                 <input type="hidden" name="starts_at" value={slot.startsAt.toISOString()} />
                 <input type="hidden" name="date" value={date} />
