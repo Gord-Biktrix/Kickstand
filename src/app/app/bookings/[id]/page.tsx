@@ -17,7 +17,7 @@ import { bookingCustomerKey } from "@/lib/customers";
 import { getTypeAvailability } from "@/lib/type-slots";
 import { lightspeedEnabled } from "@/lib/lightspeed";
 import { lightspeedWorkorderUrl } from "@/lib/workorders";
-import { checkInBookingAction, noShowBookingAction, retryBookingWorkorderAction, staffCancelTypeBookingAction, staffRescheduleTypeBookingAction, undoBookingOutcomeAction } from "../../actions";
+import { retryBookingWorkorderAction, setBookingStatusAction, staffCancelTypeBookingAction, staffRescheduleTypeBookingAction } from "../../actions";
 
 export const metadata = { title: "Booking" };
 
@@ -35,14 +35,14 @@ const EVENT_LABEL: Record<string, string> = {
   booking_reminder_day_before: "Day-before reminder sent",
   booking_checked_in: "Checked in", // "Done" for phone and video calls (below)
   booking_no_show: "Marked no-show",
-  booking_outcome_undone: "Done / no-show undone",
+  booking_outcome_undone: "Back to booked",
   booking_workorder_created: "Lightspeed work order created",
   booking_workorder_updated: "Lightspeed work order updated",
   booking_workorder_failed: "Lightspeed work order failed",
   booking_calendar_failed: "Google Calendar copy failed",
 };
 
-/** One booking: the booking itself with Check in (or Mark as done, for calls) / No-show / Change time / Cancel beside it, then its timeline. */
+/** One booking: the booking itself with its Status (Booked / Done or Checked in / No-show), Change time and Cancel beside it, then its timeline. */
 export default async function BookingPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<SearchParams> }) {
   const { id } = await params;
   const q = await searchParams;
@@ -100,16 +100,27 @@ export default async function BookingPage({ params, searchParams }: { params: Pr
             )}
           </dl>
           <div className="flex flex-col gap-2">
+            {b.status !== "cancelled" && (
+              <div>
+                <p className="mb-1 text-xs font-medium text-muted">Status</p>
+                <div className="flex overflow-hidden rounded-lg border border-border text-sm" role="group" aria-label="Status">
+                  {([["booked", "Booked"], ["completed", words.action === "Check in" ? "Checked in" : "Done"], ["no_show", "No-show"]] as const).map(([value, label]) => {
+                    const on = b.status === value;
+                    const early = value === "no_show" && b.startsAt > now;
+                    return (
+                      <form key={value} action={setBookingStatusAction.bind(null, b.id, value)} className="flex-1 border-l border-border first:border-l-0">
+                        <button type="submit" disabled={on || early} aria-pressed={on} title={early ? "After the start time" : undefined} className={`h-9 w-full whitespace-nowrap px-3 font-medium ${on ? (value === "no_show" ? "bg-danger text-white" : value === "completed" ? "bg-ok text-white" : "bg-accent text-white") : early ? "cursor-not-allowed text-muted/50" : "hover:bg-background"}`}>{label}</button>
+                      </form>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
             {b.status === "booked" && (
               <>
-                <form action={checkInBookingAction.bind(null, b.id, self)}><button type="submit" className="btn btn-primary btn-sm w-full">{words.action}</button></form>
-                {b.startsAt < now && <form action={noShowBookingAction.bind(null, b.id, self)}><button type="submit" className="btn btn-sm w-full">No-show</button></form>}
                 {b.startsAt > now && <Link href={`${self}?move=1`} className="btn btn-sm">Change time</Link>}
                 <form action={staffCancelTypeBookingAction.bind(null, b.id)}><ConfirmButton className="btn btn-danger btn-sm w-full" message={`Cancel ${b.customerName}'s ${type.name}? They're told through Klaviyo.`}>Cancel</ConfirmButton></form>
               </>
-            )}
-            {(b.status === "completed" || b.status === "no_show") && (
-              <form action={undoBookingOutcomeAction.bind(null, b.id)}><button type="submit" className="btn btn-sm">Undo {status.label}</button></form>
             )}
           </div>
         </div>

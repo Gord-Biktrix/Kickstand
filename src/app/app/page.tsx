@@ -9,8 +9,8 @@ import { sp, type SearchParams } from "@/lib/flash";
 import { todayAppointments, weekSchedule } from "@/lib/queries";
 import { automationSummary } from "@/lib/day-summary";
 import { addLocalDays, formatLongDateFromLocal, formatTime, toLocalDate } from "@/lib/time";
-import { checkInBookingAction, collectPartsAction, noShowBookingAction, recordNoShowAction } from "./actions";
-import { colorOf, LOCATION_LABEL, type BookingLocation } from "@/lib/booking-types";
+import { collectPartsAction, recordNoShowAction } from "./actions";
+import { colorOf, doneWords, LOCATION_LABEL, type BookingLocation } from "@/lib/booking-types";
 import { listBookings, type BookingRow } from "@/lib/type-bookings";
 import { currentShowroom } from "@/lib/current-showroom";
 import { ContactFlag } from "@/components/contact-flag";
@@ -51,7 +51,6 @@ export default async function TodayPage({ searchParams }: { searchParams: Promis
   const typeChips = [...new Map(bookingRows.map((r) => [r.type.id, r.type])).values()];
   const items = allItems.filter((i) => !filter || (filter === "pickups" ? i.kind === "visit" : i.kind === "booking" && i.row.type.id === filter));
   const chipHref = (t: string) => `/app?${new URLSearchParams({ ...(date !== today ? { date } : {}), ...(t ? { type: t } : {}) }).toString()}`;
-  const back = `/app?date=${date}`;
   const counts = [
     rows.length ? `${rows.length} pickup${rows.length === 1 ? "" : "s"}` : "",
     bookingRows.length ? `${bookingRows.length} booking${bookingRows.length === 1 ? "" : "s"}` : "",
@@ -94,7 +93,7 @@ export default async function TodayPage({ searchParams }: { searchParams: Promis
               ? <div key="now" role="separator" aria-label={`Now, ${formatTime(now, showroom.timezone)}`} className="flex items-center gap-2 text-xs font-bold text-danger"><span>NOW {formatTime(now, showroom.timezone)}</span><span aria-hidden="true" className="h-0.5 flex-1 bg-danger" /></div>
               : null;
             const card = (() => {
-            if (item.kind === "booking") return <BookingCard key={item.row.booking.id} row={item.row} tz={showroom.timezone} now={now} back={back} />;
+            if (item.kind === "booking") return <BookingCard key={item.row.booking.id} row={item.row} tz={showroom.timezone} />;
             const visit = item.visit;
             const first = visit[0];
             const { appointment } = first;
@@ -201,14 +200,14 @@ export default async function TodayPage({ searchParams }: { searchParams: Promis
 }
 
 const OUTCOME: Record<string, { label: string; tone: "ok" | "danger" | "neutral" }> = {
-  completed: { label: "checked in", tone: "ok" },
+  completed: { label: "done", tone: "ok" },
   no_show: { label: "no-show", tone: "danger" },
 };
 
-/** A booking of a booking type on the day list: who, what, how to reach them, and check-in / no-show. */
-function BookingCard({ row, tz, now, back }: { row: BookingRow; tz: string; now: Date; back: string }) {
+/** A booking of a booking type on the day list: who, what, how to reach them; Open for the booking (status, move, cancel). */
+function BookingCard({ row, tz }: { row: BookingRow; tz: string }) {
   const { booking: b, type } = row;
-  const outcome = OUTCOME[b.status];
+  const outcome = b.status === "completed" ? { ...OUTCOME.completed, label: doneWords(type.location).done } : OUTCOME[b.status];
   return (
     <Card>
       <div className="flex flex-wrap items-start gap-4">
@@ -229,12 +228,7 @@ function BookingCard({ row, tz, now, back }: { row: BookingRow; tz: string; now:
           </div>
           {b.customerNote && <p className="mt-1 text-sm text-muted">&ldquo;{b.customerNote}&rdquo;</p>}
         </div>
-        {b.status === "booked" && (
-          <div className="flex shrink-0 flex-col gap-2">
-            <form action={checkInBookingAction.bind(null, b.id, back)}><button type="submit" className="btn btn-primary btn-sm w-full">Check in</button></form>
-            {b.startsAt < now && <form action={noShowBookingAction.bind(null, b.id, back)}><button type="submit" className="btn btn-sm w-full">No-show</button></form>}
-          </div>
-        )}
+        <Link href={`/app/bookings/${b.id}`} className={`btn btn-sm shrink-0 ${b.status === "booked" ? "btn-primary" : ""}`}>Open</Link>
       </div>
     </Card>
   );

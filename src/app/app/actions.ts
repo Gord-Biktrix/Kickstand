@@ -1199,27 +1199,14 @@ async function staffBooking(id: string) {
   return { user, showroom, detail };
 }
 
-export async function checkInBookingAction(id: string, returnTo: string) {
-  return run(safeReturn(returnTo, `/app/bookings/${id}`), async () => {
-    const { user, showroom, detail } = await staffBooking(id);
-    await setBookingOutcome(db, { showroomId: showroom.id, bookingId: id, outcome: "completed", actor: user.id });
-    return detail.type.location === "in_person" ? "Checked in." : "Marked as done.";
-  });
-}
-
-export async function noShowBookingAction(id: string, returnTo: string) {
-  return run(safeReturn(returnTo, `/app/bookings/${id}`), async () => {
-    const { user, showroom } = await staffBooking(id);
-    await setBookingOutcome(db, { showroomId: showroom.id, bookingId: id, outcome: "no_show", actor: user.id });
-    return "Marked as a no-show.";
-  });
-}
-
-export async function undoBookingOutcomeAction(id: string) {
+/** The booking page's Status control: Booked, Done (Checked in for visits) or No-show. */
+export async function setBookingStatusAction(id: string, status: "booked" | "completed" | "no_show") {
   return run(`/app/bookings/${id}`, async () => {
-    const { user, showroom } = await staffBooking(id);
-    await setBookingOutcome(db, { showroomId: showroom.id, bookingId: id, outcome: "booked", actor: user.id });
-    return "Back to booked.";
+    const { user, showroom, detail } = await staffBooking(id);
+    await setBookingOutcome(db, { showroomId: showroom.id, bookingId: id, outcome: status, actor: user.id });
+    if (status === "no_show") return "Marked as a no-show.";
+    if (status === "booked") return "Back to booked.";
+    return detail.type.location === "in_person" ? "Checked in." : "Marked as done.";
   });
 }
 

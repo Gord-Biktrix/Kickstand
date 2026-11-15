@@ -211,6 +211,10 @@ describe("booking a booking type", () => {
     await setBookingOutcome(db, { showroomId: online.id, bookingId: b.id, outcome: "no_show", actor: "staff-1", now: later });
     await setBookingOutcome(db, { showroomId: online.id, bookingId: b.id, outcome: "booked", actor: "staff-1", now: later });
     await expect(setBookingOutcome(db, { showroomId: online.id, bookingId: b.id, outcome: "booked", actor: "staff-1", now: later })).rejects.toMatchObject({ code: "NOT_ACTIVE" });
+    // Done and no-show switch straight to each other (a mis-click), but not to the same status again.
+    expect((await setBookingOutcome(db, { showroomId: online.id, bookingId: a.id, outcome: "no_show", actor: "staff-1", now: later })).status).toBe("no_show");
+    expect((await setBookingOutcome(db, { showroomId: online.id, bookingId: a.id, outcome: "completed", actor: "staff-1", now: later })).status).toBe("completed");
+    await expect(setBookingOutcome(db, { showroomId: online.id, bookingId: a.id, outcome: "completed", actor: "staff-1", now: later })).rejects.toMatchObject({ code: "NOT_ACTIVE" });
     // Another profile can't touch it.
     await expect(setBookingOutcome(db, { showroomId: "00000000-0000-0000-0000-000000000000", bookingId: a.id, outcome: "no_show", actor: "x", now: later })).rejects.toMatchObject({ code: "NOT_ACTIVE" });
     const detail = await getBookingDetail(db, online.id, b.id);

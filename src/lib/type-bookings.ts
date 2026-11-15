@@ -327,8 +327,8 @@ export async function getBookingDetail(dbx: DbOrTx, showroomId: string, id: stri
 }
 
 /**
- * Staff mark how it went: checked in (completed) or no-show. Only a booked appointment that has started can
- * be marked; "booked" again undoes either mark. No customer message: Klaviyo hears only confirm/move/cancel.
+ * Staff set how it went: done / checked in (completed), no-show, or back to booked. Any of the three can follow
+ * any other (not a cancelled booking); no-show only once it has started. No customer message: Klaviyo hears only confirm/move/cancel.
  */
 export async function setBookingOutcome(
   db: Db,
@@ -337,12 +337,9 @@ export async function setBookingOutcome(
   const [current] = await db.select().from(bookings).where(and(eq(bookings.id, args.bookingId), eq(bookings.showroomId, args.showroomId)));
   if (!current) throw new TypeBookingError("NOT_ACTIVE");
   const now = args.now ?? new Date();
-  if (args.outcome === "booked") {
-    if (current.status !== "completed" && current.status !== "no_show") throw new TypeBookingError("NOT_ACTIVE");
-  } else {
-    if (current.status !== "booked") throw new TypeBookingError("NOT_ACTIVE");
-    if (args.outcome === "no_show" && current.startsAt > now) throw new TypeBookingError("TOO_EARLY");
-  }
+  const settable = ["booked", "completed", "no_show"];
+  if (!settable.includes(current.status) || current.status === args.outcome) throw new TypeBookingError("NOT_ACTIVE");
+  if (args.outcome === "no_show" && current.startsAt > now) throw new TypeBookingError("TOO_EARLY");
   const [row] = await db.update(bookings).set({ status: args.outcome }).where(eq(bookings.id, current.id)).returning();
   await db.insert(events).values({
     showroomId: current.showroomId,
