@@ -12,6 +12,7 @@ import { createShowroom } from "@/lib/showroom-admin";
 import { localToUtc } from "@/lib/time";
 import { BOOKING_METRIC, cancelTypeBooking, cleanDetails, createTypeBooking, getBookingByToken, getBookingDetail, listBookings, rescheduleTypeBooking, sendBookingReminders, setBookingOutcome, TypeBookingError } from "@/lib/type-bookings";
 import { getTypeAvailability, typeSlots } from "@/lib/type-slots";
+import { addClosedDays, bookingsOnClosedDays, listClosedDays, removeClosedDay } from "@/lib/closed-days";
 import { resetDb, testDb } from "./helpers";
 
 const TZ = "America/Vancouver";
@@ -29,6 +30,12 @@ describe("typeSlots", () => {
     // Weekends closed; horizon 14 days → last day 2026-11-30 (a Monday).
     expect(days.some((d) => d.date === "2026-11-21")).toBe(false);
     expect(days.at(-1)!.date).toBe("2026-11-30");
+  });
+
+  it("offers nothing on a closed day", () => {
+    const days = typeSlots({ type: call, tz: TZ, now: NOW, capacity: 1, busy: [], closed: new Set(["2026-11-17"]) });
+    expect(days.map((d) => d.date)).not.toContain("2026-11-17");
+    expect(days.map((d) => d.date)).toContain("2026-11-18");
   });
 
   it("counts overlapping bookings, buffer included, against capacity", () => {
@@ -119,6 +126,20 @@ describe("booking a booking type", () => {
       setSlackBot(undefined);
       setSlackPoster(null);
     }
+  });
+
+  it("closed days close the type's calendar and list bookings already on them", async () => {
+    const { booking } = await createTypeBooking(db, { showroom: online, type, startsAt: slot("10:00"), details, createdBy: "customer", now: NOW });
+    await addClosedDays(db, online.id, [{ date: "2026-11-17", name: "Staff day" }, { date: "2026-11-18", name: "" }]);
+    const open = (await getTypeAvailability(db, { showroom: online, type, now: NOW })).map((d) => d.date);
+    expect(open).not.toContain("2026-11-17");
+    expect(open).not.toContain("2026-11-18");
+    expect(open).toContain("2026-11-19");
+    const list = await listClosedDays(db, online.id, "2026-11-16");
+    expect(list.map((c) => [c.date, c.name])).toEqual([["2026-11-17", "Staff day"], ["2026-11-18", ""]]);
+    expect((await bookingsOnClosedDays(db, online.id, ["2026-11-17"])).map((b) => b.id)).toEqual([booking.id]);
+    await removeClosedDay(db, online.id, list[0].id);
+    expect((await getTypeAvailability(db, { showroom: online, type, now: NOW })).map((d) => d.date)).toContain("2026-11-17");
   });
 
   it("checks the customer's details", () => {

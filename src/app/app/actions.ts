@@ -14,9 +14,11 @@ import { logEvent } from "@/lib/events";
 import { bool, dollarsToCents, errorMessage, num, str, withFlash } from "@/lib/flash";
 import { normalizePhone } from "@/lib/phone";
 import { getSlackBot, isSlackWebhookUrl, postSlack } from "@/lib/slack";
+import { addClosedDays, removeClosedDay } from "@/lib/closed-days";
+import { saskatchewanHolidays } from "@/lib/holidays";
 import { FLAG_KEYS, PROGRAM_KEYS, settingsSchema, validateSettings, type ProgramSettings } from "@/lib/settings";
 import { getCapacityConfig, patchShowroomSettings } from "@/lib/showroom";
-import { formatDateTime, normalizeTime } from "@/lib/time";
+import { formatDateTime, formatLongDateFromLocal, normalizeTime, toLocalDate } from "@/lib/time";
 import { hashToken } from "@/lib/tokens";
 import { attachUnit, bookableCompanions, bookableSiblings, linkOrdersForPickup, mergeIntoVisit, splitFromVisit, unlinkOrderPickup, collectParts, completeHandover, createOrder, deleteUnit, detachUnit, futureVisitFor, grantExtension, inviteAllReceived, inviteOrders, inviteUnit, inviteUnits, joinVisit, markReady, receiveUnit, resendInvite, retagUnit, startBuild, unreceiveUnit, waiveStorage } from "@/lib/units";
 import { currentShowroom } from "@/lib/current-showroom";
@@ -1105,6 +1107,48 @@ export async function setStoreHoursAction(formData: FormData) {
     await setStoreHours(db, showroom.id, hoursFromForm((k) => str(formData, k)));
     await logEvent(db, { showroomId: showroom.id, type: "store_hours_updated", actor: user.id });
     return "Availability saved. Booking types using store hours follow it now.";
+  });
+}
+
+const AVAIL_PATH = "/app/settings/availability";
+
+export async function addClosedDayAction(formData: FormData) {
+  return run(AVAIL_PATH, async () => {
+    const user = await requireActor("manager");
+    const showroom = await currentShowroom(user);
+    const date = str(formData, "date").trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error("Pick a date to close.");
+    if (date < toLocalDate(new Date(), showroom.timezone)) throw new Error("That date has already passed.");
+    const name = str(formData, "name").trim().slice(0, 80);
+    await addClosedDays(db, showroom.id, [{ date, name }]);
+    await logEvent(db, { showroomId: showroom.id, type: "settings_changed", actor: user.id, payload: { area: "closed_days", changes: { added: [date] } } });
+    return `Closed on ${formatLongDateFromLocal(date)}. Nothing can be booked that day.`;
+  });
+}
+
+export async function addSaskatchewanHolidaysAction(formData: FormData) {
+  return run(AVAIL_PATH, async () => {
+    const user = await requireActor("manager");
+    const showroom = await currentShowroom(user);
+    const year = Number(str(formData, "year"));
+    if (!Number.isInteger(year) || year < 2024 || year > 2100) throw new Error("Pick a year.");
+    const today = toLocalDate(new Date(), showroom.timezone);
+    const days = saskatchewanHolidays(year).filter((h) => h.date >= today);
+    if (days.length === 0) throw new Error(`Every ${year} holiday has already passed.`);
+    await addClosedDays(db, showroom.id, days);
+    await logEvent(db, { showroomId: showroom.id, type: "settings_changed", actor: user.id, payload: { area: "closed_days", changes: { added: days.map((d) => d.date), source: `saskatchewan_${year}` } } });
+    return `Added ${days.length} Saskatchewan holiday${days.length === 1 ? "" : "s"} for ${year}. Remove any day the store will open after all.`;
+  });
+}
+
+export async function removeClosedDayAction(id: string) {
+  return run(AVAIL_PATH, async () => {
+    const user = await requireActor("manager");
+    const showroom = await currentShowroom(user);
+    const row = await removeClosedDay(db, showroom.id, id);
+    if (!row) throw new Error("That closed day is already gone.");
+    await logEvent(db, { showroomId: showroom.id, type: "settings_changed", actor: user.id, payload: { area: "closed_days", changes: { removed: [row.date] } } });
+    return `Open again on ${formatLongDateFromLocal(row.date)}.`;
   });
 }
 
