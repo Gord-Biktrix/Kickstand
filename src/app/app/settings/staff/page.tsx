@@ -73,7 +73,7 @@ export default async function StaffSettingsPage({ searchParams }: { searchParams
                           <div>
                             <div className="font-medium">{s.name}{s.id === user.id && <span className="ml-1 text-xs text-muted">(you)</span>}</div>
                             <div className="text-xs text-muted">{s.email}</div>
-                            <div className="mt-1 flex gap-3">
+                            <div className="mt-1 flex gap-3 whitespace-nowrap">
                               <form action={setStaffPhotoAction.bind(null, s.id)}><PhotoUpload label={photos.get(s.id) ? "Change photo" : "Add photo"} /></form>
                               {photos.get(s.id) && <form action={removeStaffPhotoAction.bind(null, s.id)}><button type="submit" className="text-xs text-muted underline">Remove</button></form>}
                             </div>

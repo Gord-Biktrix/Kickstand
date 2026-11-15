@@ -29,7 +29,7 @@ import { sp, type SearchParams } from "@/lib/flash";
 import { baseUrl } from "@/lib/messages";
 import { EMBED_HOWS, type EmbedHow } from "@/lib/embed-script";
 import { SharePanel } from "./share-panel";
-import { and, eq, or, sql } from "drizzle-orm";
+import { and, eq, isNull, or, sql } from "drizzle-orm";
 import { staffUsers } from "@/db/schema";
 import { Avatar } from "@/components/avatar";
 import { photoUrls } from "@/lib/staff-photos";
@@ -58,9 +58,9 @@ export default async function BookingTypesPage({ searchParams }: { searchParams:
   const how = (EMBED_HOWS.some((h) => h.key === sp(q.how)) ? sp(q.how) : "inline") as EmbedHow;
   const root = baseUrl();
   const close = "/app/settings/booking-types";
-  // Staff who can be shown on booking pages: everyone active in this profile, with their photos.
+  // Staff who can be shown on booking pages: everyone active in this profile (including all-stores people), with photos.
   const team = (editing || creating)
-    ? await db.select({ id: staffUsers.id, name: staffUsers.name }).from(staffUsers).where(and(eq(staffUsers.active, true), or(eq(staffUsers.showroomId, showroom.id), sql`${showroom.id} = any(${staffUsers.extraShowroomIds})`))).orderBy(staffUsers.name)
+    ? await db.select({ id: staffUsers.id, name: staffUsers.name }).from(staffUsers).where(and(eq(staffUsers.active, true), or(eq(staffUsers.showroomId, showroom.id), isNull(staffUsers.showroomId), sql`${showroom.id} = any(${staffUsers.extraShowroomIds})`))).orderBy(staffUsers.name)
     : [];
   const teamPhotos = await photoUrls(db, team.map((p) => p.id));
   const people = team.map((p) => ({ ...p, photo: teamPhotos.get(p.id) ?? null }));
