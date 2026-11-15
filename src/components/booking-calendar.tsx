@@ -108,9 +108,11 @@ export function BookingCalendar({
               {selected.slots.map((s) => (
                 <li key={s.time}>
                   {s.time === time ? (
-                    <div className="grid grid-cols-2 gap-2">
-                      <span className="flex h-11 items-center justify-center rounded-lg text-sm font-semibold text-white" style={{ background: "#475569" }}>{formatTime(s.startsAt, tz)}</span>
-                      <Link href={href({ month: shown, date: selected.date, time: s.time, confirm: "1" })} className="flex h-11 items-center justify-center rounded-lg text-sm font-semibold text-white" style={{ background: accent }}>Next</Link>
+                    <div className="flex">
+                      <span className="flex h-11 min-w-0 flex-1 items-center justify-center whitespace-nowrap rounded-lg text-sm font-semibold text-white" style={{ background: "#475569" }}>{formatTime(s.startsAt, tz)}</span>
+                      <div className="slot-next">
+                        <Link href={href({ month: shown, date: selected.date, time: s.time, confirm: "1" })} className="flex h-11 w-full items-center justify-center whitespace-nowrap rounded-lg text-sm font-semibold text-white" style={{ background: accent }}>Next</Link>
+                      </div>
                     </div>
                   ) : (
                     <Link href={href({ month: shown, date: selected.date, time: s.time })} className="flex h-11 items-center justify-center rounded-lg border text-sm font-semibold hover:border-2" style={{ borderColor: accent, color: accent }}>

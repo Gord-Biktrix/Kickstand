@@ -149,3 +149,18 @@ button[aria-busy="true"]::after {
 .in-embed body { background: transparent; }
 /* In the embed the frame is sized to the page, so the page must not stretch to the frame (or it could never shrink). */
 .in-embed, .in-embed body { height: auto; min-height: 0; }
+
+/* Booking calendar: picking a time slides "Next" out beside it (the time narrows to make room). */
+.slot-next {
+  flex: 0 0 calc(50% - 4px);
+  margin-left: 8px;
+  overflow: hidden;
+  animation: slot-next-in 0.24s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+@keyframes slot-next-in {
+  from { flex-basis: 0; margin-left: 0; opacity: 0; }
+  to { flex-basis: calc(50% - 4px); margin-left: 8px; opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .slot-next { animation: none; }
+}
