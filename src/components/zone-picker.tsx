@@ -133,7 +133,7 @@ export function ZonePicker({ current, storeTz }: { current: string; storeTz: str
             {shown.length === 0 && <li className="px-3 py-2 text-sm text-muted">No time zone matches “{query}”.</li>}
           </ul>
           <div className="border-t border-border p-2">
-            <input ref={search} value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Type here to search time zones" aria-label="Search time zones" className="w-full rounded-full bg-background px-4 py-2 text-sm outline-none focus:ring-2 focus:ring-accent" />
+            <input ref={search} value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Type here to search time zones" aria-label="Search time zones" className="w-full rounded-full bg-background px-4 py-2 text-base sm:text-sm outline-none focus:ring-2 focus:ring-accent" />
           </div>
         </div>
       )}

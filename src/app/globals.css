@@ -71,8 +71,10 @@ body {
   .btn-block {
     @apply w-full py-3 text-base;
   }
+  /* 16px text on phones: iPhone Safari zooms the whole page in when a field under 16px is tapped, and stays
+     zoomed (in the website embed that zooms biktrix.ca too). 14px from the sm breakpoint up. */
   .input {
-    @apply w-full rounded-md border border-border bg-card px-3 py-2 text-sm text-foreground shadow-sm focus:outline-2 focus:outline-offset-1 focus:outline-accent;
+    @apply w-full rounded-md border border-border bg-card px-3 py-2 text-base sm:text-sm text-foreground shadow-sm focus:outline-2 focus:outline-offset-1 focus:outline-accent;
   }
   .card {
     @apply rounded-lg border border-border bg-card p-4 shadow-sm sm:p-5;
