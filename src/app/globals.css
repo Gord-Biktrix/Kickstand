@@ -164,3 +164,14 @@ button[aria-busy="true"]::after {
 @media (prefers-reduced-motion: reduce) {
   .slot-next { animation: none; }
 }
+
+/* Just-booked screen: a bike rolls in over a tire track and parks. Plays once. */
+.ride-bike { left: calc(100% - 120px); animation: ride-in 1.8s cubic-bezier(0.25, 0.8, 0.3, 1) both; }
+.ride-wheel { transform-box: fill-box; transform-origin: center; animation: ride-wheel 0.5s linear 3.6 both; }
+.ride-track { clip-path: inset(0 100px 0 0); animation: ride-track 1.8s cubic-bezier(0.25, 0.8, 0.3, 1) both; }
+@keyframes ride-in { from { left: -90px; } }
+@keyframes ride-wheel { to { transform: rotate(360deg); } }
+@keyframes ride-track { from { clip-path: inset(0 100% 0 0); } }
+@media (prefers-reduced-motion: reduce) {
+  .ride-bike, .ride-wheel, .ride-track { animation: none; }
+}
