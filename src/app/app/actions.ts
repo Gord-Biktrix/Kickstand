@@ -15,6 +15,7 @@ import { bool, dollarsToCents, errorMessage, num, str, withFlash } from "@/lib/f
 import { normalizePhone } from "@/lib/phone";
 import { getSlackBot, isSlackWebhookUrl, postSlack } from "@/lib/slack";
 import { addClosedDays, removeClosedDay } from "@/lib/closed-days";
+import { photoFromDataUrl, removeStaffPhoto, setStaffPhoto } from "@/lib/staff-photos";
 import { saskatchewanHolidays } from "@/lib/holidays";
 import { FLAG_KEYS, PROGRAM_KEYS, settingsSchema, validateSettings, type ProgramSettings } from "@/lib/settings";
 import { getCapacityConfig, patchShowroomSettings } from "@/lib/showroom";
@@ -443,6 +444,31 @@ export async function deleteStaffAction(id: string) {
     await managedTarget(user.role, id);
     await deleteStaff(id);
     return "Account deleted.";
+  });
+}
+
+/** A staff photo for booking pages: your own, or (manager and up) anyone you can see in Settings › Staff. */
+async function photoTarget(id: string) {
+  const user = await requireActor("staff", { anyStore: true });
+  if (user.id !== id && !hasRole(user.role, "manager")) throw new Error("Only managers can change someone else's photo.");
+  const [target] = await db.select({ id: staffUsers.id, name: staffUsers.name }).from(staffUsers).where(eq(staffUsers.id, id));
+  if (!target) throw new Error("That person isn't on the staff list.");
+  return { user, target };
+}
+
+export async function setStaffPhotoAction(id: string, formData: FormData) {
+  return run("/app/settings/staff", async () => {
+    const { target } = await photoTarget(id);
+    await setStaffPhoto(db, id, photoFromDataUrl(str(formData, "photo")));
+    return `Photo saved for ${target.name}. It shows on booking pages that list them.`;
+  });
+}
+
+export async function removeStaffPhotoAction(id: string) {
+  return run("/app/settings/staff", async () => {
+    const { target } = await photoTarget(id);
+    await removeStaffPhoto(db, id);
+    return `Photo removed for ${target.name}.`;
   });
 }
 
@@ -1053,6 +1079,7 @@ function bookingTypeFromForm(formData: FormData, profileKind: string, current?: 
     color: str(formData, "color") || "orange",
     createsWorkOrder: bool(formData, "creates_work_order"),
     ...(formData.has("questions") ? { questions: validateQuestions(parseJson(str(formData, "questions"))) } : {}),
+    ...(formData.has("hosts_shown") ? { hostIds: formData.getAll("host_ids").map(String) } : {}),
   }, profileKind);
 }
 

@@ -2,6 +2,8 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import type { TypeDay } from "@/lib/type-slots";
 import { formatLongDateFromLocal, formatTime } from "@/lib/time";
+import { hostNames, type Host } from "@/lib/staff-photos";
+import { Avatar } from "./avatar";
 
 /**
  * The Calendly-style picker: a panel about the appointment on the left, a month calendar with the open days
@@ -29,8 +31,8 @@ export function BookingCalendar({
   time?: string;
   accent: string;
   info: ReactNode;
-  /** "Pacific time" — shown under the calendar. */
-  zone: string;
+  /** "Pacific time" (shown as "Times are shown in …"), or a zone picker. */
+  zone: ReactNode;
 }) {
   const join = base.includes("?") ? "&" : "?";
   const open = new Map(days.map((d) => [d.date, d]));
@@ -96,7 +98,7 @@ export function BookingCalendar({
               </div>
             </>
           )}
-          <p className="mt-6 text-xs text-muted">Times are shown in {zone}.</p>
+          <div className="mt-6 text-xs text-muted">{typeof zone === "string" ? <p>Times are shown in {zone}.</p> : zone}</div>
         </div>
 
         {selected && (
@@ -126,11 +128,19 @@ export function BookingCalendar({
 }
 
 /** The left panel: brand, who, what, how long, where. */
-export function BookingInfo({ brand, title, durationMin, location, description, extra }: { brand: string; title: string; durationMin: number; location: string; description?: string; extra?: ReactNode }) {
+export function BookingInfo({ brand, title, durationMin, location, description, extra, hosts }: { brand: string; title: string; durationMin: number; location: string; description?: string; extra?: ReactNode; hosts?: Host[] }) {
   return (
     <div className="space-y-3">
       <p className="text-sm font-semibold uppercase tracking-widest text-accent">Biktrix</p>
       <p className="text-sm text-muted">{brand}</p>
+      {hosts && hosts.length > 0 && (
+        <div className="flex items-center gap-3 pt-1">
+          <div className="flex -space-x-3">
+            {hosts.map((h) => <Avatar key={h.id} name={h.name} photo={h.photo} size={48} className="ring-2 ring-card" />)}
+          </div>
+          <p className="text-sm leading-snug"><span className="text-muted">You&apos;ll talk to</span><br /><span className="font-medium">{hostNames(hosts)}</span></p>
+        </div>
+      )}
       <h1 className="text-2xl font-bold leading-tight">{title}</h1>
       <p className="flex items-center gap-2 text-sm text-muted"><ClockIcon /> {durationMin} min</p>
       <p className="flex items-center gap-2 text-sm text-muted"><PlaceIcon /> {location}</p>

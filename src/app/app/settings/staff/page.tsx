@@ -7,7 +7,10 @@ import { sp, type SearchParams } from "@/lib/flash";
 import { googleEnabled } from "@/lib/google-auth";
 import { mailerKind } from "@/lib/mailer";
 import { listShowrooms } from "@/lib/showroom";
-import { clearStaffPasswordAction, deleteStaffAction, inviteStaffAction, setStaffActiveAction, updateStaffAction } from "../../actions";
+import { clearStaffPasswordAction, deleteStaffAction, inviteStaffAction, removeStaffPhotoAction, setStaffActiveAction, setStaffPhotoAction, updateStaffAction } from "../../actions";
+import { PhotoUpload } from "@/components/photo-upload";
+import { Avatar } from "@/components/avatar";
+import { photoUrls } from "@/lib/staff-photos";
 
 export const metadata = { title: "Staff" };
 
@@ -21,6 +24,7 @@ export default async function StaffSettingsPage({ searchParams }: { searchParams
   const [staff, showrooms] = await Promise.all([listStaff(), listShowrooms(db)]);
   const storeName = (id: string | null) => (id ? showrooms.find((s) => s.id === id)?.name ?? "—" : "All stores");
   const visible = admin ? staff : staff.filter((s) => s.showroomId === showroom.id || s.extraShowroomIds.includes(showroom.id));
+  const photos = await photoUrls(db, visible.map((s) => s.id));
   const google = googleEnabled();
   const emailKey = mailerKind() !== "console";
 
@@ -64,8 +68,17 @@ export default async function StaffSettingsPage({ searchParams }: { searchParams
                   return (
                     <tr key={s.id} className={s.active ? undefined : "opacity-60"}>
                       <td>
-                        <div className="font-medium">{s.name}{s.id === user.id && <span className="ml-1 text-xs text-muted">(you)</span>}</div>
-                        <div className="text-xs text-muted">{s.email}</div>
+                        <div className="flex items-start gap-3">
+                          <Avatar name={s.name} photo={photos.get(s.id)} />
+                          <div>
+                            <div className="font-medium">{s.name}{s.id === user.id && <span className="ml-1 text-xs text-muted">(you)</span>}</div>
+                            <div className="text-xs text-muted">{s.email}</div>
+                            <div className="mt-1 flex gap-3">
+                              <form action={setStaffPhotoAction.bind(null, s.id)}><PhotoUpload label={photos.get(s.id) ? "Change photo" : "Add photo"} /></form>
+                              {photos.get(s.id) && <form action={removeStaffPhotoAction.bind(null, s.id)}><button type="submit" className="text-xs text-muted underline">Remove</button></form>}
+                            </div>
+                          </div>
+                        </div>
                       </td>
                       <td>
                         {editable ? (

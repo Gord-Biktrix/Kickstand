@@ -8,6 +8,8 @@ import { formatLongDate, formatTime } from "@/lib/time";
 import { getBookingByToken } from "@/lib/type-bookings";
 import { cancelTypeAction } from "../../actions";
 import { zoneLabel } from "../../zone";
+import { ZoneAuto } from "@/components/zone-picker";
+import { viewZone } from "@/lib/view-tz";
 
 export const metadata = { title: "Your booking" };
 
@@ -26,7 +28,8 @@ export default async function ManageBookingPage({ params, searchParams }: { para
     return <div className="mx-auto max-w-md"><Card title="Link not found"><p className="text-sm">This booking link isn&apos;t valid. Check the link in your confirmation, or book again.</p></Card></div>;
   }
   const { booking, type, showroom } = view;
-  const tz = showroom.timezone;
+  const tz = viewZone(sp(q.tz), showroom.timezone);
+  const tzq = tz === showroom.timezone ? "" : `?tz=${encodeURIComponent(tz)}`;
   const active = booking.status === "booked" && booking.startsAt > new Date();
   const ok = sp(q.ok);
   const error = sp(q.error);
@@ -38,6 +41,7 @@ export default async function ManageBookingPage({ params, searchParams }: { para
 
   return (
     <div className="mx-auto max-w-md space-y-4">
+      <ZoneAuto storeTz={showroom.timezone} />
       {ok && OK[ok] && <Alert tone="ok">{OK[ok]}</Alert>}
       {error && <Alert tone="danger">{error}</Alert>}
       <Card
@@ -52,7 +56,7 @@ export default async function ManageBookingPage({ params, searchParams }: { para
         {active && (
           <div className="mt-4 flex flex-wrap gap-2">
             <a href={`/book/m/${token}/ics`} className="btn btn-sm">Add to calendar</a>
-            <Link href={`/book/m/${token}/reschedule`} className="btn btn-sm">Change time</Link>
+            <Link href={`/book/m/${token}/reschedule${tzq}`} className="btn btn-sm">Change time</Link>
             <form action={cancelTypeAction.bind(null, token)}>
               <ConfirmButton className="btn btn-danger btn-sm" message="Cancel this booking?">Cancel booking</ConfirmButton>
             </form>

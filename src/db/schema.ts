@@ -50,6 +50,15 @@ export const staffUsers = pgTable(
   (t) => [check("staff_users_role_check", sql`${t.role} in ('staff','manager','admin','owner')`)],
 );
 
+/** A staff member's photo, shown on booking pages for the types they're a host of. A small square JPEG, base64. */
+export const staffPhotos = pgTable("staff_photos", {
+  staffUserId: uuid("staff_user_id")
+    .primaryKey()
+    .references(() => staffUsers.id, { onDelete: "cascade" }),
+  image: text("image").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const magicLinks = pgTable("magic_links", {
   id: id(),
   email: text("email").notNull(),
@@ -378,6 +387,8 @@ export const bookingTypes = pgTable(
     createsWorkOrder: boolean("creates_work_order").notNull().default(false),
     /** Questions on the booking form (src/lib/booking-questions.ts). */
     questions: jsonb("questions").notNull().default([]),
+    /** Staff shown with their photos on the booking page ("You'll talk to…"), in this order. */
+    hostIds: uuid("host_ids").array().notNull().default(sql`'{}'::uuid[]`),
     active: boolean("active").notNull().default(true),
     sortOrder: smallint("sort_order").notNull().default(0),
     ...timestamps,

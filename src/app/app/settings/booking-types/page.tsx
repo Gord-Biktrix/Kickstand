@@ -29,6 +29,10 @@ import { sp, type SearchParams } from "@/lib/flash";
 import { baseUrl } from "@/lib/messages";
 import { EMBED_HOWS, type EmbedHow } from "@/lib/embed-script";
 import { SharePanel } from "./share-panel";
+import { and, eq, or, sql } from "drizzle-orm";
+import { staffUsers } from "@/db/schema";
+import { Avatar } from "@/components/avatar";
+import { photoUrls } from "@/lib/staff-photos";
 import { createBookingTypeAction, setBookingTypeActiveAction, updateBookingTypeAction } from "../../actions";
 
 export const metadata = { title: "Booking types" };
@@ -54,6 +58,12 @@ export default async function BookingTypesPage({ searchParams }: { searchParams:
   const how = (EMBED_HOWS.some((h) => h.key === sp(q.how)) ? sp(q.how) : "inline") as EmbedHow;
   const root = baseUrl();
   const close = "/app/settings/booking-types";
+  // Staff who can be shown on booking pages: everyone active in this profile, with their photos.
+  const team = (editing || creating)
+    ? await db.select({ id: staffUsers.id, name: staffUsers.name }).from(staffUsers).where(and(eq(staffUsers.active, true), or(eq(staffUsers.showroomId, showroom.id), sql`${showroom.id} = any(${staffUsers.extraShowroomIds})`))).orderBy(staffUsers.name)
+    : [];
+  const teamPhotos = await photoUrls(db, team.map((p) => p.id));
+  const people = team.map((p) => ({ ...p, photo: teamPhotos.get(p.id) ?? null }));
 
   return (
     <div>
@@ -87,7 +97,7 @@ export default async function BookingTypesPage({ searchParams }: { searchParams:
         <SharePanel t={sharing} storeSlug={showroom.slug} storeName={showroom.name} root={root} close={close} how={how} text={sp(q.text)} color={sp(q.color)} textColor={sp(q.text_color)} />
       )}
       {(editing || creating) && (
-        <EditorPanel t={editing} online={online} storeHours={storeHours} profileSlug={showroom.slug} close={close} />
+        <EditorPanel t={editing} online={online} storeHours={storeHours} profileSlug={showroom.slug} close={close} people={people} />
       )}
     </div>
   );
@@ -122,7 +132,7 @@ function TypeRow({ t, profileSlug, root, storeHours, selected }: { t: BookingTyp
 }
 
 /** The Calendly-style side panel: name and colour, duration, location, availability; the rest under More options. */
-function EditorPanel({ t, online, storeHours, profileSlug, close }: { t?: BookingType; online: boolean; storeHours: WeeklyHours; profileSlug: string; close: string }) {
+function EditorPanel({ t, online, storeHours, profileSlug, close, people }: { t?: BookingType; online: boolean; storeHours: WeeklyHours; profileSlug: string; close: string; people: { id: string; name: string; photo: string | null }[] }) {
   const pickup = t?.kind === "pickup";
   const locations: BookingLocation[] = online ? ["video", "phone"] : ["in_person", "video", "phone"];
   const duration = t?.durationMin ?? NEW_TYPE_DEFAULTS.durationMin;
@@ -223,6 +233,25 @@ function EditorPanel({ t, online, storeHours, profileSlug, close }: { t?: Bookin
                 <legend className="mb-1 font-semibold">Booking form</legend>
                 <p className="mb-2 text-xs text-muted">Name, email, phone and a note are always asked. Add questions to know why they&apos;re booking; answers show in Slack, on the booking and in Klaviyo.</p>
                 <QuestionsEditor initial={readQuestions(t?.questions)} />
+              </fieldset>
+
+              <fieldset>
+                <legend className="mb-1 font-semibold">People on the booking page</legend>
+                <p className="mb-2 text-xs text-muted">Customers see their photos and first names above the title, so they know who they&apos;ll talk to. Add photos in <Link href="/app/settings/staff" className="underline">Settings › Staff</Link>.</p>
+                <input type="hidden" name="hosts_shown" value="1" />
+                {people.length === 0 ? <p className="text-sm text-muted">No staff in this store yet.</p> : (
+                  <ul className="space-y-1">
+                    {people.map((p) => (
+                      <li key={p.id}>
+                        <label className="flex items-center gap-3 rounded-md px-1 py-1 text-sm hover:bg-background">
+                          <input type="checkbox" name="host_ids" value={p.id} defaultChecked={t?.hostIds?.includes(p.id)} className="h-4 w-4" />
+                          <Avatar name={p.name} photo={p.photo} size={28} />
+                          <span>{p.name}{!p.photo && <span className="text-xs text-muted"> · no photo yet</span>}</span>
+                        </label>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </fieldset>
 
               <details className="rounded-lg border border-border p-3">

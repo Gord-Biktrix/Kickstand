@@ -186,6 +186,8 @@ export type BookingTypeInput = {
   color?: string;
   /** Booking form questions (src/lib/booking-questions.ts); left as is when omitted. */
   questions?: BookingQuestion[];
+  /** Staff shown with photos on the booking page; left as is when omitted. */
+  hostIds?: string[];
 };
 
 /** The weekly hours a type is actually bookable in: the profile's availability, or its own custom hours. */
@@ -221,6 +223,7 @@ export function validateBookingType(raw: BookingTypeInput, profileKind: string):
     createsWorkOrder: raw.location === "in_person" && raw.createsWorkOrder,
     useStoreHours: !!raw.useStoreHours,
     color: raw.color && isBookingColor(raw.color) ? raw.color : "orange",
+    ...(raw.hostIds ? { hostIds: [...new Set(raw.hostIds.filter((id) => /^[0-9a-f-]{36}$/i.test(id)))].slice(0, 6) } : {}),
   };
   if (!out.useStoreHours && !Object.keys(out.hours).length) throw new Error("Set the hours it can be booked on at least one day, or use the store's availability.");
   return out;

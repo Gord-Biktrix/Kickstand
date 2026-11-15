@@ -17,7 +17,7 @@ export async function testDb(): Promise<Db> {
 
 export async function resetDb(db: Db): Promise<ShowroomCtx> {
   await db.execute(sql`
-    truncate table events, appointments, day_counters, units, orders, capacity_overrides, lightspeed_connections, google_connections,
+    truncate table staff_photos, events, appointments, day_counters, units, orders, capacity_overrides, lightspeed_connections, google_connections,
       capacity_rules, staff_sessions, magic_links, staff_users, showrooms cascade
   `);
   await seed(db);
