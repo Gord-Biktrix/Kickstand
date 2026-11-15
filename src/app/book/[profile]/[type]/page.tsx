@@ -59,7 +59,7 @@ export default async function BookTypePage({ params, searchParams }: { params: P
 
   return (
     <div className="space-y-4">
-      <Link href={`/book/${showroom.slug}`} className="text-sm text-accent underline">← All appointment types</Link>
+      <Link href={`/book/${showroom.slug}`} className="all-types-link text-sm text-accent underline">← All appointment types</Link>
       {error && <Alert tone="danger">{error}</Alert>}
       {date && time && !slot && <Alert tone="danger">That time was just taken or is no longer open. Please pick another.</Alert>}
       {slot && sp(q.confirm) === "1" ? (

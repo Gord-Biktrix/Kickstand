@@ -11,7 +11,7 @@ export const metadata = { title: { default: "Book an appointment · Biktrix", te
  * arrives instead of after the page's JavaScript has downloaded and started (saves a few hundred ms on a first
  * visit). Does nothing on the full page.
  */
-const FRAME_SIZER = `(function(){if(window.parent===window)return;var d=document.documentElement;d.classList.add("in-embed");
+const FRAME_SIZER = `(function(){if(window.parent===window)return;var d=document.documentElement;d.classList.add("in-embed");var seg=location.pathname.split("/");if(seg[1]==="book"&&seg[2]!=="m"&&seg[3])d.classList.add("embed-one-type");
 function send(m){window.parent.postMessage(m,"*");}
 var last=0;function post(){var m=document.querySelector("main");if(!m||!m.firstElementChild)return;var h=Math.ceil(document.body.getBoundingClientRect().height);if(h!==last){last=h;send({type:"biktrix-booking:height",height:h});}}
 post();if(window.ResizeObserver)new ResizeObserver(post).observe(document.body);document.addEventListener("DOMContentLoaded",post);window.addEventListener("load",post);
