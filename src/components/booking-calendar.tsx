@@ -2,7 +2,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import type { TypeDay } from "@/lib/type-slots";
 import { formatLongDateFromLocal, formatTime } from "@/lib/time";
-import { hostNames, type Host } from "@/lib/staff-photos";
+import type { Host } from "@/lib/staff-photos";
 import { Avatar } from "./avatar";
 
 /**
@@ -133,19 +133,21 @@ export function BookingInfo({ brand, title, durationMin, location, description, 
     <div className="space-y-3">
       <p className="text-sm font-semibold uppercase tracking-widest text-accent">Biktrix</p>
       <p className="text-sm text-muted">{brand}</p>
-      {hosts && hosts.length > 0 && (
-        <div className="flex items-center gap-3 pt-1">
-          <div className="flex -space-x-3">
-            {hosts.map((h) => <Avatar key={h.id} name={h.name} photo={h.photo} size={48} className="ring-2 ring-card" />)}
-          </div>
-          <p className="text-sm leading-snug"><span className="text-muted">You&apos;ll talk to</span><br /><span className="font-medium">{hostNames(hosts)}</span></p>
-        </div>
-      )}
+      {hosts && hosts.length > 0 && <HostFaces hosts={hosts} size={52} />}
       <h1 className="text-2xl font-bold leading-tight">{title}</h1>
       <p className="flex items-center gap-2 text-sm text-muted"><ClockIcon /> {durationMin} min</p>
       <p className="flex items-center gap-2 text-sm text-muted"><PlaceIcon /> {location}</p>
       {extra}
       {description && <p className="pt-2 text-sm">{description}</p>}
+    </div>
+  );
+}
+
+/** The people a customer might talk to: overlapping round photos (names only for screen readers and on hover). */
+export function HostFaces({ hosts, size = 52 }: { hosts: Host[]; size?: number }) {
+  return (
+    <div className="flex -space-x-3 pt-1" role="img" aria-label={`Our team: ${hosts.map((h) => h.name).join(", ")}`}>
+      {hosts.map((h) => <span key={h.id} title={h.name}><Avatar name={h.name} photo={h.photo} size={size} className="ring-2 ring-card" /></span>)}
     </div>
   );
 }

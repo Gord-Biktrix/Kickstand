@@ -237,7 +237,7 @@ function EditorPanel({ t, online, storeHours, profileSlug, close, people }: { t?
 
               <fieldset>
                 <legend className="mb-1 font-semibold">People on the booking page</legend>
-                <p className="mb-2 text-xs text-muted">Customers see their photos and first names above the title, so they know who they&apos;ll talk to. Add photos in <Link href="/app/settings/staff" className="underline">Settings › Staff</Link>.</p>
+                <p className="mb-2 text-xs text-muted">Customers see their photos above the title and on the list of appointment types, so they know who they&apos;ll talk to. Add photos in <Link href="/app/settings/staff" className="underline">Settings › Staff</Link>.</p>
                 <input type="hidden" name="hosts_shown" value="1" />
                 {people.length === 0 ? <p className="text-sm text-muted">No staff in this store yet.</p> : (
                   <ul className="space-y-1">
