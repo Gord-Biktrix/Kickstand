@@ -15,6 +15,11 @@ export type CapacityMode = "bench" | "staff";
 export type WeeklyHours = Record<string, [string, string][]>;
 
 export const LOCATION_LABEL: Record<BookingLocation, string> = { in_person: "In person", video: "Video call", phone: "Phone call" };
+
+/** Words for "it happened": a visit is checked in, a phone or video call is done. */
+export function doneWords(location: string): { action: string; done: string } {
+  return location === "in_person" ? { action: "Check in", done: "checked in" } : { action: "Mark as done", done: "done" };
+}
 export const ACCESS_LABEL: Record<BookingAccess, string> = { public: "Anyone (public booking page)", invite: "Invite link only" };
 export const CAPACITY_LABEL: Record<CapacityMode, string> = { bench: "Bench: a set number at the same time", staff: "Per staff member: one each" };
 export const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;

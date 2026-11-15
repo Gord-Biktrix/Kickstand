@@ -8,7 +8,7 @@ import { weekSchedule, type ScheduleDay, type ScheduleRow } from "@/lib/queries"
 import { addLocalDays, formatLongDateFromLocal, formatShortDateFromLocal, formatTime, localToUtc, minutesToTime, timeToMinutes, toLocalDate, weekdayOf } from "@/lib/time";
 import { formatInTimeZone } from "date-fns-tz";
 import { listBookings, type BookingRow } from "@/lib/type-bookings";
-import { colorOf, effectiveHours, listBookingTypes, type WeeklyHours } from "@/lib/booking-types";
+import { colorOf, effectiveHours, listBookingTypes, type WeeklyHours, doneWords } from "@/lib/booking-types";
 import { parseISO, format } from "date-fns";
 
 export const metadata = { title: "Appointments" };
@@ -309,7 +309,7 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
                     {bookingsOn(days[0].date).map((r) => (
                       <li key={r.booking.id} className="py-2">
                         <Link href={`/app/bookings/${r.booking.id}`} className="font-medium hover:text-accent">{formatTime(r.booking.startsAt, tz)} · {r.booking.customerName}</Link>
-                        <p className="text-xs text-muted">{r.type.name}{r.booking.status !== "booked" ? ` · ${r.booking.status === "completed" ? "checked in" : "no-show"}` : ""}</p>
+                        <p className="text-xs text-muted">{r.type.name}{r.booking.status !== "booked" ? ` · ${r.booking.status === "completed" ? doneWords(r.type.location).done : "no-show"}` : ""}</p>
                       </li>
                     ))}
                   </ul>

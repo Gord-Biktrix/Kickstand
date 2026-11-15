@@ -8,7 +8,7 @@ import { zoneLabel } from "@/app/book/zone";
 import { BookingCalendar, BookingInfo } from "@/components/booking-calendar";
 import { Badge, Card, Flash, PageHeader } from "@/components/ui";
 import { listStaff, requireUser } from "@/lib/auth";
-import { colorOf, LOCATION_LABEL, type BookingLocation } from "@/lib/booking-types";
+import { colorOf, LOCATION_LABEL, type BookingLocation, doneWords } from "@/lib/booking-types";
 import { currentShowroom } from "@/lib/current-showroom";
 import { sp, type SearchParams } from "@/lib/flash";
 import { formatDateTime, formatLongDate, formatLongDateFromLocal, formatTime } from "@/lib/time";
@@ -33,16 +33,16 @@ const EVENT_LABEL: Record<string, string> = {
   booking_rescheduled: "Moved to a new time",
   booking_cancelled: "Cancelled",
   booking_reminder_day_before: "Day-before reminder sent",
-  booking_checked_in: "Checked in",
+  booking_checked_in: "Checked in", // "Done" for phone and video calls (below)
   booking_no_show: "Marked no-show",
-  booking_outcome_undone: "Check-in / no-show undone",
+  booking_outcome_undone: "Done / no-show undone",
   booking_workorder_created: "Lightspeed work order created",
   booking_workorder_updated: "Lightspeed work order updated",
   booking_workorder_failed: "Lightspeed work order failed",
   booking_calendar_failed: "Google Calendar copy failed",
 };
 
-/** One booking: the booking itself with Check in / No-show / Change time / Cancel beside it, then its timeline. */
+/** One booking: the booking itself with Check in (or Mark as done, for calls) / No-show / Change time / Cancel beside it, then its timeline. */
 export default async function BookingPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<SearchParams> }) {
   const { id } = await params;
   const q = await searchParams;
@@ -60,7 +60,8 @@ export default async function BookingPage({ params, searchParams }: { params: Pr
   const slot = date && time && sp(q.confirm) === "1" ? days.find((d) => d.date === date)?.slots.find((s) => s.time === time) : undefined;
   const staffNames = new Map((await listStaff()).map((s) => [s.id, s.name]));
   const who = (actor: string) => staffNames.get(actor) ?? (actor === "customer" ? "Customer" : actor);
-  const status = STATUS[b.status] ?? STATUS.booked;
+  const words = doneWords(type.location);
+  const status = b.status === "completed" ? { ...STATUS.completed, label: words.done } : (STATUS[b.status] ?? STATUS.booked);
   const self = `/app/bookings/${b.id}`;
 
   return (
@@ -101,7 +102,7 @@ export default async function BookingPage({ params, searchParams }: { params: Pr
           <div className="flex flex-col gap-2">
             {b.status === "booked" && (
               <>
-                <form action={checkInBookingAction.bind(null, b.id, self)}><button type="submit" className="btn btn-primary btn-sm w-full">Check in</button></form>
+                <form action={checkInBookingAction.bind(null, b.id, self)}><button type="submit" className="btn btn-primary btn-sm w-full">{words.action}</button></form>
                 {b.startsAt < now && <form action={noShowBookingAction.bind(null, b.id, self)}><button type="submit" className="btn btn-sm w-full">No-show</button></form>}
                 {b.startsAt > now && <Link href={`${self}?move=1`} className="btn btn-sm">Change time</Link>}
                 <form action={staffCancelTypeBookingAction.bind(null, b.id)}><ConfirmButton className="btn btn-danger btn-sm w-full" message={`Cancel ${b.customerName}'s ${type.name}? They're told through Klaviyo.`}>Cancel</ConfirmButton></form>
@@ -152,7 +153,7 @@ export default async function BookingPage({ params, searchParams }: { params: Pr
             {timeline.map((e) => (
               <li key={e.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
                 <span>
-                  {EVENT_LABEL[e.type] ?? e.type}
+                  {e.type === "booking_checked_in" && type.location !== "in_person" ? "Done" : (EVENT_LABEL[e.type] ?? e.type)}
                   {typeof e.payload.workorder_id === "string" && <span className="text-muted"> #{e.payload.workorder_id}{e.payload.customer_matched === true ? " (existing customer)" : e.payload.customer_matched === false ? " (new customer)" : ""}</span>}
                   {typeof e.payload.error === "string" && <span className="text-danger"> · {e.payload.error}</span>}
                   {e.klaviyoStatus === "failed" && <Badge tone="danger">message not sent</Badge>}

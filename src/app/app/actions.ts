@@ -1201,9 +1201,9 @@ async function staffBooking(id: string) {
 
 export async function checkInBookingAction(id: string, returnTo: string) {
   return run(safeReturn(returnTo, `/app/bookings/${id}`), async () => {
-    const { user, showroom } = await staffBooking(id);
+    const { user, showroom, detail } = await staffBooking(id);
     await setBookingOutcome(db, { showroomId: showroom.id, bookingId: id, outcome: "completed", actor: user.id });
-    return "Checked in.";
+    return detail.type.location === "in_person" ? "Checked in." : "Marked as done.";
   });
 }
 
