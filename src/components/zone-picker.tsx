@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { CANADIAN_ZONE_NAMES } from "@/app/book/zone";
 
 /** Point the page at another zone: drops the picked day and time, which are labelled in the old zone. */
 function zoneUrl(tz: string, keepSelection = false): string {
@@ -48,7 +49,7 @@ function describe(tz: string, at: Date): ZoneRow | null {
     const minutes = m ? (m[1] === "-" ? -1 : 1) * (Number(m[2]) * 60 + Number(m[3])) : 0;
     const offset = m ? `GMT${m[1]}${m[2]}:${m[3]}` : "GMT+00:00";
     const short = new Intl.DateTimeFormat("en-US", { timeZone: tz, timeZoneName: "short" }).formatToParts(at).find((p) => p.type === "timeZoneName")?.value ?? "";
-    const abbr = /^GMT[+-]?\d*/.test(short) || !short ? (m ? `GMT${m[1]}${Number(m[2])}${m[3] !== "00" ? `:${m[3]}` : ""}` : "GMT") : short;
+    const abbr = CANADIAN_ZONE_NAMES[tz] ?? (/^GMT[+-]?\d*/.test(short) || !short ? (m ? `GMT${m[1]}${Number(m[2])}${m[3] !== "00" ? `:${m[3]}` : ""}` : "GMT") : short);
     const now = new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "2-digit", minute: "2-digit" }).format(at);
     return { tz, offset, minutes, abbr, label: `${offset} ${tz} (${abbr})`, now };
   } catch {
