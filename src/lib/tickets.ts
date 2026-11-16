@@ -9,7 +9,7 @@ import { bookings, events, lsWorkorders, orders, units } from "@/db/schema";
 import { asList, LightspeedClient, lightspeedEnabled } from "./lightspeed";
 import { logger } from "./logger";
 import { normalizePhone } from "./phone";
-import { itemNames } from "./workorder-lines";
+import { itemNames, lightspeedReason } from "./workorder-lines";
 import type { ShowroomCtx } from "./showroom";
 
 /** The service menu, until stores set their own (Settings › Services): name and usual time. */
@@ -179,6 +179,34 @@ export async function customerBikesWithStatus(db: Db, who: { lsCustomerId: strin
   return { bikes: [...out.values()].slice(0, 6), lightspeedError };
 }
 
+export type PartMatch = { itemId: string; name: string; price: number | null };
+
+/** "Juggernaut Classic Duo Step-Thru 17\" Champagne 24x4" → "Juggernaut Classic": the model words parts are named after. */
+export function bikeModel(bike: string): string {
+  return bike.replace(/^\d+\s*-\s*/, "").split(/[·,]/)[0].trim().split(/\s+/).slice(0, 2).join(" ");
+}
+
+/**
+ * Parts for the Parts tab: Lightspeed items matching what's typed, or (with nothing typed) the chosen bike's model
+ * ("Kutty", "Juggernaut Classic"). Serialized items (the bikes themselves) are left out. Read only.
+ */
+export async function searchParts(client: LightspeedClient, args: { q: string; bike: string }): Promise<PartMatch[]> {
+  const term = (args.q.trim() || bikeModel(args.bike)).replace(/[%|,~]/g, " ").trim();
+  if (term.length < 2) return [];
+  // One pattern with the words in order: "Juggernaut Classic" → %Juggernaut%Classic% (finds "Juggernaut Classic brake pads").
+  const words = term.split(/\s+/).filter(Boolean).slice(0, 3);
+  const res = await client.request<Record<string, unknown>>("GET", `Item.json?limit=40&archived=false&description=${encodeURIComponent("~,")}${encodeURIComponent(`%${words.join("%")}%`)}`);
+  return asList<Record<string, unknown>>(res, "Item")
+    .filter((i) => String(i.serialized) !== "true")
+    .map((i) => {
+      const prices = asList<Record<string, unknown>>(i.Prices as Record<string, unknown> | undefined, "ItemPrice");
+      const price = (prices.find((p) => String(p.useType) === "Default") ?? prices[0])?.amount;
+      return { itemId: String(i.itemID), name: bikeName(String(i.description ?? "").trim()), price: price !== undefined && price !== null && String(price) !== "" ? Number(price) : null };
+    })
+    .filter((p) => p.name)
+    .slice(0, 24);
+}
+
 export type NewTicket = {
   customer: { lsCustomerId: string; name: string } | { name: string; phone: string; email: string };
   bike: string;
@@ -189,7 +217,11 @@ export type NewTicket = {
   employeeId: string | null;
   /** A Lightspeed Serialized (the customer's registered bike) to attach to the work order. */
   serializedId?: string | null;
+  /** Parts picked from the Parts tab: added to the work order as Lightspeed lines (and listed in the note). */
+  parts?: { itemId: string; name: string; qty: number }[];
 };
+
+export type TicketResult = { workorderId: string; partsAdded: number; partsFailed: string[] };
 
 export class TicketError extends Error {}
 
@@ -202,7 +234,7 @@ export function checkTicket(t: NewTicket): void {
 }
 
 /** Create the work order in Lightspeed (Open, date in now, due at ready-by) and put it on the board. */
-export async function createTicket(db: Db, args: { showroom: ShowroomCtx; ticket: NewTicket; actor: string; now?: Date; client?: LightspeedClient }): Promise<string> {
+export async function createTicket(db: Db, args: { showroom: ShowroomCtx; ticket: NewTicket; actor: string; now?: Date; client?: LightspeedClient }): Promise<TicketResult> {
   const { showroom, ticket } = args;
   if (!lightspeedEnabled(showroom)) throw new TicketError("Lightspeed isn't switched on for this store, so tickets can't be created here yet.");
   checkTicket(ticket);
@@ -222,6 +254,7 @@ export async function createTicket(db: Db, args: { showroom: ShowroomCtx; ticket
     `${ticket.service.toUpperCase()} · ticket from Kickstand`,
     `Bike: ${ticket.bike.trim()}${ticket.serial.trim() ? ` · serial ${ticket.serial.trim()}` : ""}`,
     ticket.said.trim() ? `Customer says: ${ticket.said.trim()}` : "",
+    ticket.parts?.length ? `Parts: ${ticket.parts.map((p) => `${p.name}${p.qty > 1 ? ` ×${p.qty}` : ""}`).join(", ")}` : "",
   ].filter(Boolean).join("\n");
   let workorderID: string;
   try {
@@ -255,6 +288,25 @@ export async function createTicket(db: Db, args: { showroom: ShowroomCtx; ticket
     etaOut: ticket.readyBy,
     lsUpdatedAt: now,
   }).onConflictDoNothing();
-  await db.insert(events).values({ showroomId: showroom.id, type: "ticket_created", actor: args.actor, payload: { workorder_id: workorderID, customer_id: customerId, service: ticket.service } });
-  return workorderID;
+  // Parts become real lines on the work order (Lightspeed reserves the stock). One that fails stays in the note.
+  let partsAdded = 0;
+  const partsFailed: string[] = [];
+  for (const p of ticket.parts ?? []) {
+    try {
+      await client.request("POST", "WorkorderItem.json", {
+        workorderID: Number(workorderID),
+        itemID: Number(p.itemId),
+        unitQuantity: p.qty,
+        warranty: false,
+        isSpecialOrder: false,
+        ...(ticket.employeeId ? { employeeID: Number(ticket.employeeId) } : {}),
+      });
+      partsAdded++;
+    } catch (err) {
+      partsFailed.push(p.name);
+      logger.warn({ err: lightspeedReason(err), workorderID, itemId: p.itemId }, "part not added to the work order");
+    }
+  }
+  await db.insert(events).values({ showroomId: showroom.id, type: "ticket_created", actor: args.actor, payload: { workorder_id: workorderID, customer_id: customerId, service: ticket.service, parts_added: partsAdded, parts_failed: partsFailed } });
+  return { workorderId: workorderID, partsAdded, partsFailed };
 }

@@ -621,7 +621,20 @@ export async function saveViewAction(formData: FormData) {
 function ticketServices(formData: FormData): string {
   const services = formData.getAll("service").filter((v): v is string => typeof v === "string" && !!v);
   const labour = formData.getAll("labour").filter((v): v is string => typeof v === "string" && !!v).map((m) => `labour ${m} min`);
-  return [...services, ...labour].join(" + ");
+  // Repeats are quantities: "Tune-up ×2 + labour 15 min".
+  const counts = new Map<string, number>();
+  for (const s of [...services, ...labour]) counts.set(s, (counts.get(s) ?? 0) + 1);
+  return [...counts.entries()].map(([s, n]) => (n > 1 ? `${s} ×${n}` : s)).join(" + ");
+}
+
+/** Parts lines from New ticket: "itemId|qty|name". */
+function ticketParts(formData: FormData): { itemId: string; name: string; qty: number }[] {
+  return formData.getAll("part").flatMap((v) => {
+    if (typeof v !== "string") return [];
+    const [itemId, qty, ...name] = v.split("|");
+    const n = Math.max(1, Math.min(99, Number(qty) || 1));
+    return itemId ? [{ itemId, qty: n, name: name.join("|") || `Item ${itemId}` }] : [];
+  });
 }
 
 /** New ticket from the POS screen: creates the Lightspeed work order and opens it. Errors return to the form with what was typed. */
@@ -633,7 +646,7 @@ export async function createTicketAction(formData: FormData) {
     const val = str(formData, k);
     if (val) keep.set(k, val);
   }
-  for (const k of ["service", "labour"]) for (const v of formData.getAll(k)) if (typeof v === "string" && v) keep.append(k, v);
+  for (const k of ["service", "labour", "part"]) for (const v of formData.getAll(k)) if (typeof v === "string" && v) keep.append(k, v);
   let target: string;
   try {
     const c = str(formData, "c");
@@ -646,12 +659,14 @@ export async function createTicketAction(formData: FormData) {
     const readyRaw = str(formData, "ready");
     const [d, t] = readyRaw.split("T");
     const readyBy = d && t ? localToUtc(d, t.slice(0, 5), showroom.timezone) : new Date(Date.now() + showroom.settings.repair_minutes * 60_000);
-    const id = await createTicket(db, {
+    const r = await createTicket(db, {
       showroom,
-      ticket: { customer, bike: str(formData, "bike"), serial: str(formData, "serial"), service: ticketServices(formData), said: str(formData, "said"), readyBy, employeeId: str(formData, "mech") || null, serializedId: str(formData, "sid") || null },
+      ticket: { customer, bike: str(formData, "bike"), serial: str(formData, "serial"), service: ticketServices(formData), said: str(formData, "said"), readyBy, employeeId: str(formData, "mech") || null, serializedId: str(formData, "sid") || null, parts: ticketParts(formData) },
       actor: user.id,
     });
-    target = withFlash(`${jobPath(`w:${id}`)}`, { ok: `Ticket created: Lightspeed work order #${id}.` });
+    const id = r.workorderId;
+    const parts = r.partsFailed.length ? ` ${r.partsFailed.length} part${r.partsFailed.length > 1 ? "s" : ""} couldn't be added in Lightspeed (${r.partsFailed.join(", ")}); they're in the note.` : r.partsAdded ? ` ${r.partsAdded} part line${r.partsAdded > 1 ? "s" : ""} added.` : "";
+    target = withFlash(`${jobPath(`w:${id}`)}`, { ok: `Ticket created: Lightspeed work order #${id}.${parts}` });
   } catch (err) {
     keep.set("error", errorMessage(err));
     target = `/app/workshop/new?${keep.toString()}`;

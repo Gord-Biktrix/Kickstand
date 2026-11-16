@@ -23,7 +23,7 @@ import { createTicketAction, staffCreateTypeBookingAction } from "../../actions"
 export const metadata = { title: "New ticket" };
 
 /** The ticket fields that ride along in the URL while the Schedule popup is open (and after an error). */
-const KEEP = ["c", "nn", "np", "ne", "bike", "serial", "sid", "service", "labour", "said", "mech"] as const;
+const KEEP = ["c", "nn", "np", "ne", "bike", "serial", "sid", "service", "labour", "part", "said", "mech"] as const;
 const all = (v: string | string[] | undefined) => (Array.isArray(v) ? v : v ? [v] : []);
 
 /**
@@ -44,6 +44,7 @@ export default async function NewTicketPage({ searchParams }: { searchParams: Pr
 
   const services = all(q.service);
   const labour = all(q.labour);
+  const partLines = all(q.part);
   const work = services.reduce((s, n) => s + (SERVICE_MENU.find((x) => x.name === n)?.minutes ?? 0), 0) + labour.reduce((s, m) => s + (Number(m) || 0), 0);
   const ready = v("ready") || formatInTimeZone(quarterHourAfter(new Date(), work || showroom.settings.repair_minutes), tz, "yyyy-MM-dd'T'HH:mm");
 
@@ -72,7 +73,7 @@ export default async function NewTicketPage({ searchParams }: { searchParams: Pr
           enabled={ls}
           canSchedule={!!serviceType}
           defaultMinutes={showroom.settings.repair_minutes}
-          initial={{ pick: initialPick, newCustomer: { nn: v("nn"), np: v("np"), ne: v("ne") }, bike: v("bike"), serial: v("serial"), sid: v("sid"), services, labour, said: v("said"), ready, mech: v("mech") }}
+          initial={{ pick: initialPick, newCustomer: { nn: v("nn"), np: v("np"), ne: v("ne") }, bike: v("bike"), serial: v("serial"), sid: v("sid"), services, labour, parts: partLines, said: v("said"), ready, mech: v("mech") }}
         />
       </form>
 
@@ -85,7 +86,7 @@ export default async function NewTicketPage({ searchParams }: { searchParams: Pr
           bike={v("bike")}
           serial={v("serial")}
           sid={v("sid")}
-          note={[[...services, ...labour.map((m) => `labour ${m} min`)].join(" + "), v("said")].filter(Boolean).join(". ")}
+          note={[[...services, ...labour.map((m) => `labour ${m} min`), ...partLines.map((p) => p.split("|").slice(2).join("|") || "part")].join(" + "), v("said")].filter(Boolean).join(". ")}
           type={serviceType}
           showroom={showroom}
         />

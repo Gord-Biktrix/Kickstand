@@ -9,7 +9,7 @@ import { currentShowroom } from "@/lib/current-showroom";
 import { sp, type SearchParams } from "@/lib/flash";
 import { formatLongDate, formatTime } from "@/lib/time";
 import { jobIdFromPath, jobPath, workshopJobs, type JobColumn, type WorkshopJob } from "@/lib/workshop";
-import { fetchWorkorderLines, linesSubtotal, type WorkorderLine } from "@/lib/workorder-lines";
+import { fetchWorkorderLines, forgetWorkorder, linesSubtotal, type WorkorderLine } from "@/lib/workorder-lines";
 import { lightspeedWorkorderUrl } from "@/lib/workorders";
 import { moveJobAction, readyJobAction, setBookingStatusAction } from "../../actions";
 
@@ -42,7 +42,20 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   }
   const [wo] = job.workorderId ? await db.select().from(lsWorkorders).where(eq(lsWorkorders.id, job.workorderId)) : [];
   const [booking] = job.bookingId ? await db.select().from(bookings).where(eq(bookings.id, job.bookingId)) : [];
-  const lines = job.workorderId ? await fetchWorkorderLines(db, job.workorderId) : [];
+  const read = job.workorderId ? await fetchWorkorderLines(db, job.workorderId) : { status: "ok" as const, lines: [] };
+  if (read.status === "gone" && job.workorderId) {
+    // Deleted in Lightspeed: take it off the board now and say so, instead of showing an error.
+    await forgetWorkorder(db, job.workorderId);
+    return (
+      <div className="mx-auto max-w-lg rounded-xl border border-border bg-card p-6 text-center">
+        <p className="text-lg font-bold">Work order #{job.workorderId} was deleted in Lightspeed</p>
+        <p className="mt-1 text-sm text-muted">It&apos;s been taken off the Workshop board.</p>
+        <Link href="/app/workshop" className="btn btn-primary mt-4">Back to the Workshop</Link>
+      </div>
+    );
+  }
+  const lines = read.status === "ok" ? read.lines : null;
+  const failReason = read.status === "failed" ? read.reason : null;
   const subtotal = lines ? linesSubtotal(lines) : null;
   const self = jobPath(job.id);
   const first = job.customer?.split(/\s+/)[0] ?? "the customer";
@@ -74,7 +87,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
 
           <div className="flex-1 px-4">
             {lines === null ? (
-              <p className="py-4 text-sm text-red-700">Lightspeed didn&apos;t answer, so the parts and labour can&apos;t be shown right now. Open it in Lightspeed or try again.</p>
+              <p className="py-4 text-sm text-red-700">Lightspeed didn&apos;t send the parts and labour{failReason ? ` (${failReason})` : ""}. Open it in Lightspeed or try again.</p>
             ) : lines.length === 0 ? (
               <p className="py-4 text-sm text-muted">No parts or labour on this work order yet.</p>
             ) : (

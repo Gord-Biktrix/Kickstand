@@ -69,6 +69,11 @@ export async function moveJob(db: Db, args: { showroom: ShowroomCtx; jobId: stri
   try {
     await (args.client ?? new LightspeedClient(db)).updateWorkorder(job.workorderId, { workorderStatusID: target.id });
   } catch (err) {
+    if ((err as { status?: number }).status === 404) {
+      // Deleted in Lightspeed: drop it from the board now.
+      await db.delete(lsWorkorders).where(eq(lsWorkorders.id, job.workorderId));
+      throw new WorkshopMoveError(`Work order #${job.workorderId} was deleted in Lightspeed, so it's been taken off the board.`);
+    }
     logger.warn({ err: err instanceof Error ? err.message : String(err), workorderId: job.workorderId }, "workshop move not saved in Lightspeed");
     await db.insert(events).values({ showroomId: showroom.id, type: "workorder_move_failed", actor: args.actor, payload: { workorder_id: job.workorderId, to: target.id, column: args.column } });
     throw new WorkshopMoveError("Lightspeed didn't save that move, so the job stays where it was. Try again in a minute.");

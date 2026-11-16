@@ -11,7 +11,7 @@ const label = "text-[11px] font-extrabold tracking-wider text-[#3d3f43] uppercas
  * Lightspeed, or on past work orders) appear as buttons, like the POS mock. Tapping one fills Bike and Serial and,
  * for a Lightspeed bike, attaches it to the work order (`sid`). "Other bike" leaves the fields for typing.
  */
-export function TicketCustomerBike(props: { initial: Picked | null; initialNew: { nn: string; np: string; ne: string }; bike: string; serial: string; sid: string }) {
+export function TicketCustomerBike(props: { initial: Picked | null; initialNew: { nn: string; np: string; ne: string }; bike: string; serial: string; sid: string; onBike?: (bike: string) => void }) {
   const [picked, setPicked] = useState<Picked | null>(props.initial);
   const [bikes, setBikes] = useState<Bike[]>([]);
   const [loading, setLoading] = useState(false);
@@ -49,7 +49,9 @@ export function TicketCustomerBike(props: { initial: Picked | null; initialNew: 
 
   function choose(b: Bike) {
     setChosen(b.key);
-    setBike(b.label.startsWith("Bike · serial") ? "" : b.label);
+    const name = b.label.startsWith("Bike · serial") ? "" : b.label;
+    setBike(name);
+    props.onBike?.(name);
     setSerial(b.serial ?? "");
     setSid(b.serializedId ?? "");
   }
@@ -57,6 +59,7 @@ export function TicketCustomerBike(props: { initial: Picked | null; initialNew: 
   function other() {
     setChosen("other");
     setBike("");
+    props.onBike?.("");
     setSerial("");
     setSid("");
   }
@@ -93,7 +96,7 @@ export function TicketCustomerBike(props: { initial: Picked | null; initialNew: 
         {/* Typing is only for a bike we couldn't find: a picked bike already says what and which. */}
         {showFields ? (
           <>
-            <input id="bike" name="bike" value={bike} onChange={(e) => { setBike(e.target.value); setSid(""); }} placeholder="e.g. Stunner Lite 3, peach" className="input h-11 text-base" autoFocus={chosen === "other"} />
+            <input id="bike" name="bike" value={bike} onChange={(e) => { setBike(e.target.value); setSid(""); props.onBike?.(e.target.value); }} placeholder="e.g. Stunner Lite 3, peach" className="input h-11 text-base" autoFocus={chosen === "other"} />
             <input name="serial" value={serial} onChange={(e) => setSerial(e.target.value)} placeholder="Serial (optional)" aria-label="Serial number" className="input h-11 text-base" />
           </>
         ) : (

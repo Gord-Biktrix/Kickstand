@@ -4,9 +4,9 @@
  * price). Item names come from the Item records. Read defensively: a field Lightspeed leaves out shows as blank,
  * and if the whole read fails the screen says so instead of breaking.
  */
-import { inArray } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import type { Db } from "@/db/client";
-import { lsItems } from "@/db/schema";
+import { lsItems, lsWorkorders } from "@/db/schema";
 import { asList, LightspeedClient } from "./lightspeed";
 import { logger } from "./logger";
 
@@ -94,18 +94,49 @@ export async function itemNames(db: Db, ids: string[], client: LightspeedClient,
   return names;
 }
 
-/** Read a work order's lines from Lightspeed. Returns null when Lightspeed can't be reached. */
-export async function fetchWorkorderLines(db: Db, workorderId: string, client = new LightspeedClient(db)): Promise<WorkorderLine[] | null> {
+export type LinesResult = { status: "ok"; lines: WorkorderLine[] } | { status: "gone" } | { status: "failed"; reason: string };
+
+/** Lightspeed's reason, short enough to show: "GET Workorder/123.json → 400: Tried to load … not allowed". */
+export function lightspeedReason(err: unknown): string {
+  const body = (err as { body?: { message?: unknown } }).body;
+  const detail = body && typeof body.message === "string" ? `: ${body.message}` : "";
+  return `${err instanceof Error ? err.message.replace(/\?.*? →/, " →") : String(err)}${detail}`.slice(0, 200);
+}
+
+/**
+ * Read a work order's lines from Lightspeed. "gone" when Lightspeed says it no longer exists or it's archived
+ * (deleted there); the caller takes it off the board. If Lightspeed refuses the parts/labour relations, the work
+ * order is read plainly so a deleted one is still noticed, and the reason is passed on to show staff.
+ */
+export async function fetchWorkorderLines(db: Db, workorderId: string, client = new LightspeedClient(db)): Promise<LinesResult> {
+  let res: Record<string, unknown>;
   try {
-    const res = await client.request<Record<string, unknown>>("GET", `Workorder/${workorderId}.json?load_relations=${encodeURIComponent('["WorkorderItems","WorkorderLines"]')}`);
-    const wo = (res.Workorder ?? {}) as Record<string, unknown>;
-    const ids = new Set<string>();
-    for (const w of asList<Record<string, unknown>>(wo.WorkorderItems as Record<string, unknown> | undefined, "WorkorderItem")) if (w.itemID && String(w.itemID) !== "0") ids.add(String(w.itemID));
-    for (const l of asList<Record<string, unknown>>(wo.WorkorderLines as Record<string, unknown> | undefined, "WorkorderLine")) if (l.itemID && String(l.itemID) !== "0") ids.add(String(l.itemID));
-    const names = await itemNames(db, [...ids], client);
-    return parseWorkorderLines(wo, names);
+    res = await client.request<Record<string, unknown>>("GET", `Workorder/${workorderId}.json?load_relations=${encodeURIComponent('["WorkorderItems","WorkorderLines"]')}`);
   } catch (err) {
-    logger.warn({ err: err instanceof Error ? err.message : String(err), workorderId }, "work order lines not read");
-    return null;
+    const status = (err as { status?: number }).status;
+    if (status === 404) return { status: "gone" };
+    const reason = lightspeedReason(err);
+    logger.warn({ err: reason, workorderId }, "work order lines not read");
+    if (status === 400) {
+      try {
+        const plain = await client.request<Record<string, unknown>>("GET", `Workorder/${workorderId}.json`);
+        if (String((plain.Workorder as Record<string, unknown> | undefined)?.archived) === "true") return { status: "gone" };
+      } catch (e) {
+        if ((e as { status?: number }).status === 404) return { status: "gone" };
+      }
+    }
+    return { status: "failed", reason };
   }
+  const wo = (res.Workorder ?? {}) as Record<string, unknown>;
+  if (String(wo.archived) === "true") return { status: "gone" };
+  const ids = new Set<string>();
+  for (const w of asList<Record<string, unknown>>(wo.WorkorderItems as Record<string, unknown> | undefined, "WorkorderItem")) if (w.itemID && String(w.itemID) !== "0") ids.add(String(w.itemID));
+  for (const l of asList<Record<string, unknown>>(wo.WorkorderLines as Record<string, unknown> | undefined, "WorkorderLine")) if (l.itemID && String(l.itemID) !== "0") ids.add(String(l.itemID));
+  const names = await itemNames(db, [...ids], client);
+  return { status: "ok", lines: parseWorkorderLines(wo, names) };
+}
+
+/** A work order deleted in Lightspeed: take it off Kickstand's board now instead of at the next sync. */
+export async function forgetWorkorder(db: Db, workorderId: string): Promise<void> {
+  await db.delete(lsWorkorders).where(eq(lsWorkorders.id, workorderId));
 }

@@ -162,8 +162,8 @@ describe("new tickets from the POS screen", () => {
     const { workshopJobs } = await import("@/lib/workshop");
     const ls = fakeCreate();
     setLightspeedFetch(ls.fetchImpl);
-    const id = await createTicket(db, { showroom: van, ticket: { ...base, customer: { name: "Ahmed Ali", phone: "604 555 0187", email: "" } }, actor: "staff-1", now: new Date("2026-11-16T23:00:00Z") });
-    expect(id).toBe("10300");
+    const r = await createTicket(db, { showroom: van, ticket: { ...base, customer: { name: "Ahmed Ali", phone: "604 555 0187", email: "" } }, actor: "staff-1", now: new Date("2026-11-16T23:00:00Z") });
+    expect(r).toEqual({ workorderId: "10300", partsAdded: 0, partsFailed: [] });
     expect(ls.calls.find((c) => c.url.endsWith("Customer.json"))!.body).toMatchObject({ firstName: "Ahmed", lastName: "Ali" });
     expect(ls.calls.find((c) => c.url.endsWith("Workorder.json"))!.body).toMatchObject({ shopID: 3, customerID: 8801, employeeID: 31, workorderStatusID: 1, hookIn: "Tune-up", etaOut: "2026-11-17T01:30:00.000Z", timeIn: "2026-11-16T23:00:00.000Z" });
     const jobs = await workshopJobs(db, van, new Date("2026-11-16T23:05:00Z"));
@@ -211,6 +211,45 @@ describe("new tickets from the POS screen", () => {
     expect(calls.find((c) => c.url.endsWith("Workorder.json"))!.body).toMatchObject({ serializedID: 501 });
     // Without Lightspeed, the pickup bike still shows.
     expect((await customerBikes(db, { lsCustomerId: null, phone: "604 555 0187", email: null })).map((b) => b.label)).toEqual(["Swift CVT 2 · Green · Regular"]);
+  });
+
+  it("parts become Lightspeed lines on the new work order; one Lightspeed refuses is reported and kept in the note", async () => {
+    const { createTicket } = await import("@/lib/tickets");
+    const calls: Call[] = [];
+    setLightspeedFetch(async (input, init) => {
+      const url = String(input);
+      const body = init?.body ? JSON.parse(String(init.body)) : null;
+      calls.push({ method: init?.method ?? "GET", url, body });
+      const json = (status: number, data: unknown) => new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json" } });
+      if (url.endsWith("Workorder.json")) return json(200, { Workorder: { workorderID: "10302" } });
+      if (url.endsWith("WorkorderItem.json")) return body.itemID === 66 ? json(400, { message: "no stock" }) : json(200, { WorkorderItem: { workorderItemID: "1" } });
+      return json(404, {});
+    });
+    const r = await createTicket(db, { showroom: van, ticket: { ...base, customer: { lsCustomerId: "9020", name: "Alan" }, parts: [{ itemId: "55", name: "Crank arm", qty: 2 }, { itemId: "66", name: "Display", qty: 1 }] }, actor: "s" });
+    expect(r).toEqual({ workorderId: "10302", partsAdded: 1, partsFailed: ["Display"] });
+    expect(calls.filter((c) => c.url.endsWith("WorkorderItem.json")).map((c) => c.body)).toEqual([
+      expect.objectContaining({ workorderID: 10302, itemID: 55, unitQuantity: 2 }),
+      expect.objectContaining({ workorderID: 10302, itemID: 66, unitQuantity: 1 }),
+    ]);
+    expect(String(calls.find((c) => c.url.endsWith("Workorder.json"))!.body!.note)).toContain("Parts: Crank arm ×2, Display");
+  });
+
+  it("parts search uses the bike's model, skips the bikes themselves, and reads the default price", async () => {
+    const { searchParts, bikeModel } = await import("@/lib/tickets");
+    const { LightspeedClient } = await import("@/lib/lightspeed");
+    expect(bikeModel('Juggernaut Classic Duo Step-Thru 17" Champagne 24x4')).toBe("Juggernaut Classic");
+    expect(bikeModel("Kutty X 2 Yellow")).toBe("Kutty X");
+    let url = "";
+    setLightspeedFetch(async (input) => {
+      url = decodeURIComponent(String(input));
+      return new Response(JSON.stringify({ Item: [
+        { itemID: "1", description: "86-Kutty X 2 Yellow", serialized: "true" },
+        { itemID: "2", description: "Kutty X brake pads", serialized: "false", Prices: { ItemPrice: [{ amount: "29", useType: "Default" }] } },
+      ] }), { status: 200, headers: { "Content-Type": "application/json" } });
+    });
+    const parts = await searchParts(new LightspeedClient(db), { q: "", bike: "Kutty X 2 Yellow" });
+    expect(url).toContain("description=~,%Kutty%X%");
+    expect(parts).toEqual([{ itemId: "2", name: "Kutty X brake pads", price: 29 }]);
   });
 
   it("finds customers by the last digits of their phone", async () => {
@@ -269,5 +308,39 @@ describe("remembered Lightspeed item names", () => {
     expect((await itemNames(db, ["55"], client)).get("55")).toEqual({ name: "Crank arm, left", price: 34 });
     expect((await itemNames(db, ["55"], client)).get("55")).toEqual({ name: "Crank arm, left", price: 34 });
     expect(calls).toBe(1);
+  });
+});
+
+describe("work orders deleted in Lightspeed", () => {
+  let db: Db;
+  let van: ShowroomCtx;
+  beforeAll(async () => { db = await testDb(); process.env.LS_CLIENT_ID ??= "x"; process.env.LS_CLIENT_SECRET ??= "y"; });
+  afterAll(async () => { setLightspeedFetch(null); await db.$client.end(); });
+  beforeEach(async () => {
+    van = await resetDb(db);
+    await db.delete(lsWorkorderStatuses);
+    await db.insert(lsWorkorderStatuses).values(STATUSES);
+    await saveConnection(db, { accountId: "999", accessToken: "acc", refreshToken: "ref", expiresIn: 3600 });
+    van = await withSettings(db, van, { lightspeed: { ...van.settings.lightspeed, enabled: true, shop_id: 3 } });
+    await db.insert(lsWorkorders).values({ id: "10050", showroomId: van.id, statusId: 1, customerId: "1", customerName: "Gord Test", item: "stunner", note: "" });
+  });
+  const reply = (status: number, data: unknown) => new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json" } });
+
+  it("the job screen sees 404 or archived as gone; a refused relation still notices an archived one and gives the reason", async () => {
+    const { fetchWorkorderLines } = await import("@/lib/workorder-lines");
+    setLightspeedFetch(async () => reply(404, { message: "not found" }));
+    expect((await fetchWorkorderLines(db, "10050")).status).toBe("gone");
+    setLightspeedFetch(async () => reply(200, { Workorder: { workorderID: "10050", archived: "true" } }));
+    expect((await fetchWorkorderLines(db, "10050")).status).toBe("gone");
+    setLightspeedFetch(async (input) => (String(input).includes("load_relations") ? reply(400, { message: "Tried to load one or more relations that are not allowed: WorkorderItems" }) : reply(200, { Workorder: { archived: "false" } })));
+    const r = await fetchWorkorderLines(db, "10050");
+    expect(r).toMatchObject({ status: "failed" });
+    expect(r.status === "failed" && r.reason).toContain("not allowed: WorkorderItems");
+  });
+
+  it("moving a work order Lightspeed has deleted takes it off the board and says why", async () => {
+    setLightspeedFetch(async () => reply(404, { message: "not found" }));
+    await expect(moveJob(db, { showroom: van, jobId: "w:10050", column: "doing", actor: "s" })).rejects.toThrow(/deleted in Lightspeed/);
+    expect(await db.select().from(lsWorkorders)).toHaveLength(0);
   });
 });
