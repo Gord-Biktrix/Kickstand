@@ -85,7 +85,11 @@ export async function getBookingByToken(dbx: DbOrTx, token: string): Promise<{ b
 
 export async function createTypeBooking(
   db: Db,
-  args: { showroom: ShowroomCtx; type: BookingType; startsAt: Date; details: CustomerDetails; createdBy: string; now?: Date; answers?: (field: string) => string },
+  args: {
+    showroom: ShowroomCtx; type: BookingType; startsAt: Date; details: CustomerDetails; createdBy: string; now?: Date; answers?: (field: string) => string;
+    /** Staff booking from New ticket: the Lightspeed customer already picked, and their registered bike. */
+    lsCustomerId?: string | null; lsSerializedId?: string | null;
+  },
 ): Promise<{ booking: Booking; token: string }> {
   const { showroom, type } = args;
   if (type.kind !== "standard" || type.showroomId !== showroom.id) throw new TypeBookingError("NOT_BOOKABLE");
@@ -122,7 +126,7 @@ export async function createTypeBooking(
     return row;
   });
   await notifyBooking(db, { showroom, type, booking, metric: BOOKING_METRIC.confirmed, actor: args.createdBy });
-  const synced = await syncBookingWorkorder(db, { showroom, type, booking, actor: args.createdBy });
+  const synced = await syncBookingWorkorder(db, { showroom, type, booking, actor: args.createdBy, lsCustomerId: args.lsCustomerId, lsSerializedId: args.lsSerializedId });
   await syncBookingCalendar(db, { showroom, type, bookingId: booking.id, actor: args.createdBy });
   return { booking: synced ?? booking, token };
 }
@@ -444,7 +448,7 @@ export async function appointmentStatusId(dbx: DbOrTx, showroom: ShowroomCtx): P
   return row?.id ?? showroom.settings.lightspeed.open_status_id;
 }
 
-export async function syncBookingWorkorder(db: Db, args: { showroom: ShowroomCtx; type: BookingType; booking: Booking; actor: string }): Promise<Booking | null> {
+export async function syncBookingWorkorder(db: Db, args: { showroom: ShowroomCtx; type: BookingType; booking: Booking; actor: string; lsCustomerId?: string | null; lsSerializedId?: string | null }): Promise<Booking | null> {
   const { showroom, type } = args;
   if (!type.createsWorkOrder || type.location !== "in_person" || !lightspeedEnabled(showroom)) return null;
   const [b] = await db.select().from(bookings).where(eq(bookings.id, args.booking.id));
@@ -473,7 +477,7 @@ export async function syncBookingWorkorder(db: Db, args: { showroom: ShowroomCtx
       await db.insert(events).values({ showroomId: showroom.id, type: "booking_workorder_updated", actor: args.actor, payload: { booking_id: b.id, workorder_id: b.lsWorkorderId } });
       return b;
     }
-    let customerID = await matchLightspeedCustomer(db, b);
+    let customerID = args.lsCustomerId || (await matchLightspeedCustomer(db, b));
     const matched = !!customerID;
     if (!customerID) customerID = await client.createCustomer({ customerName: b.customerName, customerEmail: b.customerEmail, customerPhone: b.customerPhone });
     const workorderID = await client.createWorkorder({
@@ -483,6 +487,7 @@ export async function syncBookingWorkorder(db: Db, args: { showroom: ShowroomCtx
       timeIn: new Date().toISOString(),
       warranty: false,
       workorderStatusID: await appointmentStatusId(db, showroom),
+      ...(args.lsSerializedId ? { serializedID: Number(args.lsSerializedId) } : {}),
       ...common,
     });
     const [row] = await db.update(bookings).set({ lsWorkorderId: workorderID }).where(eq(bookings.id, b.id)).returning();

@@ -617,15 +617,23 @@ export async function saveViewAction(formData: FormData) {
   });
 }
 
+/** "Tune-up + Brake bleed + labour 30 min" from the New ticket lines. */
+function ticketServices(formData: FormData): string {
+  const services = formData.getAll("service").filter((v): v is string => typeof v === "string" && !!v);
+  const labour = formData.getAll("labour").filter((v): v is string => typeof v === "string" && !!v).map((m) => `labour ${m} min`);
+  return [...services, ...labour].join(" + ");
+}
+
 /** New ticket from the POS screen: creates the Lightspeed work order and opens it. Errors return to the form with what was typed. */
 export async function createTicketAction(formData: FormData) {
   const user = await requireActor("staff");
   const showroom = await currentShowroom(user);
   const keep = new URLSearchParams();
-  for (const k of ["c", "nn", "np", "ne", "bike", "serial", "sid", "service", "said", "ready", "mech"]) {
+  for (const k of ["c", "nn", "np", "ne", "bike", "serial", "sid", "said", "ready", "mech"]) {
     const val = str(formData, k);
     if (val) keep.set(k, val);
   }
+  for (const k of ["service", "labour"]) for (const v of formData.getAll(k)) if (typeof v === "string" && v) keep.append(k, v);
   let target: string;
   try {
     const c = str(formData, "c");
@@ -640,7 +648,7 @@ export async function createTicketAction(formData: FormData) {
     const readyBy = d && t ? localToUtc(d, t.slice(0, 5), showroom.timezone) : new Date(Date.now() + showroom.settings.repair_minutes * 60_000);
     const id = await createTicket(db, {
       showroom,
-      ticket: { customer, bike: str(formData, "bike"), serial: str(formData, "serial"), service: str(formData, "service"), said: str(formData, "said"), readyBy, employeeId: str(formData, "mech") || null, serializedId: str(formData, "sid") || null },
+      ticket: { customer, bike: str(formData, "bike"), serial: str(formData, "serial"), service: ticketServices(formData), said: str(formData, "said"), readyBy, employeeId: str(formData, "mech") || null, serializedId: str(formData, "sid") || null },
       actor: user.id,
     });
     target = withFlash(`${jobPath(`w:${id}`)}`, { ok: `Ticket created: Lightspeed work order #${id}.` });
@@ -1332,12 +1340,17 @@ export async function staffCreateTypeBookingAction(typeId: string, formData: For
       createdBy: user.id,
       details: { name: str(formData, "name"), email: str(formData, "email"), phone: str(formData, "phone"), smsConsent: bool(formData, "sms_consent"), note: str(formData, "note") },
       answers: (field) => str(formData, field),
+      lsCustomerId: str(formData, "ls_customer_id") || null,
+      lsSerializedId: str(formData, "ls_serialized_id") || null,
     });
     target = withFlash(`/app/bookings/${booking.id}`, { ok: `Booked. ${booking.customerEmail || booking.customerPhone ? "The customer gets a confirmation through Klaviyo." : ""}` });
   } catch (err) {
     const date = str(formData, "date");
     const time = str(formData, "time");
-    target = withFlash(`/app/bookings/new?type=${typeId}${date && time ? `&date=${date}&time=${time}` : ""}`, { error: errorMessage(err) });
+    const back = str(formData, "back");
+    target = back.startsWith("/app/")
+      ? withFlash(back, { error: errorMessage(err) })
+      : withFlash(`/app/bookings/new?type=${typeId}${date && time ? `&date=${date}&time=${time}` : ""}`, { error: errorMessage(err) });
   }
   redirect(target);
 }

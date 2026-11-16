@@ -110,6 +110,14 @@ describe("service bookings and Lightspeed work orders", () => {
     expect(ls.calls.filter((c) => c.method === "PUT").at(-1)!.body).toEqual({ workorderStatusID: 27 });
   });
 
+  it("a booking scheduled from New ticket uses the Lightspeed customer and bike already picked", async () => {
+    const ls = fakeLightspeed();
+    setLightspeedFetch(ls.fetchImpl);
+    await createTypeBooking(db, { showroom: van, type: service, startsAt: slot("10:00"), details, createdBy: "staff-1", now: NOW, lsCustomerId: "9020", lsSerializedId: "501" });
+    expect(ls.calls.some((c) => c.method === "POST" && c.url.endsWith("Customer.json"))).toBe(false);
+    expect(ls.calls.find((c) => c.method === "POST" && c.url.endsWith("Workorder.json"))!.body).toMatchObject({ customerID: 9020, serializedID: 501 });
+  });
+
   it("skips types without the work-order flag and stores with the link off", async () => {
     const ls = fakeLightspeed();
     setLightspeedFetch(ls.fetchImpl);

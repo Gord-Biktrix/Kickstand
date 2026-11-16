@@ -231,7 +231,7 @@ export async function createTicket(db: Db, args: { showroom: ShowroomCtx; ticket
       ...(ticket.employeeId ? { employeeID: Number(ticket.employeeId) } : ls.employee_id ? { employeeID: ls.employee_id } : {}),
       timeIn: now.toISOString(),
       etaOut: ticket.readyBy.toISOString(),
-      warranty: ticket.service === "Warranty claim",
+      warranty: ticket.service.includes("Warranty claim"),
       workorderStatusID: ls.open_status_id,
       hookIn: ticket.service.slice(0, 40),
       note,
