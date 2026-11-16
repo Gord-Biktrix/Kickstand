@@ -218,3 +218,53 @@ describe("new tickets from the POS screen", () => {
     expect(matches.map((m) => [m.name, m.lsCustomerId])).toEqual([["Ahmed Ali", "9020"]]);
   });
 });
+
+describe("Lightspeed customer search", () => {
+  let db: Db;
+  beforeAll(async () => { db = await testDb(); process.env.LS_CLIENT_ID ??= "x"; process.env.LS_CLIENT_SECRET ??= "y"; });
+  afterAll(async () => { setLightspeedFetch(null); await db.$client.end(); });
+
+  it("a full name searches first AND last name; one word searches either; Kickstand-only when it has enough", async () => {
+    const { searchCustomers } = await import("@/lib/tickets");
+    const { LightspeedClient } = await import("@/lib/lightspeed");
+    await resetDb(db);
+    await saveConnection(db, { accountId: "999", accessToken: "acc", refreshToken: "ref", expiresIn: 3600 });
+    const urls: string[] = [];
+    setLightspeedFetch(async (input) => {
+      urls.push(decodeURIComponent(String(input)));
+      return new Response(JSON.stringify({ Customer: { customerID: "77", firstName: "Alan", lastName: "Uyeno", Contact: {} } }), { status: 200, headers: { "Content-Type": "application/json" } });
+    });
+    const client = new LightspeedClient(db);
+    expect((await searchCustomers(db, "Alan Uyeno", client)).matches.map((m) => m.name)).toEqual(["Alan Uyeno"]);
+    expect(urls.at(-1)).toContain("firstName=~,%Alan%&lastName=~,%Uyeno%");
+    await searchCustomers(db, "uyeno", client);
+    expect(urls.at(-1)).toContain("or=firstName=~,%uyeno%|lastName=~,%uyeno%");
+    const before = urls.length;
+    await searchCustomers(db, "al", client);
+    expect(urls.length).toBe(before); // 2 letters: Kickstand only
+  });
+});
+
+describe("remembered Lightspeed item names", () => {
+  let db: Db;
+  beforeAll(async () => { db = await testDb(); process.env.LS_CLIENT_ID ??= "x"; process.env.LS_CLIENT_SECRET ??= "y"; });
+  afterAll(async () => { setLightspeedFetch(null); await db.$client.end(); });
+
+  it("asks Lightspeed for an item once, then uses the remembered name", async () => {
+    const { itemNames } = await import("@/lib/workorder-lines");
+    const { LightspeedClient } = await import("@/lib/lightspeed");
+    const { lsItems } = await import("@/db/schema");
+    await resetDb(db);
+    await db.delete(lsItems);
+    await saveConnection(db, { accountId: "999", accessToken: "acc", refreshToken: "ref", expiresIn: 3600 });
+    let calls = 0;
+    setLightspeedFetch(async () => {
+      calls++;
+      return new Response(JSON.stringify({ Item: { description: "Crank arm, left", Prices: { ItemPrice: [{ amount: "34", useType: "Default" }] } } }), { status: 200, headers: { "Content-Type": "application/json" } });
+    });
+    const client = new LightspeedClient(db);
+    expect((await itemNames(db, ["55"], client)).get("55")).toEqual({ name: "Crank arm, left", price: 34 });
+    expect((await itemNames(db, ["55"], client)).get("55")).toEqual({ name: "Crank arm, left", price: 34 });
+    expect(calls).toBe(1);
+  });
+});

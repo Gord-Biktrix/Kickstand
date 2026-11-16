@@ -71,15 +71,19 @@ export async function searchCustomers(db: Db, query: string, client?: Lightspeed
     for (const r of woRows) add({ lsCustomerId: r.c, name: r.name, phone: null, email: null, source: "Lightspeed work order" });
   }
 
-  // Lightspeed's own customer list, by name (its API can't search phone numbers).
+  // Lightspeed's own customer list, by name (its API can't search phone numbers). Only when Kickstand's own
+  // records come up short and at least 3 letters are typed, to spare Lightspeed's request allowance.
   let lightspeedFailed = false;
-  if (!byPhone && client) {
+  if (!byPhone && client && q.length >= 3 && out.size < 3) {
     try {
-      const like = encodeURIComponent(`%${q.replace(/[%|,]/g, " ")}%`);
-      const res = await client.request<Record<string, unknown>>(
-        "GET",
-        `Customer.json?limit=10&archived=false&load_relations=${encodeURIComponent('["Contact"]')}&or=${encodeURIComponent("firstName=~,")}${like}${encodeURIComponent("|lastName=~,")}${like}`,
-      );
+      // "Alan Uyeno" → first name like Alan AND last name like Uyeno; one word → first OR last name like it.
+      const words = q.replace(/[%|,~]/g, " ").split(/\s+/).filter(Boolean);
+      const pct = (w: string) => encodeURIComponent(`%${w}%`);
+      const filter =
+        words.length >= 2
+          ? `firstName=${encodeURIComponent("~,")}${pct(words[0])}&lastName=${encodeURIComponent("~,")}${pct(words.slice(1).join(" "))}`
+          : `or=${encodeURIComponent("firstName=~,")}${pct(words[0])}${encodeURIComponent("|lastName=~,")}${pct(words[0])}`;
+      const res = await client.request<Record<string, unknown>>("GET", `Customer.json?limit=10&archived=false&load_relations=${encodeURIComponent('["Contact"]')}&${filter}`);
       for (const c of asList<Record<string, unknown>>(res, "Customer")) {
         const contact = c.Contact as Record<string, unknown> | undefined;
         const phones = asList<{ number: string; useType?: string }>(contact?.Phones as Record<string, unknown>, "ContactPhone");
@@ -106,6 +110,12 @@ export type CustomerBike = { key: string; label: string; serial: string | null; 
  * their past work orders, and bikes registered to them in Lightspeed (Serialized items, which carry the serial).
  */
 export async function customerBikes(db: Db, who: { lsCustomerId: string | null; phone: string | null; email: string | null }, client?: LightspeedClient): Promise<CustomerBike[]> {
+  return (await customerBikesWithStatus(db, who, client)).bikes;
+}
+
+/** As customerBikes, plus what went wrong asking Lightspeed (shown on screen so staff can report it). */
+export async function customerBikesWithStatus(db: Db, who: { lsCustomerId: string | null; phone: string | null; email: string | null }, client?: LightspeedClient): Promise<{ bikes: CustomerBike[]; lightspeedError: string | null }> {
+  let lightspeedError: string | null = null;
   const out = new Map<string, CustomerBike>();
   // The same bike can come from Lightspeed and from a pickup with a size added, so match on model + colour.
   const add = (b: Omit<CustomerBike, "key">, sameAs?: string) => {
@@ -135,7 +145,10 @@ export async function customerBikes(db: Db, who: { lsCustomerId: string | null; 
         );
       }
     } catch (err) {
-      logger.warn({ err: err instanceof Error ? err.message : String(err) }, "lightspeed bikes not read");
+      const body = (err as { body?: { message?: unknown } }).body;
+      const detail = body && typeof body.message === "string" ? `: ${body.message}` : "";
+      lightspeedError = `${err instanceof Error ? err.message.replace(/\?.*? →/, " →") : String(err)}${detail}`.slice(0, 200);
+      logger.warn({ err: lightspeedError }, "lightspeed bikes not read");
     }
   }
 
@@ -160,7 +173,7 @@ export async function customerBikes(db: Db, who: { lsCustomerId: string | null; 
     const rows = await db.select({ item: lsWorkorders.item, serial: lsWorkorders.serial }).from(lsWorkorders).where(eq(lsWorkorders.customerId, who.lsCustomerId)).limit(10);
     for (const r of rows) add({ label: r.item, serial: r.serial, serializedId: null, source: "Past work order" });
   }
-  return [...out.values()].slice(0, 6);
+  return { bikes: [...out.values()].slice(0, 6), lightspeedError };
 }
 
 export type NewTicket = {

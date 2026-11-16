@@ -3,7 +3,7 @@ import { db } from "@/db/client";
 import { getCurrentUser } from "@/lib/auth";
 import { currentShowroom } from "@/lib/current-showroom";
 import { LightspeedClient, lightspeedEnabled } from "@/lib/lightspeed";
-import { customerBikes } from "@/lib/tickets";
+import { customerBikesWithStatus } from "@/lib/tickets";
 
 /** The picked customer's bikes, for the New ticket bike buttons. Staff only. */
 export async function GET(request: NextRequest) {
@@ -11,6 +11,6 @@ export async function GET(request: NextRequest) {
   if (!user) return Response.json({ error: "Sign in again." }, { status: 401 });
   const p = request.nextUrl.searchParams;
   const showroom = await currentShowroom(user);
-  const bikes = await customerBikes(db, { lsCustomerId: p.get("ls") || null, phone: p.get("phone") || null, email: p.get("email") || null }, lightspeedEnabled(showroom) ? new LightspeedClient(db) : undefined);
-  return Response.json({ bikes }, { headers: { "Cache-Control": "no-store" } });
+  const result = await customerBikesWithStatus(db, { lsCustomerId: p.get("ls") || null, phone: p.get("phone") || null, email: p.get("email") || null }, lightspeedEnabled(showroom) ? new LightspeedClient(db) : undefined);
+  return Response.json(result, { headers: { "Cache-Control": "no-store" } });
 }

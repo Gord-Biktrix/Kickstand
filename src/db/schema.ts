@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { boolean, check, date, index, integer, jsonb, pgTable, primaryKey, smallint, text, time, timestamp, unique, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { boolean, check, date, index, integer, jsonb, numeric, pgTable, primaryKey, smallint, text, time, timestamp, unique, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 
 const id = () => uuid("id").primaryKey().defaultRandom();
 const timestamps = {
@@ -332,6 +332,14 @@ export const lsEmployees = pgTable("ls_employees", {
   id: text("id").primaryKey(), // Lightspeed employeeID
   name: text("name").notNull(),
   syncedAt: timestamp("synced_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** Lightspeed item names and default prices, remembered so the POS job screen needs one Lightspeed call, not one per part. */
+export const lsItems = pgTable("ls_items", {
+  id: text("id").primaryKey(), // Lightspeed itemID
+  name: text("name").notNull(),
+  price: numeric("price", { precision: 10, scale: 2, mode: "number" }),
+  fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
 export const lsWorkorders = pgTable(

@@ -4,7 +4,9 @@
  * price). Item names come from the Item records. Read defensively: a field Lightspeed leaves out shows as blank,
  * and if the whole read fails the screen says so instead of breaking.
  */
+import { inArray } from "drizzle-orm";
 import type { Db } from "@/db/client";
+import { lsItems } from "@/db/schema";
 import { asList, LightspeedClient } from "./lightspeed";
 import { logger } from "./logger";
 
@@ -62,6 +64,34 @@ function itemPrice(item: Record<string, unknown>): number | null {
   return p ? num(p.amount) : null;
 }
 
+const ITEM_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * Item names and default prices: from Kickstand's memory when it has them (less than a week old), else from
+ * Lightspeed, then remembered. So a job with eight parts costs one Lightspeed call after the first look.
+ */
+export async function itemNames(db: Db, ids: string[], client: LightspeedClient, now = new Date()): Promise<Map<string, { name: string; price: number | null }>> {
+  const names = new Map<string, { name: string; price: number | null }>();
+  if (ids.length === 0) return names;
+  const cached = await db.select().from(lsItems).where(inArray(lsItems.id, ids));
+  for (const c of cached) if (now.getTime() - c.fetchedAt.getTime() < ITEM_TTL_MS) names.set(c.id, { name: c.name, price: c.price });
+  const missing = ids.filter((id) => !names.has(id)).slice(0, 30);
+  await Promise.all(
+    missing.map(async (id) => {
+      try {
+        const r = await client.request<Record<string, unknown>>("GET", `Item/${id}.json?load_relations=${encodeURIComponent('["Prices"]')}`);
+        const item = (r.Item ?? {}) as Record<string, unknown>;
+        const entry = { name: String(item.description ?? "").trim(), price: itemPrice(item) };
+        names.set(id, entry);
+        await db.insert(lsItems).values({ id, ...entry, fetchedAt: now }).onConflictDoUpdate({ target: lsItems.id, set: { ...entry, fetchedAt: now } });
+      } catch {
+        // A missing item still shows as a line, just without its name.
+      }
+    }),
+  );
+  return names;
+}
+
 /** Read a work order's lines from Lightspeed. Returns null when Lightspeed can't be reached. */
 export async function fetchWorkorderLines(db: Db, workorderId: string, client = new LightspeedClient(db)): Promise<WorkorderLine[] | null> {
   try {
@@ -70,18 +100,7 @@ export async function fetchWorkorderLines(db: Db, workorderId: string, client = 
     const ids = new Set<string>();
     for (const w of asList<Record<string, unknown>>(wo.WorkorderItems as Record<string, unknown> | undefined, "WorkorderItem")) if (w.itemID && String(w.itemID) !== "0") ids.add(String(w.itemID));
     for (const l of asList<Record<string, unknown>>(wo.WorkorderLines as Record<string, unknown> | undefined, "WorkorderLine")) if (l.itemID && String(l.itemID) !== "0") ids.add(String(l.itemID));
-    const names = new Map<string, { name: string; price: number | null }>();
-    await Promise.all(
-      [...ids].slice(0, 30).map(async (id) => {
-        try {
-          const r = await client.request<Record<string, unknown>>("GET", `Item/${id}.json?load_relations=${encodeURIComponent('["Prices"]')}`);
-          const item = (r.Item ?? {}) as Record<string, unknown>;
-          names.set(id, { name: String(item.description ?? "").trim(), price: itemPrice(item) });
-        } catch {
-          // A missing item still shows as a line, just without its name.
-        }
-      }),
-    );
+    const names = await itemNames(db, [...ids], client);
     return parseWorkorderLines(wo, names);
   } catch (err) {
     logger.warn({ err: err instanceof Error ? err.message : String(err), workorderId }, "work order lines not read");

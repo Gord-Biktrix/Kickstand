@@ -19,6 +19,7 @@ export function TicketCustomerBike(props: { initial: Picked | null; initialNew: 
   const [serial, setSerial] = useState(props.serial);
   const [sid, setSid] = useState(props.sid);
   const [chosen, setChosen] = useState<string | null>(null);
+  const [lsError, setLsError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!picked) return;
@@ -29,9 +30,10 @@ export function TicketCustomerBike(props: { initial: Picked | null; initialNew: 
       try {
         const qs = new URLSearchParams({ ls: ls ?? "", phone: phone ?? "", email: email ?? "" });
         const res = await fetch(`/api/customers/bikes?${qs.toString()}`, { cache: "no-store" });
-        const json = (await res.json()) as { bikes?: Bike[] };
+        const json = (await res.json()) as { bikes?: Bike[]; lightspeedError?: string | null };
         if (!live) return;
         const list = json.bikes ?? [];
+        setLsError(json.lightspeedError ?? null);
         setBikes(list);
         // One bike on file: pick it, unless something was already typed.
         if (list.length === 1 && !props.bike) choose(list[0]);
@@ -63,7 +65,7 @@ export function TicketCustomerBike(props: { initial: Picked | null; initialNew: 
     <>
       <div className="flex min-w-0 flex-col gap-2">
         <p className={label}>Customer</p>
-        <CustomerPicker initial={props.initial} initialNew={props.initialNew} onPick={(p) => { setPicked(p); setBikes([]); setChosen(null); }} />
+        <CustomerPicker initial={props.initial} initialNew={props.initialNew} onPick={(p) => { setPicked(p); setBikes([]); setChosen(null); setLsError(null); }} />
       </div>
 
       <div className="grid gap-2">
@@ -80,6 +82,9 @@ export function TicketCustomerBike(props: { initial: Picked | null; initialNew: 
               <button type="button" onClick={other} aria-pressed={chosen === "other"} className={`min-h-11 rounded-full border px-4 text-sm font-semibold ${chosen === "other" ? "border-[#17181a] bg-[#17181a] text-white" : "border-border bg-card"}`}>+ Other bike</button>
             )}
           </div>
+        )}
+        {picked && !loading && bikes.length === 0 && (
+          <p className="text-xs text-muted">{lsError ? `Lightspeed didn't send their bikes (${lsError}).` : "No bikes on file for them yet; type it below."}</p>
         )}
         <input id="bike" name="bike" value={bike} onChange={(e) => { setBike(e.target.value); setSid(""); setChosen(null); }} placeholder="e.g. Stunner Lite 3, peach" className="input h-11 text-base" />
         <input name="serial" value={serial} onChange={(e) => setSerial(e.target.value)} placeholder="Serial (optional)" aria-label="Serial number" className="input h-11 text-base" />

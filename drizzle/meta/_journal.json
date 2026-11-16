@@ -162,6 +162,13 @@
       "when": 1794856009537,
       "tag": "0022_amused_stature",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1794862815612,
+      "tag": "0023_curvy_sandman",
+      "breakpoints": true
     }
   ]
 }
