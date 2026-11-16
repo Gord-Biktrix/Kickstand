@@ -1,13 +1,13 @@
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { Db } from "@/db/client";
-import { bookings, events, type BookingType } from "@/db/schema";
+import { bookings, events, lsWorkorderStatuses, type BookingType } from "@/db/schema";
 import { createBookingType, validateBookingType, WEEKDAY_8_TO_4 } from "@/lib/booking-types";
 import { saveConnection, setLightspeedFetch } from "@/lib/lightspeed";
 import { MemoryNotifier, setNotifier } from "@/lib/notifier";
 import type { ShowroomCtx } from "@/lib/showroom";
 import { localToUtc } from "@/lib/time";
-import { cancelTypeBooking, createTypeBooking, rescheduleTypeBooking, syncBookingWorkorder } from "@/lib/type-bookings";
+import { cancelTypeBooking, createTypeBooking, rescheduleTypeBooking, setBookingOutcome, syncBookingWorkorder } from "@/lib/type-bookings";
 import { makeOrder, resetDb, testDb, withSettings } from "./helpers";
 
 const TZ = "America/Vancouver";
@@ -28,6 +28,7 @@ function fakeLightspeed(opts: { fail?: boolean } = {}) {
     if (url.endsWith("Customer.json")) return json(200, { Customer: { customerID: String(++ids) } });
     if (url.endsWith("Workorder.json")) return json(200, { Workorder: { workorderID: String(++ids) } });
     if (/Workorder\/\d+\.json$/.test(url)) return json(200, { Workorder: {} });
+    if (/Customer\/\d+\.json/.test(url)) return json(200, { Customer: { customerID: "9020", firstName: "Walk", lastName: "In", Contact: { Emails: { ContactEmail: { address: "walk@example.com" } }, Phones: { ContactPhone: { number: "604-555-0100", useType: "Mobile" } } } } });
     return json(404, { message: `unhandled ${method} ${url}` });
   };
   return { calls, fetchImpl };
@@ -48,6 +49,7 @@ describe("service bookings and Lightspeed work orders", () => {
   afterAll(async () => { setLightspeedFetch(null); setNotifier(null); await db.$client.end(); });
   beforeEach(async () => {
     van = await resetDb(db);
+    await db.delete(lsWorkorderStatuses); // account-wide, so other test files can leave some behind
     setNotifier(new MemoryNotifier());
     await saveConnection(db, { accountId: "999", accessToken: "acc", refreshToken: "ref", expiresIn: 3600 });
     van = await withSettings(db, van, { lightspeed: { ...van.settings.lightspeed, enabled: true, shop_id: 3, employee_id: 27, open_status_id: 1 } });
@@ -78,7 +80,7 @@ describe("service bookings and Lightspeed work orders", () => {
     expect(ev.payload).toMatchObject({ booking_id: booking.id, customer_matched: true });
   });
 
-  it("moves Due on reschedule and marks the note cancelled on cancel, never changing the status", async () => {
+  it("moves Due on reschedule; on cancel marks the note cancelled and archives the work order", async () => {
     const ls = fakeLightspeed();
     setLightspeedFetch(ls.fetchImpl);
     const { booking } = await createTypeBooking(db, { showroom: van, type: service, startsAt: slot("10:00"), details, createdBy: "customer", now: NOW });
@@ -89,6 +91,23 @@ describe("service bookings and Lightspeed work orders", () => {
     expect(puts[0].body).toMatchObject({ etaOut: slot("13:00").toISOString() });
     expect(String(puts[1].body!.note)).toMatch(/^CANCELLED \(by staff\)/);
     expect(puts.every((p) => !("workorderStatusID" in p.body!))).toBe(true);
+    const del = ls.calls.filter((c) => c.method === "DELETE");
+    expect(del.map((c) => c.url.split("/").at(-1))).toEqual([`${booking.lsWorkorderId}.json`]);
+    expect(await db.select().from(events).where(eq(events.type, "booking_workorder_archived"))).toHaveLength(1);
+  });
+
+  it("books into the shop's Appointment status; check in moves it to Open with today's date in; undo puts it back", async () => {
+    await db.insert(lsWorkorderStatuses).values([{ id: 1, name: "Open", systemValue: "open" }, { id: 27, name: "Appointment", systemValue: null }]);
+    const ls = fakeLightspeed();
+    setLightspeedFetch(ls.fetchImpl);
+    const { booking } = await createTypeBooking(db, { showroom: van, type: service, startsAt: slot("10:00"), details, createdBy: "customer", now: NOW });
+    expect(ls.calls.find((c) => c.method === "POST" && c.url.endsWith("Workorder.json"))!.body).toMatchObject({ workorderStatusID: 27 });
+    const at = localToUtc("2026-11-17", "09:55", TZ);
+    await setBookingOutcome(db, { showroomId: van.id, bookingId: booking.id, outcome: "completed", actor: "staff-1", now: at });
+    const checkIn = ls.calls.filter((c) => c.method === "PUT").at(-1)!;
+    expect(checkIn.body).toEqual({ workorderStatusID: 1, timeIn: at.toISOString() });
+    await setBookingOutcome(db, { showroomId: van.id, bookingId: booking.id, outcome: "booked", actor: "staff-1", now: at });
+    expect(ls.calls.filter((c) => c.method === "PUT").at(-1)!.body).toEqual({ workorderStatusID: 27 });
   });
 
   it("skips types without the work-order flag and stores with the link off", async () => {

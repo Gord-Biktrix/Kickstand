@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { MAX_QUESTIONS, QUESTION_KINDS, SUGGESTED_CALL_QUESTIONS, type BookingQuestion, type QuestionKind } from "@/lib/booking-questions";
+import { MAX_QUESTIONS, QUESTION_KINDS, SUGGESTED_CALL_QUESTIONS, SUGGESTED_SERVICE_QUESTIONS, type BookingQuestion, type QuestionKind } from "@/lib/booking-questions";
 
 type Draft = BookingQuestion & { optionsText: string };
 
@@ -59,7 +59,10 @@ export function QuestionsEditor({ initial }: { initial: BookingQuestion[] }) {
           <button type="button" onClick={() => setList((l) => [...l, { id: newId(), label: "", kind: "text", options: [], optionsText: "", required: false }])} className="btn btn-sm">+ Add a question</button>
         )}
         {list.length === 0 && (
-          <button type="button" onClick={() => setList(SUGGESTED_CALL_QUESTIONS.map(toDraft))} className="btn btn-sm">Use the sales-call questions</button>
+          <>
+            <button type="button" onClick={() => setList(SUGGESTED_CALL_QUESTIONS.map(toDraft))} className="btn btn-sm">Use the sales-call questions</button>
+            <button type="button" onClick={() => setList(SUGGESTED_SERVICE_QUESTIONS.map(toDraft))} className="btn btn-sm">Use the service questions (which bike)</button>
+          </>
         )}
       </div>
     </div>

@@ -32,6 +32,7 @@ import { mailerKind } from "@/lib/mailer";
 import { syncSpecialOrders } from "@/lib/special-orders";
 import { deleteView, saveView, syncWorkorders } from "@/lib/workorders";
 import type { BoardColumn } from "@/lib/workshop-columns";
+import { markJobReady, moveJob } from "@/lib/workshop-moves";
 
 /** Run a mutation and land back on `returnTo` with a flash; auth errors surface the same way. */
 async function run(returnTo: string, fn: () => Promise<string | void>): Promise<never> {
@@ -611,6 +612,27 @@ export async function saveViewAction(formData: FormData) {
     const statusIds = formData.getAll("status_ids").map((v) => Number(v));
     const v = await saveView(db, { showroom, id, name: str(formData, "name"), statusIds, actor: user.id });
     return `${id ? "Updated" : "Created"} view “${v.name}” (${v.statusIds.length} status${v.statusIds.length === 1 ? "" : "es"}).`;
+  });
+}
+
+/** Workshop board: move a repair to a column; its Lightspeed work order moves with it. */
+export async function moveJobAction(jobId: string, column: BoardColumn, back: string) {
+  return run(safeReturn(back, "/app/workshop"), async () => {
+    const user = await requireActor("staff");
+    const showroom = await currentShowroom(user);
+    const r = await moveJob(db, { showroom, jobId, column, actor: user.id });
+    return `Moved. Lightspeed work order #${r.workorderId} is now ${r.status}.`;
+  });
+}
+
+/** Workshop board: Ready, from the confirm panel. "notify" ticked tells the customer through Klaviyo. */
+export async function readyJobAction(jobId: string, back: string, formData: FormData) {
+  return run(safeReturn(back, "/app/workshop"), async () => {
+    const user = await requireActor("staff");
+    const showroom = await currentShowroom(user);
+    const r = await markJobReady(db, { showroom, jobId, notify: formData.get("notify") === "on", actor: user.id });
+    const told = r.told === "sent" ? " The customer has been told." : r.told === "failed" ? " The message to the customer didn't go out; call them." : r.told === "no_contact" ? " There's no phone or email to tell the customer." : "";
+    return `Ready. Lightspeed says ${r.status}.${told}`;
   });
 }
 

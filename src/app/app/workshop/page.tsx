@@ -6,12 +6,15 @@ import { requireUser } from "@/lib/auth";
 import { currentShowroom } from "@/lib/current-showroom";
 import { sp, type SearchParams } from "@/lib/flash";
 import { addLocalDays, formatTime, toLocalDate } from "@/lib/time";
-import { workshopJobs, type JobColumn, type WorkshopJob } from "@/lib/workshop";
-import { markReadyAction, startBuildAction } from "../actions";
+import { jobPath, workshopJobs, type JobColumn, type WorkshopJob } from "@/lib/workshop";
+import { markReadyAction, moveJobAction, readyJobAction, setBookingStatusAction, startBuildAction } from "../actions";
 
 export const metadata = { title: "Workshop" };
 
 const RETURN = "/app/workshop";
+
+/** Repairs move through Lightspeed: a work order written there, or the one Kickstand made for a service booking. */
+const movable = (j: WorkshopJob) => j.workorderId !== null && (j.source === "lightspeed" || j.kind === "repair");
 
 const COLUMNS: { key: JobColumn; label: string; empty: string }[] = [
   { key: "todo", label: "To do", empty: "Nothing waiting to start." },
@@ -56,6 +59,8 @@ export default async function WorkshopPage({ searchParams }: { searchParams: Pro
   const jobs = mech === "none" ? all.filter((j) => !j.mechanicId) : mech ? all.filter((j) => j.mechanicId === mech) : all;
   const late = jobs.filter((j) => j.late).length;
   const ls = showroom.settings.lightspeed.shop_id !== null;
+  const back = mech ? `/app/workshop?mech=${encodeURIComponent(mech)}` : RETURN;
+  const readying = all.find((j) => j.id === sp(q.ready) && movable(j));
 
   return (
     <div>
@@ -82,6 +87,7 @@ export default async function WorkshopPage({ searchParams }: { searchParams: Pro
           )
         }
       />
+      {readying && <ReadyPanel job={readying} back={back} />}
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         {COLUMNS.map((c) => {
           const list = jobs.filter((j) => j.column === c.key);
@@ -91,7 +97,7 @@ export default async function WorkshopPage({ searchParams }: { searchParams: Pro
                 {c.label}
                 <span className="text-muted">{list.length}</span>
               </h2>
-              {list.length === 0 ? <Empty>{c.empty}</Empty> : list.map((j) => <JobCard key={j.id} job={j} tz={tz} today={today} />)}
+              {list.length === 0 ? <Empty>{c.empty}</Empty> : list.map((j) => <JobCard key={j.id} job={j} tz={tz} today={today} back={back} />)}
             </section>
           );
         })}
@@ -104,7 +110,7 @@ export default async function WorkshopPage({ searchParams }: { searchParams: Pro
   );
 }
 
-function JobCard({ job, tz, today }: { job: WorkshopJob; tz: string; today: string }) {
+function JobCard({ job, tz, today, back }: { job: WorkshopJob; tz: string; today: string; back: string }) {
   const k = KIND[job.kind];
   const timing = job.noDate
     ? job.column === "parts" ? "Waiting on parts" : "No due date"
@@ -121,9 +127,9 @@ function JobCard({ job, tz, today }: { job: WorkshopJob; tz: string; today: stri
     ? [job.customer ?? "Shop bike", job.note, !job.noDate && job.column !== "ready" && `due ${when(job.readyBy, tz, today)}`]
     : job.kind === "build"
       ? [`${hours(job.minutes)} build`, job.column !== "ready" && `ready by ${when(job.readyBy, tz, today)}`, job.customer && `${job.customer} picks up ${when(job.visitAt, tz, today)}`]
-      : [hours(job.minutes), job.customer && `${job.customer} drops off ${when(job.visitAt, tz, today)}`];
+      : [hours(job.minutes), job.customer && (job.notHereYet ? `${job.customer} · not here yet, drops off ${when(job.visitAt, tz, today)}` : `${job.customer} · checked in`)];
   return (
-    <article className={`rounded-lg border bg-card p-3 ${job.kind === "floor" ? "opacity-75" : ""} ${job.late ? "border-red-600 shadow-[0_0_0_1px_#dc2626]" : "border-border"}`}>
+    <article className={`rounded-lg border bg-card p-3 ${job.kind === "floor" ? "opacity-75" : ""} ${job.notHereYet ? "border-dashed" : ""} ${job.late ? "border-red-600 shadow-[0_0_0_1px_#dc2626]" : "border-border"}`}>
       <p className="flex flex-wrap items-center justify-between gap-2 text-[11px] font-extrabold tracking-wider uppercase">
         <span className="inline-flex items-center gap-1.5">
           <i aria-hidden className="inline-block h-2.5 w-2.5 rounded-[2px]" style={{ background: k.color }} />
@@ -134,35 +140,36 @@ function JobCard({ job, tz, today }: { job: WorkshopJob; tz: string; today: stri
           {job.late && " · late"}
         </span>
       </p>
-      {job.source === "lightspeed" ? (
-        <a href={job.href} target="_blank" rel="noreferrer" className="mt-1.5 block font-semibold">{job.title}</a>
-      ) : (
-        <Link href={job.href} className="mt-1.5 block font-semibold">
-          {job.title}
-        </Link>
-      )}
+      <Link href={movable(job) ? jobPath(job.id) : job.href} className="mt-1.5 block font-semibold">
+        {job.title}
+      </Link>
       <p className="mt-0.5 text-sm text-muted">{detail.filter(Boolean).join(" · ")}</p>
-      <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
-        <span className="text-xs text-muted">{[job.tag && `tag ${job.tag}`, job.workorderId && `WO #${job.workorderId}`, job.status].filter(Boolean).join(" · ")}</span>
-        <span className="flex gap-2">
-          {job.unitId && job.column === "todo" && (
-            <form action={startBuildAction.bind(null, job.unitId, RETURN)}>
-              <button type="submit" className="btn btn-sm btn-primary">Build</button>
-            </form>
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        {job.unitId && job.column === "todo" && (
+          <form action={startBuildAction.bind(null, job.unitId, RETURN)}>
+            <button type="submit" className="btn btn-sm btn-primary">Build</button>
+          </form>
+        )}
+        {job.unitId && job.column === "doing" && (
+          <form action={markReadyAction.bind(null, job.unitId, RETURN)}>
+            <button type="submit" className="btn btn-sm btn-primary">Ready</button>
+          </form>
+        )}
+        {movable(job) && <MoveButtons job={job} back={back} />}
+      </div>
+      <div className="mt-2 flex items-center justify-between gap-2 border-t border-border pt-2">
+        <span className="min-w-0 text-xs text-muted">
+          {[job.tag && `tag ${job.tag}`].filter(Boolean).join("")}
+          {job.workorderId && (
+            <>
+              {job.tag ? " · " : ""}
+              {job.source === "lightspeed" ? <a href={job.href} target="_blank" rel="noreferrer" className="underline">WO #{job.workorderId}</a> : `WO #${job.workorderId}`}
+            </>
           )}
-          {job.unitId && job.column === "doing" && (
-            <form action={markReadyAction.bind(null, job.unitId, RETURN)}>
-              <button type="submit" className="btn btn-sm btn-primary">Ready</button>
-            </form>
-          )}
-          {job.source === "kickstand" && job.kind === "repair" && (
-            <Link href={job.href} className="btn btn-sm">Open</Link>
-          )}
-          {job.source === "lightspeed" && (
-            <a href={job.href} target="_blank" rel="noreferrer" className="btn btn-sm">Lightspeed</a>
-          )}
-          <Mechanic name={job.mechanic} assigned={!!job.mechanicId} />
+          {job.status && ` · ${job.status}`}
+          {job.source === "kickstand" && job.kind === "repair" && <> · <Link href={job.href} className="underline">Open booking</Link></>}
         </span>
+        <Mechanic name={job.mechanic} assigned={!!job.mechanicId} />
       </div>
     </article>
   );
@@ -175,5 +182,52 @@ function Mechanic({ name, assigned }: { name: string | null; assigned: boolean }
     <span title={name ?? (assigned ? "Mechanic" : "Not assigned")} aria-label={name ? `Mechanic: ${name}` : assigned ? "Mechanic assigned" : "Not assigned"} className={`inline-flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-semibold text-white ${assigned ? "bg-[#3d3f43]" : "bg-[#a8a29e]"}`}>
       {initials}
     </span>
+  );
+}
+
+/** The next step for a repair, as one main button (plus Waiting on parts). Each writes the column's Lightspeed status. */
+function MoveButtons({ job, back }: { job: WorkshopJob; back: string }) {
+  if (job.notHereYet && job.bookingId) {
+    return (
+      <form action={setBookingStatusAction.bind(null, job.bookingId, "completed", back)}>
+        <button type="submit" className="btn btn-sm btn-primary">Check in</button>
+      </form>
+    );
+  }
+  const move = (column: JobColumn, label: string, primary = false) => (
+    <form action={moveJobAction.bind(null, job.id, column, back)}>
+      <button type="submit" className={`btn btn-sm ${primary ? "btn-primary" : ""}`}>{label}</button>
+    </form>
+  );
+  const ready = <Link href={`${back}${back.includes("?") ? "&" : "?"}ready=${encodeURIComponent(job.id)}`} className="btn btn-sm btn-primary">Ready</Link>;
+  if (job.column === "todo") return <>{move("doing", "Start", true)}{move("parts", "Waiting on parts")}</>;
+  if (job.column === "doing") return <>{ready}{move("parts", "Waiting on parts")}</>;
+  if (job.column === "parts") return move("todo", "Parts in", true);
+  return null;
+}
+
+/** Ready, confirmed: shows what happens in Lightspeed and lets staff choose whether the customer is told. */
+function ReadyPanel({ job, back }: { job: WorkshopJob; back: string }) {
+  const canTell = job.kind !== "floor" && !!job.customer;
+  const first = job.customer?.split(/\s+/)[0] ?? "the customer";
+  return (
+    <section role="dialog" aria-labelledby="ready-title" className="mb-4 rounded-lg border-2 border-[#ff6b1a] bg-card p-4">
+      <p className="text-[11px] font-extrabold tracking-wider uppercase">Mark ready</p>
+      <h2 id="ready-title" className="mt-1 text-lg font-bold">{job.title}{job.customer ? ` · ${job.customer}` : ""}</h2>
+      <p className="mt-1 text-sm text-muted">Lightspeed work order #{job.workorderId} moves to the Ready column&apos;s status (Finished unless you changed it in Settings › Views).</p>
+      <form action={readyJobAction.bind(null, job.id, back)} className="mt-3 flex flex-wrap items-center gap-3">
+        {canTell ? (
+          <label className="flex min-h-11 items-center gap-2 text-sm">
+            <input type="checkbox" name="notify" defaultChecked className="h-5 w-5" /> Tell {first} it&apos;s ready (text or email, through Klaviyo)
+          </label>
+        ) : (
+          <p className="text-sm text-muted">Shop bike: nobody to tell.</p>
+        )}
+        <span className="ml-auto flex gap-2">
+          <Link href={back} className="btn">Cancel</Link>
+          <button type="submit" className="btn btn-primary">Mark ready</button>
+        </span>
+      </form>
+    </section>
   );
 }

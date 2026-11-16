@@ -49,12 +49,12 @@ describe("workshop jobs", () => {
     expect(buildJob(sr, { appointment: appt, unit: unit("ready"), order: null }, readyBy, at("2026-09-05", "11:00"))).toMatchObject({ column: "ready", late: false });
   });
 
-  it("repairs run during the appointment", () => {
-    const booking = { id: "b1", startsAt: at("2026-09-05", "15:00"), endsAt: at("2026-09-05", "16:00"), customerName: "Ahmed Ali", lsWorkorderId: "10255" };
+  it("a booked repair waits in To do as not-here-yet until it's checked in", () => {
+    const booking = { id: "b1", startsAt: at("2026-09-05", "15:00"), endsAt: at("2026-09-05", "16:00"), customerName: "Ahmed Ali", lsWorkorderId: "10255", status: "booked" };
     const type = { name: "Tune-up", durationMin: 60 };
-    expect(repairJob({ booking, type }, at("2026-09-05", "12:00"))).toMatchObject({ column: "todo", minutes: 60, late: false });
-    expect(repairJob({ booking, type }, at("2026-09-05", "15:30"))).toMatchObject({ column: "doing", late: false });
-    expect(repairJob({ booking, type }, at("2026-09-05", "16:30")).late).toBe(true);
+    expect(repairJob({ booking, type }, at("2026-09-05", "12:00"))).toMatchObject({ column: "todo", minutes: 60, late: false, notHereYet: true });
+    expect(repairJob({ booking, type }, at("2026-09-05", "15:30"))).toMatchObject({ column: "todo", late: false, notHereYet: true });
+    expect(repairJob({ booking: { ...booking, status: "completed" }, type }, at("2026-09-05", "15:30"))).toMatchObject({ notHereYet: false, late: true });
   });
 
   it("sorts by start time", () => {
@@ -113,7 +113,7 @@ describe("Lightspeed work orders on the board", () => {
   it("a booked repair follows its work order's column; a bike keeps Kickstand's build status", () => {
     const columns = defaultWorkshopColumns(statuses);
     const ctx = { columns, statusName: (id: number) => VAN.find((v) => v[0] === id)![1], mechanicName: (id: string | null) => (id === "7" ? "Jordan Lee" : null) };
-    const booking = { id: "b1", startsAt: at("2026-09-05", "15:00"), endsAt: at("2026-09-05", "16:00"), customerName: "Ahmed Ali", lsWorkorderId: "10249" };
+    const booking = { id: "b1", startsAt: at("2026-09-05", "15:00"), endsAt: at("2026-09-05", "16:00"), customerName: "Ahmed Ali", lsWorkorderId: "10249", status: "completed" };
     const repair = repairJob({ booking, type: { name: "Tune-up", durationMin: 60 } }, at("2026-09-05", "12:00"));
     expect(withWorkorder(repair, wo({ statusId: 7 }), ctx, at("2026-09-05", "12:00"))).toMatchObject({ column: "parts", status: "Parts On Order", mechanic: "Jordan Lee" });
     expect(withWorkorder(repair, undefined, ctx, at("2026-09-05", "12:00")).column).toBe("todo");

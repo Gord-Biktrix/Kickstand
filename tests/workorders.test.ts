@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { Db } from "@/db/client";
-import { units } from "@/db/schema";
+import { lsWorkorderStatuses, units } from "@/db/schema";
 import { patchShowroomSettings, type ShowroomCtx } from "@/lib/showroom";
 import { deleteView, listViews, listWorkorders, listWorkorderStatuses, saveView, syncWorkorders, unassignedStatuses, type WorkorderRow, type WorkorderSource, type WorkorderStatusRow } from "@/lib/workorders";
 import { workshopJobs } from "@/lib/workshop";
@@ -32,6 +32,7 @@ describe("work-order mirror and views", () => {
   afterAll(async () => { await db.$client.end(); });
   beforeEach(async () => {
     showroom = await resetDb(db);
+    await db.delete(lsWorkorderStatuses); // account-wide, so other test files can leave some behind
     showroom = { ...showroom, settings: { ...showroom.settings, lightspeed: { ...showroom.settings.lightspeed, shop_id: 3 } } };
     await patchShowroomSettings(db, showroom.id, { lightspeed: showroom.settings.lightspeed });
   });

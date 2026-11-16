@@ -8,7 +8,7 @@ import { and, asc, between, desc, eq, isNotNull, ne, or, sql } from "drizzle-orm
 import { bookingSlackMessage, bookingThreadReply, getSlackBot, postSlack, type BookingSlackPing } from "./slack";
 import { collectAnswers, readAnswers, readQuestions } from "./booking-questions";
 import type { Db, DbOrTx } from "@/db/client";
-import { bookings, bookingTypes, events, orders, type Booking, type BookingType } from "@/db/schema";
+import { bookings, bookingTypes, events, lsWorkorders, lsWorkorderStatuses, orders, type Booking, type BookingType } from "@/db/schema";
 import { formatInTimeZone } from "date-fns-tz";
 import { LightspeedClient, lightspeedEnabled } from "./lightspeed";
 import { getCalendarWriter } from "./google-calendar";
@@ -361,7 +361,32 @@ export async function setBookingOutcome(
     actor: args.actor,
     payload: { booking_id: current.id, booking_type_id: current.bookingTypeId, previous: current.status },
   });
+  await syncCheckInWorkorder(db, { booking: row, outcome: args.outcome, actor: args.actor, now });
   return row;
+}
+
+/**
+ * Check in on a service booking tells Lightspeed the bike is here: the work order moves from Appointment to
+ * Open with today's date in. Undoing it puts it back to Appointment. A no-show leaves it for staff to rebook
+ * or archive. Never throws: the check-in itself is already saved.
+ */
+async function syncCheckInWorkorder(db: Db, args: { booking: Booking; outcome: "completed" | "no_show" | "booked"; actor: string; now: Date }) {
+  const b = args.booking;
+  if (!b.lsWorkorderId || args.outcome === "no_show") return;
+  const [type] = await db.select().from(bookingTypes).where(eq(bookingTypes.id, b.bookingTypeId));
+  if (!type?.createsWorkOrder || type.location !== "in_person") return;
+  const showroom = await getShowroomById(db, b.showroomId);
+  if (!lightspeedEnabled(showroom)) return;
+  const statusID = args.outcome === "completed" ? showroom.settings.lightspeed.open_status_id : await appointmentStatusId(db, showroom);
+  try {
+    await new LightspeedClient(db).updateWorkorder(b.lsWorkorderId, { workorderStatusID: statusID, ...(args.outcome === "completed" ? { timeIn: args.now.toISOString() } : {}) });
+    await db.update(lsWorkorders).set({ statusId: statusID, ...(args.outcome === "completed" ? { timeIn: args.now } : {}) }).where(eq(lsWorkorders.id, b.lsWorkorderId));
+    await db.insert(events).values({ showroomId: b.showroomId, type: "booking_workorder_updated", actor: args.actor, payload: { booking_id: b.id, workorder_id: b.lsWorkorderId, status_id: statusID } });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    logger.warn({ err: message, bookingId: b.id }, "check-in not sent to Lightspeed");
+    await db.insert(events).values({ showroomId: b.showroomId, type: "booking_workorder_failed", actor: args.actor, payload: { booking_id: b.id, error: message.slice(0, 300) } });
+  }
 }
 
 // ---- Lightspeed work orders for service bookings ------------------------------------------------
@@ -406,6 +431,19 @@ function workorderNote(showroom: ShowroomCtx, type: BookingType, b: Booking): st
  * never changed here, so Ikeono's status automations can't fire by surprise. Never throws: a failure is logged
  * on the booking's timeline and staff can retry from the booking page.
  */
+/**
+ * The status a booked-but-not-arrived service work order sits in: the shop's "Appointment" status when it has
+ * one (Vancouver does), else the new-work-order status. Check in moves it to the new-work-order status (Open).
+ */
+export async function appointmentStatusId(dbx: DbOrTx, showroom: ShowroomCtx): Promise<number> {
+  const [row] = await dbx
+    .select({ id: lsWorkorderStatuses.id })
+    .from(lsWorkorderStatuses)
+    .where(and(sql`lower(trim(${lsWorkorderStatuses.name})) = 'appointment'`, eq(lsWorkorderStatuses.archived, false)))
+    .limit(1);
+  return row?.id ?? showroom.settings.lightspeed.open_status_id;
+}
+
 export async function syncBookingWorkorder(db: Db, args: { showroom: ShowroomCtx; type: BookingType; booking: Booking; actor: string }): Promise<Booking | null> {
   const { showroom, type } = args;
   if (!type.createsWorkOrder || type.location !== "in_person" || !lightspeedEnabled(showroom)) return null;
@@ -425,6 +463,13 @@ export async function syncBookingWorkorder(db: Db, args: { showroom: ShowroomCtx
     const client = new LightspeedClient(db);
     if (b.lsWorkorderId) {
       await client.updateWorkorder(b.lsWorkorderId, common);
+      if (b.status === "cancelled") {
+        // A cancelled service leaves nothing open behind it: archive the work order and drop it off the board.
+        await client.archiveWorkorder(b.lsWorkorderId);
+        await db.delete(lsWorkorders).where(eq(lsWorkorders.id, b.lsWorkorderId));
+        await db.insert(events).values({ showroomId: showroom.id, type: "booking_workorder_archived", actor: args.actor, payload: { booking_id: b.id, workorder_id: b.lsWorkorderId } });
+        return b;
+      }
       await db.insert(events).values({ showroomId: showroom.id, type: "booking_workorder_updated", actor: args.actor, payload: { booking_id: b.id, workorder_id: b.lsWorkorderId } });
       return b;
     }
@@ -437,7 +482,7 @@ export async function syncBookingWorkorder(db: Db, args: { showroom: ShowroomCtx
       ...(ls.employee_id ? { employeeID: ls.employee_id } : {}),
       timeIn: new Date().toISOString(),
       warranty: false,
-      workorderStatusID: ls.open_status_id,
+      workorderStatusID: await appointmentStatusId(db, showroom),
       ...common,
     });
     const [row] = await db.update(bookings).set({ lsWorkorderId: workorderID }).where(eq(bookings.id, b.id)).returning();

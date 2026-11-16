@@ -52,11 +52,13 @@ export type WorkshopJob = {
   noDate: boolean;
   /** Kickstand's own job (bike pickup or booking) or a work order written in Lightspeed. */
   source: "kickstand" | "lightspeed";
+  /** A service booking whose bike hasn't been checked in yet. */
+  notHereYet: boolean;
   note: string | null;
 };
 
 type BuildInput = { appointment: Pick<Appointment, "onDate" | "startsAt">; unit: Pick<Unit, "id" | "status" | "model" | "boxTag" | "lsWorkorderId">; order: Pick<Order, "customerName"> | null };
-type RepairInput = { booking: Pick<Booking, "id" | "startsAt" | "endsAt" | "customerName" | "lsWorkorderId">; type: Pick<BookingType, "name" | "durationMin"> };
+type RepairInput = { booking: Pick<Booking, "id" | "startsAt" | "endsAt" | "customerName" | "lsWorkorderId" | "status">; type: Pick<BookingType, "name" | "durationMin"> };
 
 /** Ready-by for a build: the deadline instant, or (in "pickup" mode, date only) the close of that day's pickup window. */
 export function buildReadyBy(showroom: ShowroomCtx, appt: BuildInput["appointment"], rules: RuleLike[], overrides: OverrideLike[]): Date {
@@ -93,13 +95,18 @@ export function buildJob(showroom: ShowroomCtx, r: BuildInput, readyBy: Date, no
     noDate: false,
     source: "kickstand",
     note: null,
+    notHereYet: false,
   };
 }
 
-/** A repair is worked on while the customer's appointment runs: it starts at drop-off and is ready at the end. */
+/**
+ * A booked repair: the bike comes in at the appointment and is worked on during it. Until staff check it in it
+ * waits in To do as "not here yet"; once checked in, its work order's status decides the column (withWorkorder).
+ */
 export function repairJob(r: RepairInput, now: Date): WorkshopJob {
   const { booking, type } = r;
-  const column: JobColumn = now >= booking.startsAt ? "doing" : "todo";
+  const arrived = booking.status === "completed";
+  const column: JobColumn = "todo";
   return {
     id: `b:${booking.id}`,
     kind: "repair",
@@ -110,7 +117,7 @@ export function repairJob(r: RepairInput, now: Date): WorkshopJob {
     startBy: booking.startsAt,
     readyBy: booking.endsAt,
     visitAt: booking.startsAt,
-    late: column === "doing" && now > booking.endsAt,
+    late: arrived && now > booking.startsAt,
     unitId: null,
     bookingId: booking.id,
     tag: null,
@@ -122,6 +129,7 @@ export function repairJob(r: RepairInput, now: Date): WorkshopJob {
     noDate: false,
     source: "kickstand",
     note: null,
+    notHereYet: !arrived,
   };
 }
 
@@ -163,6 +171,7 @@ export function workorderJob(
     noDate,
     source: "lightspeed",
     note: w.item && firstLine ? firstLine : null,
+    notHereYet: false,
   };
 }
 
@@ -178,7 +187,7 @@ export function withWorkorder(job: WorkshopJob, w: WoInput | undefined, ctx: { c
   // Bikes keep Kickstand's own build status (Build / Ready buttons); a booked repair follows Lightspeed.
   const col = job.kind === "repair" ? columnOf(ctx.columns, w.statusId) : null;
   const column = col ?? job.column;
-  const late = column === "todo" ? now > job.startBy : column === "doing" ? now > job.readyBy : false;
+  const late = job.notHereYet ? false : column === "todo" ? now > job.startBy : column === "doing" ? now > job.readyBy : false;
   return { ...job, column, late, status, mechanicId: w.employeeId, mechanic };
 }
 
@@ -225,14 +234,21 @@ export async function workshopJobs(dbx: Db, showroom: ShowroomCtx, now = new Dat
         between(bookings.onDate, today, until),
       ),
     );
-  const repairs = repairRows.map((r) => repairJob(r, now));
-
   // Lightspeed work orders (the hourly mirror), their statuses and mechanics.
   const [wos, statuses, employees] = await Promise.all([
     dbx.select().from(lsWorkorders).where(eq(lsWorkorders.showroomId, showroom.id)),
     dbx.select().from(lsWorkorderStatuses),
     dbx.select().from(lsEmployees),
   ]);
+  // Checked-in service bookings stay on the board, whatever their date, until their work order is paid.
+  const checkedIn = wos.length
+    ? await dbx
+        .select({ booking: bookings, type: bookingTypes })
+        .from(bookings)
+        .innerJoin(bookingTypes, eq(bookingTypes.id, bookings.bookingTypeId))
+        .where(and(eq(bookings.showroomId, showroom.id), eq(bookings.status, "completed"), eq(bookingTypes.createsWorkOrder, true), inArray(bookings.lsWorkorderId, wos.map((w) => w.id))))
+    : [];
+  const repairs = [...repairRows, ...checkedIn].map((r) => repairJob(r, now));
   const columns = workshopColumns(showroom.settings, statuses);
   const statusById = new Map(statuses.map((st) => [st.id, st.name]));
   const nameById = new Map(employees.map((e) => [e.id, e.name]));
@@ -251,4 +267,14 @@ export async function workshopJobs(dbx: Db, showroom: ShowroomCtx, now = new Dat
   });
 
   return sortJobs([...kickstandJobs, ...lsJobs]);
+}
+
+/** The POS job page for a board card: /app/workshop/w-10237 (Lightspeed work order) or /app/workshop/b-<booking id>. */
+export function jobPath(jobId: string): string {
+  return `/app/workshop/${jobId.replace(":", "-")}`;
+}
+
+export function jobIdFromPath(ref: string): string | null {
+  const m = /^([wbu])-(.+)$/.exec(decodeURIComponent(ref));
+  return m ? `${m[1]}:${m[2]}` : null;
 }

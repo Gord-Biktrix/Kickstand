@@ -6,6 +6,7 @@ import { currentShowroom } from "@/lib/current-showroom";
 import { sp, type SearchParams } from "@/lib/flash";
 import { listViews, listWorkorderStatuses, unassignedStatuses } from "@/lib/workorders";
 import { BOARD_COLUMNS, columnOf, workshopColumns } from "@/lib/workshop-columns";
+import { writeStatusFor } from "@/lib/workshop-moves";
 import { deleteViewAction, saveViewAction, saveWorkshopColumnsAction } from "../../actions";
 
 export const metadata = { title: "Views" };
@@ -65,6 +66,9 @@ export default async function ViewsSettingsPage({ searchParams }: { searchParams
                 </label>
               ))}
             </div>
+            <p className="text-sm text-muted">
+              Moving a card on the board sets: {BOARD_COLUMNS.map((c) => `${c.label} → ${writeStatusFor(c.key, statuses, columns)?.name ?? "nothing (add a status)"}`).join(" · ")}.
+            </p>
             <button type="submit" className="btn btn-primary">Save columns</button>
           </form>
         </Card>

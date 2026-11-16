@@ -196,7 +196,7 @@ export class LightspeedClient {
 
   /** `path` is relative to /Account/{id}/ unless absolute. */
   async request<T = Record<string, unknown>>(
-    method: "GET" | "POST" | "PUT",
+    method: "GET" | "POST" | "PUT" | "DELETE",
     path: string,
     body?: unknown,
     attempt = 0,
@@ -496,6 +496,10 @@ export class LightspeedClient {
 
   async updateWorkorder(id: string, body: Record<string, unknown>): Promise<void> {
     await this.request("PUT", `Workorder/${id}.json`, body);
+  }
+  /** Lightspeed's DELETE on a work order archives it (it drops out of the open list; history stays). */
+  async archiveWorkorder(id: string): Promise<void> {
+    await this.request("DELETE", `Workorder/${id}.json`);
   }
 }
 

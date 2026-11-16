@@ -22,6 +22,12 @@ export const SUGGESTED_CALL_QUESTIONS: BookingQuestion[] = [
   { id: "bikes", label: "Which bike(s) are you interested in?", kind: "text", options: [], required: false },
 ];
 
+/** Starting point for a service booking: what the mechanic needs to know before the bike arrives. */
+export const SUGGESTED_SERVICE_QUESTIONS: BookingQuestion[] = [
+  { id: "bike", label: "Which bike is it?", kind: "text", options: [], required: true },
+  { id: "serial", label: "Serial number (optional, under the frame near the pedals)", kind: "text", options: [], required: false },
+];
+
 /** Lenient read of what's stored on a type: drops anything malformed rather than breaking the booking page. */
 export function readQuestions(raw: unknown): BookingQuestion[] {
   if (!Array.isArray(raw)) return [];

@@ -40,6 +40,7 @@ const EVENT_LABEL: Record<string, string> = {
   booking_outcome_undone: "Back to booked",
   booking_workorder_created: "Lightspeed work order created",
   booking_workorder_updated: "Lightspeed work order updated",
+  booking_workorder_archived: "Lightspeed work order archived",
   booking_workorder_failed: "Lightspeed work order failed",
   booking_calendar_failed: "Google Calendar copy failed",
 };
