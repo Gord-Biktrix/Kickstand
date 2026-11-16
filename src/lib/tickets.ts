@@ -278,7 +278,7 @@ export async function createTicket(db: Db, args: { showroom: ShowroomCtx; ticket
     `${ticket.service.toUpperCase()} · ticket from Kickstand`,
     `Bike: ${ticket.bike.trim()}${ticket.serial.trim() ? ` · serial ${ticket.serial.trim()}` : ""}`,
     ticket.said.trim() ? `Notes: ${ticket.said.trim()}` : "",
-    ticket.parts?.length ? `Parts: ${ticket.parts.map((p) => `${p.name}${p.qty > 1 ? ` ×${p.qty}` : ""}`).join(", ")}` : "",
+    ticket.parts?.length ? `Items: ${ticket.parts.map((p) => `${p.name}${p.qty > 1 ? ` ×${p.qty}` : ""}`).join(", ")}` : "",
   ].filter(Boolean).join("\n");
   let workorderID: string;
   try {

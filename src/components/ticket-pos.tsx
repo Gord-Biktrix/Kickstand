@@ -6,7 +6,8 @@ import { ReadyPicker } from "./ready-picker";
 import { TicketCustomerBike } from "./ticket-customer-bike";
 import { estimateReady, type WeeklyHours } from "@/lib/ready-estimate";
 
-type Service = { key: string; name: string; minutes: number };
+/** A service or labour tile: a Lightspeed item (itemId, price) or one of Kickstand's starter services. */
+type Service = { key: string; name: string; minutes: number; itemId?: string; price?: number | null };
 type Part = { itemId: string; name: string; price: number | null };
 /** A line on the ticket. Tapping the same tile again adds to its quantity. */
 type Line = { key: string; kind: "service" | "labour" | "part"; name: string; minutes: number; qty: number; itemId?: string; price?: number | null };
@@ -42,6 +43,10 @@ function queueText(loads: number[]): string {
  */
 export function TicketPos(props: {
   services: Service[];
+  /** Lightspeed labour items ("15min", "1h30"); empty → the fixed labour buttons. */
+  labourItems: Service[];
+  /** Why the tiles aren't from Lightspeed, when they aren't. */
+  tilesNote: string;
   employees: { id: string; name: string }[];
   tz: string;
   enabled: boolean;
@@ -60,11 +65,15 @@ export function TicketPos(props: {
       if (found) found.qty++;
       else out.push({ ...l, qty: 1 });
     };
-    for (const name of props.initial.services) bump({ key: `s:${name}`, kind: "service", name, minutes: services.find((s) => s.name === name)?.minutes ?? props.defaultMinutes });
+    for (const name of props.initial.services) {
+      const t = [...services, ...props.labourItems].find((s) => s.name === name);
+      bump({ key: `s:${name}`, kind: "service", name, minutes: t?.minutes ?? props.defaultMinutes, itemId: t?.itemId, price: t?.price ?? null });
+    }
     for (const m of props.initial.labour) bump({ key: `l:${m}`, kind: "labour", name: `Labour ${mins(Number(m) || 15)}`, minutes: Number(m) || 15 });
     for (const p of props.initial.parts) {
       const [itemId, qty, ...name] = p.split("|");
-      if (itemId) out.push({ key: `p:${itemId}`, kind: "part", name: name.join("|"), minutes: 0, qty: Number(qty) || 1, itemId, price: null });
+      // Service items come back as parts too; they're already a service line.
+      if (itemId && !out.some((l) => l.itemId === itemId)) out.push({ key: `p:${itemId}`, kind: "part", name: name.join("|"), minutes: 0, qty: Number(qty) || 1, itemId, price: null });
     }
     return out;
   });
@@ -79,7 +88,7 @@ export function TicketPos(props: {
   const seq = useRef(0);
 
   const work = lines.reduce((s, l) => s + l.minutes * l.qty, 0);
-  const partsTotal = lines.filter((l) => l.kind === "part" && l.price != null).reduce((s, l) => s + (l.price ?? 0) * l.qty, 0);
+  const partsTotal = lines.filter((l) => l.price != null).reduce((s, l) => s + (l.price ?? 0) * l.qty, 0);
 
   // Parts tab: Lightspeed items for the chosen bike, or what's typed.
   useEffect(() => {
@@ -150,13 +159,15 @@ export function TicketPos(props: {
             <ul className="divide-y divide-border">
               {lines.map((l) => (
                 <li key={l.key} className="flex items-center gap-3 py-3">
-                  {Array.from({ length: l.kind === "part" ? 1 : l.qty }, (_, i) => (
-                    <input key={i} type="hidden" name={l.kind} value={l.kind === "service" ? l.name : l.kind === "labour" ? String(l.minutes) : `${l.itemId}|${l.qty}|${l.name}`} />
+                  {l.kind !== "part" && Array.from({ length: l.qty }, (_, i) => (
+                    <input key={i} type="hidden" name={l.kind} value={l.kind === "service" ? l.name : String(l.minutes)} />
                   ))}
+                  {/* A Lightspeed item (part or service) goes on the work order as a line. */}
+                  {l.itemId && <input type="hidden" name="part" value={`${l.itemId}|${l.qty}|${l.name}`} />}
                   <div className="min-w-0 flex-1">
                     <p className="font-semibold">{l.name}</p>
                     <p className="text-sm text-muted">
-                      {l.kind === "part" ? (l.price != null ? `${money(l.price)} each` : "Part") : l.kind === "labour" ? "Extra time" : `about ${mins(l.minutes)}`}
+                      {l.kind === "part" ? (l.price != null ? `${money(l.price)} each` : "Part") : l.kind === "labour" ? "Extra time" : [`about ${mins(l.minutes)}`, l.price != null ? money(l.price) : null].filter(Boolean).join(" · ")}
                     </p>
                   </div>
                   <div className="flex items-center rounded-full border border-border" role="group" aria-label={`${l.name} quantity`}>
@@ -185,7 +196,7 @@ export function TicketPos(props: {
               </select>
             </label>
             <div className="text-right">
-              <p className="text-sm text-muted">Work{partsTotal ? " · parts" : ""}</p>
+              <p className="text-sm text-muted">Work{partsTotal ? " · before tax" : ""}</p>
               <p className="text-xl font-extrabold">{work ? mins(work) : "—"}{partsTotal ? ` · ${money(partsTotal)}` : ""}</p>
             </div>
           </div>
@@ -224,13 +235,23 @@ export function TicketPos(props: {
             shown.map((s) => {
               const n = qtyOf(`s:${s.name}`);
               return (
-                <button key={s.key} type="button" onClick={() => add({ key: `s:${s.name}`, kind: "service", name: s.name, minutes: s.minutes })} className={`flex min-h-24 flex-col justify-between rounded-xl border bg-card p-3 text-left ${n ? "border-2 border-[#17181a]" : "border-border"}`}>
-                  <span className="font-bold">{s.name}</span>
-                  <span className="text-sm text-muted">about {mins(s.minutes)}{n ? ` · ×${n}` : ""}</span>
+                <button key={s.key} type="button" onClick={() => add({ key: `s:${s.name}`, kind: "service", name: s.name, minutes: s.minutes, itemId: s.itemId, price: s.price ?? null })} className={`flex min-h-24 flex-col justify-between rounded-xl border bg-card p-3 text-left ${n ? "border-2 border-[#17181a]" : "border-border"}`}>
+                  <span className="line-clamp-2 font-bold">{s.name}</span>
+                  <span className="text-sm text-muted">{[s.price != null ? money(s.price) : null, `about ${mins(s.minutes)}`].filter(Boolean).join(" · ")}{n ? ` · ×${n}` : ""}</span>
                 </button>
               );
             })}
-          {tab === "labour" &&
+          {tab === "labour" && props.labourItems.length > 0 &&
+            props.labourItems.map((s) => {
+              const n = qtyOf(`s:${s.name}`);
+              return (
+                <button key={s.key} type="button" onClick={() => add({ key: `s:${s.name}`, kind: "service", name: s.name, minutes: s.minutes, itemId: s.itemId, price: s.price ?? null })} className={`flex min-h-24 flex-col justify-between rounded-xl border bg-[#f7f6f3] p-3 text-left ${n ? "border-2 border-[#17181a]" : "border-border"}`}>
+                  <span className="font-bold">{s.name}</span>
+                  <span className="text-sm text-muted">{[s.price != null ? money(s.price) : null, "Labour"].filter(Boolean).join(" · ")}{n ? ` · ×${n}` : ""}</span>
+                </button>
+              );
+            })}
+          {tab === "labour" && props.labourItems.length === 0 &&
             LABOUR.map((m) => {
               const n = qtyOf(`l:${m}`);
               return (
@@ -264,7 +285,11 @@ export function TicketPos(props: {
                     : `Lightspeed items matching “${search.trim() || model}”. Tap to add; they go on the work order as lines.`}
           </p>
         )}
-        {tab !== "parts" && <p className="text-sm text-muted">Tap to add; tap again for more. Services and labour go on the work order&apos;s note.</p>}
+        {tab !== "parts" && (
+          <p className="text-sm text-muted">
+            {props.tilesNote || "Your Lightspeed service and labour items. Tap to add (again for more); each goes on the work order as a line at its Lightspeed price."}
+          </p>
+        )}
       </section>
     </>
   );

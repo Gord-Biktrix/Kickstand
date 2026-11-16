@@ -18,6 +18,9 @@ import { lightspeedEnabled } from "@/lib/lightspeed";
 import { formatLongDateFromLocal, formatTime } from "@/lib/time";
 import { getTypeAvailability } from "@/lib/type-slots";
 import { SERVICE_MENU } from "@/lib/tickets";
+import { loadServiceItems } from "@/lib/service-items";
+import { LightspeedClient } from "@/lib/lightspeed";
+import { lightspeedReason } from "@/lib/workorder-lines";
 import type { ShowroomCtx } from "@/lib/showroom";
 import type { BookingType } from "@/db/schema";
 import { createTicketAction, staffCreateTypeBookingAction } from "../../actions";
@@ -44,10 +47,24 @@ export default async function NewTicketPage({ searchParams }: { searchParams: Pr
   await ensureDefaultBookingTypes(db, showroom);
   const serviceType = (await listBookingTypes(db, showroom.id)).find((t) => t.kind === "standard" && t.active && t.createsWorkOrder && t.location === "in_person") ?? null;
 
+  // Service and labour tiles: the shop's Lightspeed items, or the starter list if Lightspeed can't be read.
+  let tiles: { key: string; name: string; minutes: number; itemId?: string; price?: number | null; labour?: boolean }[] = SERVICE_MENU;
+  let tilesNote = "Lightspeed isn't linked for this store, so these are Kickstand's starter services.";
+  if (ls) {
+    try {
+      const items = await loadServiceItems(new LightspeedClient(db));
+      if (items.length) {
+        tiles = items.map((i) => ({ key: i.itemId, name: i.name, minutes: i.minutes ?? showroom.settings.repair_minutes, itemId: i.itemId, price: i.price, labour: i.labour }));
+        tilesNote = "";
+      } else tilesNote = "No service or labour items found in Lightspeed (categories named Labour, Service or Repair), so these are Kickstand's starter services.";
+    } catch (err) {
+      tilesNote = `Lightspeed didn't send its service items (${lightspeedReason(err)}), so these are Kickstand's starter services.`;
+    }
+  }
   const services = all(q.service);
   const labour = all(q.labour);
   const partLines = all(q.part);
-  const work = services.reduce((s, n) => s + (SERVICE_MENU.find((x) => x.name === n)?.minutes ?? 0), 0) + labour.reduce((s, m) => s + (Number(m) || 0), 0);
+  const work = services.reduce((s, n) => s + (tiles.find((x) => x.name === n)?.minutes ?? 0), 0) + labour.reduce((s, m) => s + (Number(m) || 0), 0);
   // Ready-by: the queue on the benches plus this job's work, in the store's open hours (lib/ready-estimate.ts).
   const now = new Date();
   const [hours, jobs] = await Promise.all([ensureStoreHours(db, showroom), workshopJobs(db, showroom, now)]);
@@ -74,7 +91,9 @@ export default async function NewTicketPage({ searchParams }: { searchParams: Pr
 
       <form action={createTicketAction} className="grid gap-4 lg:grid-cols-[420px_minmax(0,1fr)]">
         <TicketPos
-          services={SERVICE_MENU}
+          services={tiles.filter((t) => !t.labour)}
+          labourItems={tiles.filter((t) => t.labour)}
+          tilesNote={tilesNote}
           employees={employees}
           tz={tz}
           enabled={ls}

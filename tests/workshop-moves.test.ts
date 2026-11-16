@@ -231,7 +231,7 @@ describe("new tickets from the POS screen", () => {
       expect.objectContaining({ workorderID: 10302, itemID: 55, unitQuantity: 2 }),
       expect.objectContaining({ workorderID: 10302, itemID: 66, unitQuantity: 1 }),
     ]);
-    expect(String(calls.find((c) => c.url.endsWith("Workorder.json"))!.body!.note)).toContain("Parts: Crank arm ×2, Display");
+    expect(String(calls.find((c) => c.url.endsWith("Workorder.json"))!.body!.note)).toContain("Items: Crank arm ×2, Display");
   });
 
   it("parts search uses the bike's model, skips the bikes themselves, and reads the default price", async () => {
