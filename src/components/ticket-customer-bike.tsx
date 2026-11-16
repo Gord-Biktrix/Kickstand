@@ -61,6 +61,9 @@ export function TicketCustomerBike(props: { initial: Picked | null; initialNew: 
     setSid("");
   }
 
+  // Show the typing fields for a new customer, one with no bikes on file, "Other bike", or a bike already typed.
+  const showFields = !picked || (!loading && bikes.length === 0) || chosen === "other" || (chosen === null && !!bike);
+
   return (
     <>
       <div className="flex min-w-0 flex-col gap-2">
@@ -87,8 +90,18 @@ export function TicketCustomerBike(props: { initial: Picked | null; initialNew: 
         {picked && !loading && bikes.length === 0 && (
           <p className="text-xs text-muted">{lsError ? `Lightspeed didn't send their bikes (${lsError}).` : "No bikes on file for them yet; type it below."}</p>
         )}
-        <input id="bike" name="bike" value={bike} onChange={(e) => { setBike(e.target.value); setSid(""); setChosen(null); }} placeholder="e.g. Stunner Lite 3, peach" className="input h-11 text-base" />
-        <input name="serial" value={serial} onChange={(e) => setSerial(e.target.value)} placeholder="Serial (optional)" aria-label="Serial number" className="input h-11 text-base" />
+        {/* Typing is only for a bike we couldn't find: a picked bike already says what and which. */}
+        {showFields ? (
+          <>
+            <input id="bike" name="bike" value={bike} onChange={(e) => { setBike(e.target.value); setSid(""); }} placeholder="e.g. Stunner Lite 3, peach" className="input h-11 text-base" autoFocus={chosen === "other"} />
+            <input name="serial" value={serial} onChange={(e) => setSerial(e.target.value)} placeholder="Serial (optional)" aria-label="Serial number" className="input h-11 text-base" />
+          </>
+        ) : (
+          <>
+            <input type="hidden" name="bike" value={bike} />
+            <input type="hidden" name="serial" value={serial} />
+          </>
+        )}
         <input type="hidden" name="sid" value={sid} />
       </div>
     </>
