@@ -125,3 +125,69 @@ describe("work order lines for the POS screen", () => {
     expect(parseWorkorderLines({}, new Map())).toEqual([]);
   });
 });
+
+describe("new tickets from the POS screen", () => {
+  let db: Db;
+  let van: ShowroomCtx;
+  beforeAll(async () => {
+    db = await testDb();
+    process.env.LS_CLIENT_ID ??= "test-client";
+    process.env.LS_CLIENT_SECRET ??= "test-secret";
+  });
+  afterAll(async () => { setLightspeedFetch(null); await db.$client.end(); });
+  beforeEach(async () => {
+    van = await resetDb(db);
+    await saveConnection(db, { accountId: "999", accessToken: "acc", refreshToken: "ref", expiresIn: 3600 });
+    van = await withSettings(db, van, { lightspeed: { ...van.settings.lightspeed, enabled: true, shop_id: 3, employee_id: 27, open_status_id: 1 } });
+  });
+
+  function fakeCreate(opts: { fail?: boolean } = {}) {
+    const calls: Call[] = [];
+    const fetchImpl: typeof fetch = async (input, init) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      calls.push({ method, url, body: init?.body ? JSON.parse(String(init.body)) : null });
+      const json = (status: number, data: unknown) => new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json" } });
+      if (opts.fail) return json(500, {});
+      if (method === "POST" && url.endsWith("Customer.json")) return json(200, { Customer: { customerID: "8801" } });
+      if (method === "POST" && url.endsWith("Workorder.json")) return json(200, { Workorder: { workorderID: "10300" } });
+      return json(404, {});
+    };
+    return { calls, fetchImpl };
+  }
+  const base = { bike: "Stunner Lite 3, peach", serial: "BX24-55120", service: "Tune-up", said: "Crank clicks", readyBy: new Date("2026-11-17T01:30:00Z"), employeeId: "31" };
+
+  it("a new customer: creates them, then an Open work order due at ready-by, and puts it in To do at once", async () => {
+    const { createTicket } = await import("@/lib/tickets");
+    const { workshopJobs } = await import("@/lib/workshop");
+    const ls = fakeCreate();
+    setLightspeedFetch(ls.fetchImpl);
+    const id = await createTicket(db, { showroom: van, ticket: { ...base, customer: { name: "Ahmed Ali", phone: "604 555 0187", email: "" } }, actor: "staff-1", now: new Date("2026-11-16T23:00:00Z") });
+    expect(id).toBe("10300");
+    expect(ls.calls.find((c) => c.url.endsWith("Customer.json"))!.body).toMatchObject({ firstName: "Ahmed", lastName: "Ali" });
+    expect(ls.calls.find((c) => c.url.endsWith("Workorder.json"))!.body).toMatchObject({ shopID: 3, customerID: 8801, employeeID: 31, workorderStatusID: 1, hookIn: "Tune-up", etaOut: "2026-11-17T01:30:00.000Z", timeIn: "2026-11-16T23:00:00.000Z" });
+    const jobs = await workshopJobs(db, van, new Date("2026-11-16T23:05:00Z"));
+    expect(jobs.find((j) => j.workorderId === "10300")).toMatchObject({ column: "todo", title: "Stunner Lite 3, peach", customer: "Ahmed Ali" });
+  });
+
+  it("an existing Lightspeed customer isn't created again; bad input and Lightspeed failures save nothing", async () => {
+    const { createTicket } = await import("@/lib/tickets");
+    const ls = fakeCreate();
+    setLightspeedFetch(ls.fetchImpl);
+    await createTicket(db, { showroom: van, ticket: { ...base, customer: { lsCustomerId: "9020", name: "Hana Sato" } }, actor: "staff-1" });
+    expect(ls.calls.some((c) => c.url.endsWith("Customer.json"))).toBe(false);
+    await expect(createTicket(db, { showroom: van, ticket: { ...base, bike: " ", customer: { lsCustomerId: "9020", name: "Hana" } }, actor: "s" })).rejects.toThrow(/which bike/);
+    await expect(createTicket(db, { showroom: van, ticket: { ...base, customer: { name: "No Contact", phone: "", email: "" } }, actor: "s" })).rejects.toThrow(/mobile/);
+    setLightspeedFetch(fakeCreate({ fail: true }).fetchImpl);
+    await expect(createTicket(db, { showroom: van, ticket: { ...base, customer: { lsCustomerId: "9020", name: "Hana" } }, actor: "s" })).rejects.toThrow(/didn't create/);
+    expect((await db.select().from(lsWorkorders)).map((w) => w.id)).toEqual(["10300"]);
+  });
+
+  it("finds customers by the last digits of their phone", async () => {
+    const { searchCustomers } = await import("@/lib/tickets");
+    const { makeOrder } = await import("./helpers");
+    await makeOrder(db, van, { customerName: "Ahmed Ali", customerPhone: "+16045550187", lsCustomerId: "9020" });
+    const { matches } = await searchCustomers(db, "0187");
+    expect(matches.map((m) => [m.name, m.lsCustomerId])).toEqual([["Ahmed Ali", "9020"]]);
+  });
+});

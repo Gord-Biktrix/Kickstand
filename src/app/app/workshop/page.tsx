@@ -74,7 +74,9 @@ export default async function WorkshopPage({ searchParams }: { searchParams: Pro
           </>
         }
         action={
-          mechanics.length > 0 && (
+          <div className="flex flex-wrap items-center gap-3">
+          <Link href="/app/workshop/new" className="btn btn-primary">+ New ticket</Link>
+          {mechanics.length > 0 && (
             <form className="flex items-center gap-2" action="/app/workshop">
               <label htmlFor="mech" className="text-sm text-muted">Mechanic</label>
               <select id="mech" name="mech" defaultValue={mech} className="input h-10 w-auto">
@@ -84,7 +86,8 @@ export default async function WorkshopPage({ searchParams }: { searchParams: Pro
               </select>
               <button type="submit" className="btn btn-sm">Show</button>
             </form>
-          )
+          )}
+          </div>
         }
       />
       {readying && <ReadyPanel job={readying} back={back} />}

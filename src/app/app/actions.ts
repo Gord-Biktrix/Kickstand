@@ -19,7 +19,7 @@ import { photoFromDataUrl, removeStaffPhoto, setStaffPhoto } from "@/lib/staff-p
 import { saskatchewanHolidays } from "@/lib/holidays";
 import { FLAG_KEYS, PROGRAM_KEYS, settingsSchema, validateSettings, type ProgramSettings } from "@/lib/settings";
 import { getCapacityConfig, patchShowroomSettings } from "@/lib/showroom";
-import { formatDateTime, formatLongDateFromLocal, normalizeTime, toLocalDate } from "@/lib/time";
+import { formatDateTime, formatLongDateFromLocal, localToUtc, normalizeTime, toLocalDate } from "@/lib/time";
 import { hashToken } from "@/lib/tokens";
 import { attachUnit, bookableCompanions, bookableSiblings, linkOrdersForPickup, mergeIntoVisit, splitFromVisit, unlinkOrderPickup, collectParts, completeHandover, createOrder, deleteUnit, detachUnit, futureVisitFor, grantExtension, inviteAllReceived, inviteOrders, inviteUnit, inviteUnits, joinVisit, markReady, receiveUnit, resendInvite, retagUnit, startBuild, unreceiveUnit, waiveStorage } from "@/lib/units";
 import { currentShowroom } from "@/lib/current-showroom";
@@ -33,6 +33,8 @@ import { syncSpecialOrders } from "@/lib/special-orders";
 import { deleteView, saveView, syncWorkorders } from "@/lib/workorders";
 import type { BoardColumn } from "@/lib/workshop-columns";
 import { markJobReady, moveJob } from "@/lib/workshop-moves";
+import { createTicket } from "@/lib/tickets";
+import { jobPath } from "@/lib/workshop";
 
 /** Run a mutation and land back on `returnTo` with a flash; auth errors surface the same way. */
 async function run(returnTo: string, fn: () => Promise<string | void>): Promise<never> {
@@ -613,6 +615,40 @@ export async function saveViewAction(formData: FormData) {
     const v = await saveView(db, { showroom, id, name: str(formData, "name"), statusIds, actor: user.id });
     return `${id ? "Updated" : "Created"} view “${v.name}” (${v.statusIds.length} status${v.statusIds.length === 1 ? "" : "es"}).`;
   });
+}
+
+/** New ticket from the POS screen: creates the Lightspeed work order and opens it. Errors return to the form with what was typed. */
+export async function createTicketAction(formData: FormData) {
+  const user = await requireActor("staff");
+  const showroom = await currentShowroom(user);
+  const keep = new URLSearchParams();
+  for (const k of ["q", "c", "nn", "np", "ne", "bike", "serial", "service", "said", "ready", "mech"]) {
+    const val = str(formData, k);
+    if (val) keep.set(k, val);
+  }
+  let target: string;
+  try {
+    const c = str(formData, "c");
+    const [lsId, cName, cPhone, cEmail] = c && c !== "new" ? c.split("|") : ["", "", "", ""];
+    const customer = lsId
+      ? { lsCustomerId: lsId, name: cName }
+      : c && c !== "new"
+        ? { name: cName, phone: cPhone, email: cEmail }
+        : { name: str(formData, "nn"), phone: str(formData, "np"), email: str(formData, "ne") };
+    const readyRaw = str(formData, "ready");
+    const [d, t] = readyRaw.split("T");
+    const readyBy = d && t ? localToUtc(d, t.slice(0, 5), showroom.timezone) : new Date(Date.now() + showroom.settings.repair_minutes * 60_000);
+    const id = await createTicket(db, {
+      showroom,
+      ticket: { customer, bike: str(formData, "bike"), serial: str(formData, "serial"), service: str(formData, "service"), said: str(formData, "said"), readyBy, employeeId: str(formData, "mech") || null },
+      actor: user.id,
+    });
+    target = withFlash(`${jobPath(`w:${id}`)}`, { ok: `Ticket created: Lightspeed work order #${id}.` });
+  } catch (err) {
+    keep.set("error", errorMessage(err));
+    target = `/app/workshop/new?${keep.toString()}`;
+  }
+  redirect(target);
 }
 
 /** Workshop board: move a repair to a column; its Lightspeed work order moves with it. */

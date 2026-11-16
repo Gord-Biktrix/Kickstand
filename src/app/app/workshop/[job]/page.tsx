@@ -57,7 +57,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
         {lsUrl && <a href={lsUrl} target="_blank" rel="noreferrer" className="text-sm underline">Open in Lightspeed</a>}
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,430px)_minmax(0,1fr)]">
+      <div className="grid gap-4 lg:grid-cols-[420px_minmax(0,1fr)]">
         {/* The work order, like a POS cart. */}
         <section aria-label="Work order" className="flex flex-col overflow-hidden rounded-xl border border-border bg-card">
           <div className="flex items-center gap-3 border-b border-border p-4">
