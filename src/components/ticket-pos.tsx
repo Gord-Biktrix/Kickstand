@@ -288,13 +288,20 @@ async function shrink(file: File): Promise<string> {
   }
 }
 
-/** "+ Photo": take or pick photos (up to 6), shown as thumbnails with ×, sent as `photo` with the ticket. */
+/**
+ * Photos as a drop zone: drag photos in, "Select photos" from the library, or "Take photo" with the camera (phones
+ * and iPads). Up to 6, shrunk on the device, shown as thumbnails with ×, sent as `photo` with the ticket.
+ */
 function PhotoAdd() {
   const [photos, setPhotos] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
-  const input = useRef<HTMLInputElement>(null);
-  async function onFiles(files: FileList | null) {
-    if (!files?.length) return;
+  const [over, setOver] = useState(false);
+  const pick = useRef<HTMLInputElement>(null);
+  const camera = useRef<HTMLInputElement>(null);
+  const full = photos.length >= 6;
+
+  async function onFiles(files: FileList | File[] | null) {
+    if (!files || !files.length) return;
     setBusy(true);
     const out: string[] = [];
     for (const f of [...files].slice(0, 6 - photos.length)) {
@@ -303,25 +310,51 @@ function PhotoAdd() {
     }
     setPhotos((p) => [...p, ...out].slice(0, 6));
     setBusy(false);
-    if (input.current) input.current.value = "";
+    if (pick.current) pick.current.value = "";
+    if (camera.current) camera.current.value = "";
   }
+
   return (
-    <div className="mt-2 flex flex-wrap items-center gap-2">
-      {photos.map((src, i) => (
-        <span key={i} className="relative">
-          <input type="hidden" name="photo" value={src} />
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={src} alt={`Photo ${i + 1}`} className="h-16 w-16 rounded-lg object-cover" />
-          <button type="button" onClick={() => setPhotos((p) => p.filter((_, j) => j !== i))} aria-label={`Remove photo ${i + 1}`} className="absolute -top-2 -right-2 h-6 w-6 rounded-full bg-[#17181a] text-xs text-white">×</button>
-        </span>
-      ))}
-      {photos.length < 6 && (
-        <label className="btn min-h-16 cursor-pointer px-4">
-          <input ref={input} type="file" accept="image/*" multiple className="sr-only" onChange={(e) => onFiles(e.target.files)} />
-          {busy ? "Adding…" : "+ Photo"}
-        </label>
+    <div className="mt-3">
+      <p className="mb-1.5 text-sm font-semibold">Photos</p>
+      {!full && (
+        <div
+          onDragOver={(e) => { e.preventDefault(); setOver(true); }}
+          onDragLeave={() => setOver(false)}
+          onDrop={(e) => { e.preventDefault(); setOver(false); onFiles(e.dataTransfer.files); }}
+          className={`flex flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed px-4 py-6 text-center transition-colors ${over ? "border-[#c2410c] bg-[#fff1e8]" : "border-[#cfcbc4] bg-[#f7f6f3]"}`}
+        >
+          <div>
+            <p className="font-semibold">{busy ? "Adding…" : "Drag and drop or select photos"}</p>
+            <p className="mt-0.5 text-xs text-muted">Photos from the camera or library · up to 6 · videos once file storage is on</p>
+          </div>
+          <div className="flex flex-wrap justify-center gap-2">
+            <label className="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-lg border border-[#cfcbc4] bg-card px-4 text-sm font-semibold">
+              <svg aria-hidden width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 16V4M7 9l5-5 5 5M4 20h16" /></svg>
+              Select photos
+              <input ref={pick} type="file" accept="image/*" multiple className="sr-only" onChange={(e) => onFiles(e.target.files)} />
+            </label>
+            <label className="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-lg border border-[#cfcbc4] bg-card px-4 text-sm font-semibold sm:hidden">
+              <svg aria-hidden width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 8h3l2-3h6l2 3h3v11H4z" /><circle cx="12" cy="13" r="3.5" /></svg>
+              Take photo
+              <input ref={camera} type="file" accept="image/*" capture="environment" className="sr-only" onChange={(e) => onFiles(e.target.files)} />
+            </label>
+          </div>
+        </div>
       )}
-      <span className="text-xs text-muted">Videos come once file storage is switched on.</span>
+      {photos.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-2">
+          {photos.map((src, i) => (
+            <span key={i} className="relative">
+              <input type="hidden" name="photo" value={src} />
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={src} alt={`Photo ${i + 1}`} className="h-20 w-20 rounded-lg object-cover" />
+              <button type="button" onClick={() => setPhotos((p) => p.filter((_, j) => j !== i))} aria-label={`Remove photo ${i + 1}`} className="absolute -top-2 -right-2 h-7 w-7 rounded-full bg-[#17181a] text-sm text-white">×</button>
+            </span>
+          ))}
+          {full && <p className="self-center text-xs text-muted">6 photos is the most per ticket.</p>}
+        </div>
+      )}
     </div>
   );
 }
