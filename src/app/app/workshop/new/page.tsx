@@ -6,8 +6,9 @@ import { Flash } from "@/components/ui";
 import { requireUser } from "@/lib/auth";
 import { currentShowroom } from "@/lib/current-showroom";
 import { sp, type SearchParams } from "@/lib/flash";
-import { LightspeedClient, lightspeedEnabled } from "@/lib/lightspeed";
-import { SERVICE_MENU, searchCustomers } from "@/lib/tickets";
+import { lightspeedEnabled } from "@/lib/lightspeed";
+import { CustomerPicker } from "@/components/customer-picker";
+import { SERVICE_MENU } from "@/lib/tickets";
 import { createTicketAction } from "../../actions";
 
 export const metadata = { title: "New ticket" };
@@ -16,8 +17,8 @@ const label = "text-[11px] font-extrabold tracking-wider text-[#3d3f43] uppercas
 
 /**
  * New ticket in the POS layout: the ticket on the left like a cart (who, which bike, what they said, when it's
- * ready, one big Create button), the service menu as tiles on the right. "Find" re-loads the page with what's
- * typed so far (a GET of the same form), so nothing is lost while searching for the customer.
+ * ready, one big Create button), the service menu as tiles on the right. The customer box suggests people as you
+ * type (components/customer-picker.tsx).
  */
 export default async function NewTicketPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const q = await searchParams;
@@ -25,16 +26,17 @@ export default async function NewTicketPage({ searchParams }: { searchParams: Pr
   const showroom = await currentShowroom();
   const tz = showroom.timezone;
   const v = (k: string) => sp(q[k]) ?? "";
-  const query = v("q");
   const ls = lightspeedEnabled(showroom);
-  const search = query ? await searchCustomers(db, query, ls ? new LightspeedClient(db) : undefined) : { matches: [], lightspeedFailed: false };
   const employees = await db.select().from(lsEmployees).orderBy(lsEmployees.name);
   const service = v("service");
   const minutes = SERVICE_MENU.find((s) => s.name === service)?.minutes ?? showroom.settings.repair_minutes;
   // Ready by: now + the job's time, rounded up to the next quarter hour, in the store's time.
   const readyDefault = quarterHourAfter(new Date(), minutes);
   const ready = v("ready") || formatInTimeZone(readyDefault, tz, "yyyy-MM-dd'T'HH:mm");
+  // After an error the form comes back with what was picked, so the customer stays chosen.
   const picked = v("c");
+  const [pLs, pName, pPhone, pEmail] = picked && picked !== "new" ? picked.split("|") : [];
+  const initialPick = picked && picked !== "new" && pName ? { value: picked, name: pName, sub: [pPhone, pEmail].filter(Boolean).join(" · ") || (pLs ? "Lightspeed customer" : "") } : null;
 
   return (
     <div>
@@ -52,39 +54,10 @@ export default async function NewTicketPage({ searchParams }: { searchParams: Pr
           </div>
 
           <div className="flex flex-col gap-4 p-4">
-            <fieldset className="flex min-w-0 flex-col gap-2">
-              <legend className={label}>Customer</legend>
-              <div className="flex gap-2">
-                <label htmlFor="q" className="sr-only">Find a customer by name, phone or email</label>
-                <input id="q" name="q" defaultValue={query} placeholder="Name, phone or email" className="input h-12 min-w-0 flex-1 text-base" autoComplete="off" />
-                <button type="submit" formAction="/app/workshop/new" formMethod="get" className="btn min-h-12">Find</button>
-              </div>
-              {query && search.matches.length === 0 && <p className="text-sm text-muted">No one found for &ldquo;{query}&rdquo;. Add them below.</p>}
-              {search.lightspeedFailed && <p className="text-xs text-muted">Lightspeed&apos;s customer list didn&apos;t answer; showing Kickstand&apos;s customers only.</p>}
-              {search.matches.map((m, i) => {
-                const value = [m.lsCustomerId ?? "", m.name, m.phone ?? "", m.email ?? ""].join("|");
-                return (
-                  <label key={m.key} className="flex min-h-12 cursor-pointer items-center gap-3 rounded-lg border border-border px-3 py-2 has-[:checked]:border-2 has-[:checked]:border-[#17181a] has-[:checked]:bg-[#f7f6f3]">
-                    <input type="radio" name="c" value={value} defaultChecked={picked ? picked === value : i === 0} className="h-5 w-5" />
-                    <span className="min-w-0">
-                      <span className="block font-semibold">{m.name}</span>
-                      <span className="block truncate text-xs text-muted">{[m.phone, m.email, m.source].filter(Boolean).join(" · ")}</span>
-                    </span>
-                  </label>
-                );
-              })}
-              <details open={!query || search.matches.length === 0} className="rounded-lg border border-border px-3 py-2">
-                <summary className="min-h-8 cursor-pointer text-sm font-semibold">New customer</summary>
-                <label className="mt-2 flex min-h-11 items-center gap-2 text-sm">
-                  <input type="radio" name="c" value="new" defaultChecked={!query || search.matches.length === 0 || picked === "new"} className="h-5 w-5" /> Use these details
-                </label>
-                <div className="mt-1 grid gap-2">
-                  <input name="nn" defaultValue={v("nn")} placeholder="Full name" aria-label="Customer's full name" className="input h-11 text-base" />
-                  <input name="np" defaultValue={v("np")} placeholder="Mobile" inputMode="tel" aria-label="Customer's mobile" className="input h-11 text-base" />
-                  <input name="ne" defaultValue={v("ne")} placeholder="Email (optional)" inputMode="email" aria-label="Customer's email" className="input h-11 text-base" />
-                </div>
-              </details>
-            </fieldset>
+            <div className="flex min-w-0 flex-col gap-2">
+              <p className={label}>Customer</p>
+              <CustomerPicker initial={initialPick} initialNew={{ nn: v("nn"), np: v("np"), ne: v("ne") }} />
+            </div>
 
             <div className="grid gap-2">
               <label htmlFor="bike" className={label}>Bike</label>

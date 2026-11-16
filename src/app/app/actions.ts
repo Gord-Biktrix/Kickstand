@@ -622,7 +622,7 @@ export async function createTicketAction(formData: FormData) {
   const user = await requireActor("staff");
   const showroom = await currentShowroom(user);
   const keep = new URLSearchParams();
-  for (const k of ["q", "c", "nn", "np", "ne", "bike", "serial", "service", "said", "ready", "mech"]) {
+  for (const k of ["c", "nn", "np", "ne", "bike", "serial", "service", "said", "ready", "mech"]) {
     const val = str(formData, k);
     if (val) keep.set(k, val);
   }
