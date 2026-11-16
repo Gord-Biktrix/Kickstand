@@ -4,11 +4,9 @@ import { db } from "@/db/client";
 import { lsEmployees } from "@/db/schema";
 import { zoneLabel } from "@/app/book/zone";
 import { BookingCalendar, BookingInfo } from "@/components/booking-calendar";
-import { QuestionFields } from "@/components/question-fields";
 import { TicketPos } from "@/components/ticket-pos";
 import { Flash } from "@/components/ui";
 import { requireUser } from "@/lib/auth";
-import { readQuestions } from "@/lib/booking-questions";
 import { colorOf, ensureDefaultBookingTypes, ensureStoreHours, listBookingTypes, LOCATION_LABEL, type BookingLocation } from "@/lib/booking-types";
 import { benchLoads, estimateReady } from "@/lib/ready-estimate";
 import { workshopJobs } from "@/lib/workshop";
@@ -24,12 +22,13 @@ import { LightspeedClient } from "@/lib/lightspeed";
 import { lightspeedReason } from "@/lib/workorder-lines";
 import type { ShowroomCtx } from "@/lib/showroom";
 import type { BookingType } from "@/db/schema";
-import { createTicketAction, staffCreateTypeBookingAction } from "../../actions";
+import { createTicketAction } from "../../actions";
 
 export const metadata = { title: "New ticket" };
 
 /** The ticket fields that ride along in the URL while the Schedule popup is open (and after an error). */
 const KEEP = ["c", "nn", "np", "ne", "bike", "serial", "sid", "service", "labour", "part", "said", "mech"] as const;
+const dropLabel = (d: Date, tz: string) => formatInTimeZone(d, tz, "EEE d MMM, h:mm a").replace("AM", "am").replace("PM", "pm");
 const all = (v: string | string[] | undefined) => (Array.isArray(v) ? v : v ? [v] : []);
 
 /**
@@ -79,6 +78,12 @@ export default async function NewTicketPage({ searchParams }: { searchParams: Pr
   const [pLs, pName, pPhone, pEmail] = picked && picked !== "new" ? picked.split("|") : [];
   const initialPick = picked && picked !== "new" && pName ? { value: picked, name: pName, sub: [pPhone, pEmail].filter(Boolean).join(" · ") || (pLs ? "Lightspeed customer" : "") } : null;
 
+  // Drop-off: now (walk-in), the earliest open service slot, or a time picked in the calendar (comes back as ?dropoff=).
+  const serviceDays = serviceType ? await getTypeAvailability(db, { showroom, type: serviceType }) : [];
+  const firstSlot = serviceDays.flatMap((d) => d.slots).find((sl) => sl.startsAt > now);
+  const earliest = firstSlot ? { iso: firstSlot.startsAt.toISOString(), label: dropLabel(firstSlot.startsAt, tz) } : null;
+  const pickedDrop = v("dropoff") && v("dropoff") !== "now" && !Number.isNaN(new Date(v("dropoff")).getTime()) ? { iso: new Date(v("dropoff")).toISOString(), label: dropLabel(new Date(v("dropoff")), tz) } : null;
+
   const keep = new URLSearchParams();
   for (const k of KEEP) for (const val of all(q[k])) keep.append(k, val);
   const ticketUrl = `/app/workshop/new${keep.size ? `?${keep.toString()}` : ""}`;
@@ -100,6 +105,8 @@ export default async function NewTicketPage({ searchParams }: { searchParams: Pr
           tz={tz}
           enabled={ls}
           canSchedule={!!serviceType}
+          earliest={earliest}
+          pickedDropoff={pickedDrop}
           defaultMinutes={showroom.settings.repair_minutes}
           benches={benches}
           loads={loads}
@@ -147,9 +154,6 @@ async function SchedulePopup(props: {
   const time = sp(q.time);
   const slot = date && time && sp(q.confirm) === "1" ? days.find((d) => d.date === date)?.slots.find((s) => s.time === time) : undefined;
   const base = `/app/workshop/new?${new URLSearchParams([...props.keep.entries(), ["schedule", "1"]]).toString()}`;
-  const questions = readQuestions(type.questions);
-  const known: Record<string, string> = { bike: props.bike, serial: props.serial };
-  const others = questions.filter((qq) => !(qq.id in known));
 
   return (
     <div role="dialog" aria-modal="true" aria-labelledby="sched-title" className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 p-4 sm:p-8">
@@ -163,31 +167,14 @@ async function SchedulePopup(props: {
         </div>
 
         {slot ? (
-          <div className="mx-auto max-w-2xl rounded-xl border border-border bg-card p-5">
-            <p className="text-lg font-bold">{formatLongDateFromLocal(date!)} · {formatTime(slot.startsAt, tz)} – {formatTime(slot.endsAt, tz)}</p>
-            <form action={staffCreateTypeBookingAction.bind(null, type.id)} className="mt-3 space-y-3">
-              <input type="hidden" name="starts_at" value={slot.startsAt.toISOString()} />
-              <input type="hidden" name="date" value={date} />
-              <input type="hidden" name="time" value={time} />
-              <input type="hidden" name="back" value={`${base}&date=${date}`} />
-              <input type="hidden" name="ls_customer_id" value={customer.ls} />
-              <input type="hidden" name="ls_serialized_id" value={props.sid} />
-              {questions.filter((qq) => qq.id in known).map((qq) => <input key={qq.id} type="hidden" name={`q_${qq.id}`} value={known[qq.id]} />)}
-              <div className="grid gap-3 sm:grid-cols-3">
-                <label className="grid gap-1 text-sm"><span className="font-semibold">Name</span><input name="name" required defaultValue={customer.name} className="input" /></label>
-                <label className="grid gap-1 text-sm"><span className="font-semibold">Phone</span><input name="phone" type="tel" defaultValue={customer.phone} className="input" /></label>
-                <label className="grid gap-1 text-sm"><span className="font-semibold">Email</span><input name="email" type="email" defaultValue={customer.email} className="input" /></label>
-              </div>
-              {props.bike && <p className="text-sm">Bike: <strong>{props.bike}</strong>{props.serial ? ` · serial ${props.serial}` : ""}</p>}
-              <QuestionFields questions={others} idPrefix="sch" />
-              <label className="grid gap-1 text-sm"><span className="font-semibold">Note</span><textarea name="note" rows={2} defaultValue={props.note} className="input" /></label>
-              <label className="flex min-h-11 items-center gap-2 text-sm"><input type="checkbox" name="sms_consent" className="h-5 w-5" /> Customer agrees to text messages about this booking</label>
-              <div className="flex flex-wrap gap-2">
-                <button type="submit" className="btn btn-primary min-h-12 px-6">Book it</button>
-                <Link href={`${base}&date=${date}`} className="btn min-h-12">Pick another time</Link>
-              </div>
-              <p className="text-xs text-muted">Creates the booking and its Lightspeed work order (Appointment); the customer gets the usual confirmation.</p>
-            </form>
+          <div className="mx-auto max-w-md rounded-xl border border-border bg-card p-5 text-center">
+            <p className="text-sm text-muted">Drop-off</p>
+            <p className="text-lg font-bold">{formatLongDateFromLocal(date!)} · {formatTime(slot.startsAt, tz)}</p>
+            <div className="mt-4 flex flex-wrap justify-center gap-2">
+              <Link href={`${props.ticketUrl}${props.ticketUrl.includes("?") ? "&" : "?"}dropoff=${encodeURIComponent(slot.startsAt.toISOString())}`} className="btn btn-primary min-h-12 px-6">Use this time</Link>
+              <Link href={`${base}&date=${date}`} className="btn min-h-12">Pick another time</Link>
+            </div>
+            <p className="mt-3 text-xs text-muted">Back on the ticket, &ldquo;Book drop-off&rdquo; books it and puts the lines on the work order.</p>
           </div>
         ) : (
           <BookingCalendar

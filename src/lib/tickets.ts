@@ -11,6 +11,8 @@ import { logger } from "./logger";
 import { normalizePhone } from "./phone";
 import { baseUrl } from "./messages";
 import { itemNames, lightspeedReason } from "./workorder-lines";
+import { createTypeBooking } from "./type-bookings";
+import type { BookingType } from "@/db/schema";
 import type { ShowroomCtx } from "./showroom";
 
 /** The service menu, until stores set their own (Settings › Services): name and usual time. */
@@ -245,6 +247,74 @@ export async function listTicketPhotos(db: Db, workorderId: string): Promise<{ i
   return db.select({ id: ticketPhotos.id, createdAt: ticketPhotos.createdAt }).from(ticketPhotos).where(eq(ticketPhotos.workorderId, workorderId)).orderBy(ticketPhotos.createdAt);
 }
 
+/** Services and parts become real lines on the work order (Lightspeed reserves stock). One that fails is reported. */
+export async function addWorkorderParts(client: LightspeedClient, workorderID: string, parts: { itemId: string; name: string; qty: number }[], employeeId: string | null): Promise<{ added: number; failed: string[] }> {
+  let added = 0;
+  const failed: string[] = [];
+  for (const p of parts) {
+    try {
+      await client.request("POST", "WorkorderItem.json", {
+        workorderID: Number(workorderID),
+        itemID: Number(p.itemId),
+        unitQuantity: p.qty,
+        warranty: false,
+        isSpecialOrder: false,
+        ...(employeeId ? { employeeID: Number(employeeId) } : {}),
+      });
+      added++;
+    } catch (err) {
+      failed.push(p.name);
+      logger.warn({ err: lightspeedReason(err), workorderID, itemId: p.itemId }, "part not added to the work order");
+    }
+  }
+  return { added, failed };
+}
+
+/** Photos stay in Kickstand; the work order's internal note points staff in Lightspeed to them. */
+async function attachTicketPhotos(db: Db, client: LightspeedClient, args: { showroomId: string; workorderId: string; images: string[]; actor: string }): Promise<number> {
+  const photos = await saveTicketPhotos(db, args);
+  if (photos) {
+    try {
+      await client.updateWorkorder(args.workorderId, { internalNote: `${photos} photo${photos > 1 ? "s" : ""} in Kickstand: ${baseUrl()}/app/workshop/w-${args.workorderId}` });
+    } catch (err) {
+      logger.warn({ err: lightspeedReason(err), workorderID: args.workorderId }, "photo note not added to the work order");
+    }
+  }
+  return photos;
+}
+
+/**
+ * A ticket for later: book the store's service type at the drop-off time (the customer gets the usual
+ * confirmation; the work order goes in as Appointment, for the Lightspeed customer and bike already picked), then
+ * put the ticket's services and parts on that work order as lines and keep its photos.
+ */
+export async function scheduleTicket(
+  db: Db,
+  args: {
+    showroom: ShowroomCtx; type: BookingType; startsAt: Date; smsConsent: boolean; actor: string; client?: LightspeedClient;
+    customer: { lsCustomerId: string | null; name: string; phone: string; email: string };
+    bike: string; serial: string; serializedId: string | null; service: string; said: string; employeeId: string | null;
+    parts: { itemId: string; name: string; qty: number }[]; photos: string[];
+  },
+): Promise<{ bookingId: string; workorderId: string | null; partsAdded: number; partsFailed: string[] }> {
+  if (!args.service.trim()) throw new TicketError("Tap what it needs.");
+  const { booking } = await createTypeBooking(db, {
+    showroom: args.showroom,
+    type: args.type,
+    startsAt: args.startsAt,
+    createdBy: args.actor,
+    details: { name: args.customer.name, email: args.customer.email, phone: args.customer.phone, smsConsent: args.smsConsent, note: [args.service, args.said.trim()].filter(Boolean).join(". ") },
+    answers: (field) => (field === "q_bike" ? args.bike : field === "q_serial" ? args.serial : ""),
+    lsCustomerId: args.customer.lsCustomerId,
+    lsSerializedId: args.serializedId,
+  });
+  if (!booking.lsWorkorderId) return { bookingId: booking.id, workorderId: null, partsAdded: 0, partsFailed: args.parts.map((p) => p.name) };
+  const client = args.client ?? new LightspeedClient(db);
+  const { added, failed } = await addWorkorderParts(client, booking.lsWorkorderId, args.parts, args.employeeId);
+  await attachTicketPhotos(db, client, { showroomId: args.showroom.id, workorderId: booking.lsWorkorderId, images: args.photos, actor: args.actor });
+  return { bookingId: booking.id, workorderId: booking.lsWorkorderId, partsAdded: added, partsFailed: failed };
+}
+
 export type TicketResult = { workorderId: string; partsAdded: number; partsFailed: string[] };
 
 export class TicketError extends Error {}
@@ -312,34 +382,8 @@ export async function createTicket(db: Db, args: { showroom: ShowroomCtx; ticket
     etaOut: ticket.readyBy,
     lsUpdatedAt: now,
   }).onConflictDoNothing();
-  // Parts become real lines on the work order (Lightspeed reserves the stock). One that fails stays in the note.
-  let partsAdded = 0;
-  const partsFailed: string[] = [];
-  for (const p of ticket.parts ?? []) {
-    try {
-      await client.request("POST", "WorkorderItem.json", {
-        workorderID: Number(workorderID),
-        itemID: Number(p.itemId),
-        unitQuantity: p.qty,
-        warranty: false,
-        isSpecialOrder: false,
-        ...(ticket.employeeId ? { employeeID: Number(ticket.employeeId) } : {}),
-      });
-      partsAdded++;
-    } catch (err) {
-      partsFailed.push(p.name);
-      logger.warn({ err: lightspeedReason(err), workorderID, itemId: p.itemId }, "part not added to the work order");
-    }
-  }
-  // Photos stay in Kickstand; the work order's internal note points staff in Lightspeed to them.
-  const photos = await saveTicketPhotos(db, { showroomId: showroom.id, workorderId: workorderID, images: ticket.photos ?? [], actor: args.actor });
-  if (photos) {
-    try {
-      await client.updateWorkorder(workorderID, { internalNote: `${photos} photo${photos > 1 ? "s" : ""} in Kickstand: ${baseUrl()}/app/workshop/w-${workorderID}` });
-    } catch (err) {
-      logger.warn({ err: lightspeedReason(err), workorderID }, "photo note not added to the work order");
-    }
-  }
+  const { added: partsAdded, failed: partsFailed } = await addWorkorderParts(client, workorderID, ticket.parts ?? [], ticket.employeeId);
+  const photos = await attachTicketPhotos(db, client, { showroomId: showroom.id, workorderId: workorderID, images: ticket.photos ?? [], actor: args.actor });
   await db.insert(events).values({ showroomId: showroom.id, type: "ticket_created", actor: args.actor, payload: { workorder_id: workorderID, customer_id: customerId, service: ticket.service, parts_added: partsAdded, parts_failed: partsFailed, photos } });
   return { workorderId: workorderID, partsAdded, partsFailed };
 }

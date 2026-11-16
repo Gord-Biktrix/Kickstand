@@ -23,9 +23,12 @@ function localValue(d: Date, tz: string): string {
   return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}`;
 }
 /** Ready-by default: after the benches' queue plus this work, in open hours (lib/ready-estimate.ts). */
-function readyAfter(work: number, loads: number[], hours: WeeklyHours, tz: string): string {
-  return localValue(estimateReady({ now: new Date(), work, loads, hours, tz }), tz);
+function readyAfter(work: number, loads: number[], hours: WeeklyHours, tz: string, dropoff: string): string {
+  // Walk-in: after the benches' queue. A later drop-off: from that time (the queue then isn't known yet).
+  const later = dropoff !== "now";
+  return localValue(estimateReady({ now: later ? new Date(dropoff) : new Date(), work, loads: later ? [0] : loads, hours, tz }), tz);
 }
+
 
 /** "next bench free now" / "next bench free in 1 h 30 min (3 h queued)". */
 function queueText(loads: number[]): string {
@@ -51,6 +54,10 @@ export function TicketPos(props: {
   tz: string;
   enabled: boolean;
   canSchedule: boolean;
+  /** The next open service slot, for "Earliest available". */
+  earliest: { iso: string; label: string } | null;
+  /** A drop-off picked in the calendar popup. */
+  pickedDropoff: { iso: string; label: string } | null;
   defaultMinutes: number;
   benches: number;
   loads: number[];
@@ -86,6 +93,8 @@ export function TicketPos(props: {
   const [partsState, setPartsState] = useState<"idle" | "loading" | "error">("idle");
   const [partsError, setPartsError] = useState("");
   const seq = useRef(0);
+  const [dropoff, setDropoff] = useState<string>(props.pickedDropoff?.iso ?? "now");
+  const dropLabel = dropoff === "now" ? "" : dropoff === props.earliest?.iso ? props.earliest.label : (props.pickedDropoff?.label ?? "");
 
   const work = lines.reduce((s, l) => s + l.minutes * l.qty, 0);
   const partsTotal = lines.filter((l) => l.price != null).reduce((s, l) => s + (l.price ?? 0) * l.qty, 0);
@@ -115,7 +124,11 @@ export function TicketPos(props: {
   function update(next: Line[]) {
     setLines(next);
     const w = next.reduce((s, l) => s + l.minutes * l.qty, 0);
-    if (!readyTouched) setReady(next.length ? readyAfter(w || props.defaultMinutes, props.loads, props.hours, tz) : "");
+    if (!readyTouched) setReady(next.length ? readyAfter(w || props.defaultMinutes, props.loads, props.hours, tz, dropoff) : "");
+  }
+  function chooseDropoff(d: string) {
+    setDropoff(d);
+    if (!readyTouched && lines.length) setReady(readyAfter(work || props.defaultMinutes, props.loads, props.hours, tz, d));
   }
   function add(l: Omit<Line, "qty">) {
     const found = lines.find((x) => x.key === l.key);
@@ -136,20 +149,44 @@ export function TicketPos(props: {
           <TicketCustomerBike initial={props.initial.pick} initialNew={props.initial.newCustomer} bike={props.initial.bike} serial={props.initial.serial} sid={props.initial.sid} onBike={setBike} />
         </div>
 
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-[#f7f6f3] px-4 py-2.5 text-sm">
-          <span><strong>New walk-in</strong> · drop-off now</span>
-          {lines.length > 0 && ready ? (
-            <span className="flex items-center gap-2">
-              <span>Ready by</span>
-              <ReadyPicker name="ready" value={ready} tz={tz} onChange={(v) => { setReady(v); setReadyTouched(true); }} />
-            </span>
-          ) : (
-            <span className="text-muted">Ready by: add the work first</span>
-          )}
-          <p className="w-full text-xs text-muted">
-            {props.benches} bench{props.benches === 1 ? "" : "es"} · {queueText(props.loads)}
-            {readyTouched ? " · ready-by set by hand" : ""}
-          </p>
+        <div className="flex flex-col gap-3 border-b border-border bg-[#f7f6f3] px-4 py-3 text-sm">
+          <input type="hidden" name="dropoff" value={dropoff} />
+          <div>
+            <p className={label}>Drop-off</p>
+            <div className="mt-1.5 flex flex-wrap gap-2" role="radiogroup" aria-label="Drop-off">
+              <DropButton on={dropoff === "now"} onClick={() => chooseDropoff("now")} title="Now" sub="walk-in" />
+              {props.earliest && <DropButton on={dropoff === props.earliest.iso} onClick={() => chooseDropoff(props.earliest!.iso)} title="Earliest available" sub={props.earliest.label} />}
+              {props.pickedDropoff && props.pickedDropoff.iso !== props.earliest?.iso && <DropButton on={dropoff === props.pickedDropoff.iso} onClick={() => chooseDropoff(props.pickedDropoff!.iso)} title="Picked" sub={props.pickedDropoff.label} />}
+              {props.canSchedule && (
+                <button
+                  type="submit"
+                  formAction="/app/workshop/new"
+                  formMethod="get"
+                  name="schedule"
+                  value="1"
+                  // Photos don't ride along in the address; add them after picking the time.
+                  onClick={(e) => e.currentTarget.form?.querySelectorAll<HTMLInputElement>('input[name="photo"]').forEach((i) => { i.disabled = true; })}
+                  className="min-h-12 rounded-lg border border-dashed border-[#cfcbc4] bg-card px-3 text-left text-sm font-semibold"
+                >
+                  Pick a time…
+                </button>
+              )}
+            </div>
+          </div>
+          <div>
+            <p className={label}>Ready by</p>
+            <div className="mt-1.5 flex flex-wrap items-center gap-2">
+              {lines.length > 0 && ready ? (
+                <ReadyPicker name="ready" value={ready} tz={tz} onChange={(v) => { setReady(v); setReadyTouched(true); }} />
+              ) : (
+                <span className="text-muted">Add the work first</span>
+              )}
+            </div>
+            <p className="mt-1 text-xs text-muted">
+              {dropoff === "now" ? `${props.benches} bench${props.benches === 1 ? "" : "es"} · ${queueText(props.loads)}` : `From the drop-off at ${dropLabel}, in open hours`}
+              {readyTouched ? " · set by hand" : ""}
+            </p>
+          </div>
         </div>
 
         <div className="flex-1 px-4">
@@ -200,22 +237,13 @@ export function TicketPos(props: {
               <p className="text-xl font-extrabold">{work ? mins(work) : "—"}{partsTotal ? ` · ${money(partsTotal)}` : ""}</p>
             </div>
           </div>
-          <button type="submit" disabled={!props.enabled} className="flex min-h-16 w-full items-center justify-center rounded-xl bg-[#ff6b1a] text-lg font-extrabold text-[#17181a] disabled:opacity-50">Check in · create ticket</button>
-          {props.canSchedule && (
-            <button
-              type="submit"
-              formAction="/app/workshop/new"
-              formMethod="get"
-              name="schedule"
-              value="1"
-              // Photos don't ride along in the address; they're added at check-in.
-              onClick={(e) => e.currentTarget.form?.querySelectorAll<HTMLInputElement>('input[name="photo"]').forEach((i) => { i.disabled = true; })}
-              className="btn mt-2 min-h-12 w-full"
-            >
-              Schedule for later
-            </button>
+          {dropoff !== "now" && (
+            <label className="mb-2 flex min-h-11 items-center gap-2 text-sm"><input type="checkbox" name="sms_consent" className="h-5 w-5" /> Customer agrees to texts about this booking</label>
           )}
-          <p className="mt-2 text-xs text-muted">Check in creates the Lightspeed work order now (Open, with the parts as lines) and puts it in To do. Schedule books a service appointment instead.</p>
+          <button type="submit" disabled={!props.enabled} className="flex min-h-16 w-full items-center justify-center rounded-xl bg-[#ff6b1a] px-4 text-center text-lg font-extrabold text-[#17181a] disabled:opacity-50">
+            {dropoff === "now" ? "Check in · create ticket" : `Book drop-off · ${dropLabel}`}
+          </button>
+          <p className="mt-2 text-xs text-muted">{dropoff === "now" ? "Creates the Lightspeed work order now (Open, with the lines) and puts it in To do." : "Books the service appointment (the customer gets a confirmation) and puts the lines on its Lightspeed work order."}</p>
         </div>
       </section>
 
@@ -379,5 +407,15 @@ function Tile({ name, sub, qty, onAdd, onStep, muted = false }: { name: string; 
         </div>
       )}
     </div>
+  );
+}
+
+/** One drop-off choice: a title and the time under it. */
+function DropButton({ on, onClick, title, sub }: { on: boolean; onClick: () => void; title: string; sub: string }) {
+  return (
+    <button type="button" role="radio" aria-checked={on} onClick={onClick} className={`min-h-12 rounded-lg border px-3 py-1.5 text-left ${on ? "border-[#17181a] bg-[#17181a] text-white" : "border-border bg-card"}`}>
+      <span className="block text-sm font-bold">{title}</span>
+      <span className={`block text-xs ${on ? "text-white/75" : "text-muted"}`}>{sub}</span>
+    </button>
   );
 }

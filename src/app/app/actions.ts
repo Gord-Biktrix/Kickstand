@@ -25,7 +25,7 @@ import { attachUnit, bookableCompanions, bookableSiblings, linkOrdersForPickup, 
 import { currentShowroom } from "@/lib/current-showroom";
 import { createShowroom, importShowroomsFromLightspeed, isProfileKind, setLightspeedLink, updateShowroomDetails } from "@/lib/showroom-admin";
 import { cancelTypeBooking, createTypeBooking, getBookingDetail, rescheduleTypeBooking, resendBookingConfirmation, setBookingOutcome, syncBookingWorkorder } from "@/lib/type-bookings";
-import { createBookingType, getBookingType, hoursFromForm, NEW_TYPE_DEFAULTS, setBookingTypeActive, setStoreHours, updateBookingType, updatePickupType, validateBookingType, type BookingTypeInput } from "@/lib/booking-types";
+import { createBookingType, getBookingType, hoursFromForm, NEW_TYPE_DEFAULTS, setBookingTypeActive, setStoreHours, updateBookingType, updatePickupType, validateBookingType, type BookingTypeInput, listBookingTypes } from "@/lib/booking-types";
 import { LightspeedClient } from "@/lib/lightspeed";
 import { googleEnabled } from "@/lib/google-auth";
 import { mailerKind } from "@/lib/mailer";
@@ -33,7 +33,7 @@ import { syncSpecialOrders } from "@/lib/special-orders";
 import { deleteView, saveView, syncWorkorders } from "@/lib/workorders";
 import type { BoardColumn } from "@/lib/workshop-columns";
 import { markJobReady, moveJob } from "@/lib/workshop-moves";
-import { createTicket, ticketPhotoData } from "@/lib/tickets";
+import { createTicket, scheduleTicket, ticketPhotoData } from "@/lib/tickets";
 import { jobPath } from "@/lib/workshop";
 
 /** Run a mutation and land back on `returnTo` with a flash; auth errors surface the same way. */
@@ -642,7 +642,7 @@ export async function createTicketAction(formData: FormData) {
   const user = await requireActor("staff");
   const showroom = await currentShowroom(user);
   const keep = new URLSearchParams();
-  for (const k of ["c", "nn", "np", "ne", "bike", "serial", "sid", "said", "ready", "mech"]) {
+  for (const k of ["c", "nn", "np", "ne", "bike", "serial", "sid", "said", "ready", "mech", "dropoff"]) {
     const val = str(formData, k);
     if (val) keep.set(k, val);
   }
@@ -656,6 +656,23 @@ export async function createTicketAction(formData: FormData) {
       : c && c !== "new"
         ? { name: cName, phone: cPhone, email: cEmail }
         : { name: str(formData, "nn"), phone: str(formData, "np"), email: str(formData, "ne") };
+    // A later drop-off books the store's service type instead of checking the bike in now.
+    const dropoff = str(formData, "dropoff");
+    if (dropoff && dropoff !== "now") {
+      const startsAt = new Date(dropoff);
+      if (Number.isNaN(startsAt.getTime())) throw new Error("Pick the drop-off time again.");
+      const type = (await listBookingTypes(db, showroom.id)).find((t) => t.kind === "standard" && t.active && t.createsWorkOrder && t.location === "in_person");
+      if (!type) throw new Error("This store has no service booking type to book drop-offs with (Settings › Booking types).");
+      const who = lsId ? { lsCustomerId: lsId, name: cName, phone: cPhone, email: cEmail } : { lsCustomerId: null, ...(customer as { name: string; phone: string; email: string }) };
+      const r = await scheduleTicket(db, {
+        showroom, type, startsAt, smsConsent: bool(formData, "sms_consent"), actor: user.id, customer: who,
+        bike: str(formData, "bike"), serial: str(formData, "serial"), serializedId: str(formData, "sid") || null,
+        service: ticketServices(formData), said: str(formData, "said"), employeeId: str(formData, "mech") || null,
+        parts: ticketParts(formData), photos: ticketPhotoData(formData.getAll("photo").filter((v): v is string => typeof v === "string")),
+      });
+      const lines = !r.workorderId ? " The Lightspeed work order isn't there yet, so its lines weren't added; open the booking to retry." : r.partsFailed.length ? ` ${r.partsFailed.length} line${r.partsFailed.length > 1 ? "s" : ""} couldn't be added (${r.partsFailed.join(", ")}).` : r.partsAdded ? ` ${r.partsAdded} line${r.partsAdded > 1 ? "s" : ""} on work order #${r.workorderId}.` : "";
+      target = withFlash(`/app/bookings/${r.bookingId}`, { ok: `Drop-off booked. The customer gets a confirmation.${lines}` });
+    } else {
     const readyRaw = str(formData, "ready");
     const [d, t] = readyRaw.split("T");
     const readyBy = d && t ? localToUtc(d, t.slice(0, 5), showroom.timezone) : new Date(Date.now() + showroom.settings.repair_minutes * 60_000);
@@ -667,6 +684,7 @@ export async function createTicketAction(formData: FormData) {
     const id = r.workorderId;
     const parts = r.partsFailed.length ? ` ${r.partsFailed.length} part${r.partsFailed.length > 1 ? "s" : ""} couldn't be added in Lightspeed (${r.partsFailed.join(", ")}); they're in the note.` : r.partsAdded ? ` ${r.partsAdded} part line${r.partsAdded > 1 ? "s" : ""} added.` : "";
     target = withFlash(`${jobPath(`w:${id}`)}`, { ok: `Ticket created: Lightspeed work order #${id}.${parts}` });
+    }
   } catch (err) {
     keep.set("error", errorMessage(err));
     target = `/app/workshop/new?${keep.toString()}`;

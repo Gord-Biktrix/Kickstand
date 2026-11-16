@@ -27,6 +27,7 @@ function fakeLightspeed(opts: { fail?: boolean } = {}) {
     if (opts.fail) return json(500, { message: "down" });
     if (url.endsWith("Customer.json")) return json(200, { Customer: { customerID: String(++ids) } });
     if (url.endsWith("Workorder.json")) return json(200, { Workorder: { workorderID: String(++ids) } });
+    if (url.endsWith("WorkorderItem.json")) return json(200, { WorkorderItem: { workorderItemID: String(++ids) } });
     if (/Workorder\/\d+\.json$/.test(url)) return json(200, { Workorder: {} });
     if (/Customer\/\d+\.json/.test(url)) return json(200, { Customer: { customerID: "9020", firstName: "Walk", lastName: "In", Contact: { Emails: { ContactEmail: { address: "walk@example.com" } }, Phones: { ContactPhone: { number: "604-555-0100", useType: "Mobile" } } } } });
     return json(404, { message: `unhandled ${method} ${url}` });
@@ -116,6 +117,26 @@ describe("service bookings and Lightspeed work orders", () => {
     await createTypeBooking(db, { showroom: van, type: service, startsAt: slot("10:00"), details, createdBy: "staff-1", now: NOW, lsCustomerId: "9020", lsSerializedId: "501" });
     expect(ls.calls.some((c) => c.method === "POST" && c.url.endsWith("Customer.json"))).toBe(false);
     expect(ls.calls.find((c) => c.method === "POST" && c.url.endsWith("Workorder.json"))!.body).toMatchObject({ customerID: 9020, serializedID: 501 });
+  });
+
+  it("a ticket for later books the drop-off, then puts its services and parts on the booking's work order", async () => {
+    const { scheduleTicket } = await import("@/lib/tickets");
+    const ls = fakeLightspeed();
+    setLightspeedFetch(ls.fetchImpl);
+    const r = await scheduleTicket(db, {
+      showroom: van, type: service, startsAt: slot("10:00"), smsConsent: false, actor: "staff-1",
+      customer: { lsCustomerId: "9020", name: "Alan Uyeno", phone: "604-916-8336", email: "alan@example.com" },
+      bike: "Kutty X 2 Yellow", serial: "S022YP01561", serializedId: "503", service: "Tune Up", said: "Squeaks", employeeId: null,
+      parts: [{ itemId: "77", name: "Tune Up", qty: 1 }, { itemId: "55", name: "Brake pads", qty: 2 }], photos: [],
+    });
+    expect(r.workorderId).toBeTruthy();
+    expect(r).toMatchObject({ partsAdded: 2, partsFailed: [] });
+    const wo = ls.calls.find((c) => c.method === "POST" && c.url.endsWith("Workorder.json"))!;
+    expect(wo.body).toMatchObject({ customerID: 9020, serializedID: 503 });
+    expect(String(wo.body!.note)).toContain("Customer says: Tune Up. Squeaks");
+    expect(ls.calls.filter((c) => c.url.endsWith("WorkorderItem.json")).map((c) => [c.body!.workorderID, c.body!.itemID, c.body!.unitQuantity])).toEqual([[Number(r.workorderId), 77, 1], [Number(r.workorderId), 55, 2]]);
+    const [b] = await db.select().from(bookings).where(eq(bookings.id, r.bookingId));
+    expect(b).toMatchObject({ customerName: "Alan Uyeno", status: "booked" });
   });
 
   it("skips types without the work-order flag and stores with the link off", async () => {
