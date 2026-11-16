@@ -11,6 +11,7 @@ import { formatLongDate, formatTime } from "@/lib/time";
 import { jobIdFromPath, jobPath, workshopJobs, type JobColumn, type WorkshopJob } from "@/lib/workshop";
 import { fetchWorkorderLines, forgetWorkorder, linesSubtotal, type WorkorderLine } from "@/lib/workorder-lines";
 import { lightspeedWorkorderUrl } from "@/lib/workorders";
+import { listTicketPhotos } from "@/lib/tickets";
 import { moveJobAction, readyJobAction, setBookingStatusAction } from "../../actions";
 
 export const metadata = { title: "Job" };
@@ -60,6 +61,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   const self = jobPath(job.id);
   const first = job.customer?.split(/\s+/)[0] ?? "the customer";
   const said = booking?.customerNote || wo?.note || "";
+  const photos = job.workorderId ? await listTicketPhotos(db, job.workorderId) : [];
   const lsUrl = job.workorderId ? lightspeedWorkorderUrl(job.workorderId) : null;
 
   return (
@@ -95,10 +97,20 @@ export default async function JobPage({ params, searchParams }: { params: Promis
                 {lines.map((l) => <Line key={l.id} line={l} />)}
               </ul>
             )}
-            {said && (
+            {(said || photos.length > 0) && (
               <div className="border-t border-border py-3">
-                <p className="text-[11px] font-extrabold tracking-wider text-[#3d3f43] uppercase">What they said</p>
-                <p className="mt-1 text-sm whitespace-pre-line">{said}</p>
+                <p className="text-[11px] font-extrabold tracking-wider text-[#3d3f43] uppercase">Notes</p>
+                {said && <p className="mt-1 text-sm whitespace-pre-line">{said}</p>}
+                {photos.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {photos.map((p, i) => (
+                      <a key={p.id} href={`/ticket-photo/${p.id}`} target="_blank" rel="noreferrer">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={`/ticket-photo/${p.id}`} alt={`Photo ${i + 1}`} className="h-20 w-20 rounded-lg object-cover" />
+                      </a>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </div>

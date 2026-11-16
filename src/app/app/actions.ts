@@ -33,7 +33,7 @@ import { syncSpecialOrders } from "@/lib/special-orders";
 import { deleteView, saveView, syncWorkorders } from "@/lib/workorders";
 import type { BoardColumn } from "@/lib/workshop-columns";
 import { markJobReady, moveJob } from "@/lib/workshop-moves";
-import { createTicket } from "@/lib/tickets";
+import { createTicket, ticketPhotoData } from "@/lib/tickets";
 import { jobPath } from "@/lib/workshop";
 
 /** Run a mutation and land back on `returnTo` with a flash; auth errors surface the same way. */
@@ -661,7 +661,7 @@ export async function createTicketAction(formData: FormData) {
     const readyBy = d && t ? localToUtc(d, t.slice(0, 5), showroom.timezone) : new Date(Date.now() + showroom.settings.repair_minutes * 60_000);
     const r = await createTicket(db, {
       showroom,
-      ticket: { customer, bike: str(formData, "bike"), serial: str(formData, "serial"), service: ticketServices(formData), said: str(formData, "said"), readyBy, employeeId: str(formData, "mech") || null, serializedId: str(formData, "sid") || null, parts: ticketParts(formData) },
+      ticket: { customer, bike: str(formData, "bike"), serial: str(formData, "serial"), service: ticketServices(formData), said: str(formData, "said"), readyBy, employeeId: str(formData, "mech") || null, serializedId: str(formData, "sid") || null, parts: ticketParts(formData), photos: ticketPhotoData(formData.getAll("photo").filter((v): v is string => typeof v === "string")) },
       actor: user.id,
     });
     const id = r.workorderId;

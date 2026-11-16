@@ -1,6 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { Wheel } from "./booking-calendar-picker";
+
+const ACCENT = "#c2410c";
 
 const pad = (n: number) => String(n).padStart(2, "0");
 const DAY = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -107,9 +110,12 @@ export function ReadyPicker({ name, value, tz, onChange }: { name: string; value
                     disabled={past}
                     onClick={() => onChange(`${d}T${time}`)}
                     aria-pressed={on}
-                    className={`mx-auto flex h-9 w-9 items-center justify-center rounded-full text-sm font-semibold ${on ? "bg-[#c2410c] text-white" : past ? "text-[#cfcbc4]" : d === today?.date ? "border-2 border-[#17181a]" : "hover:bg-[#fff1e8]"}`}
+                    aria-label={`${DAY[weekday(d)]} ${i + 1}`}
+                    className={`group relative mx-auto flex h-10 w-10 items-center justify-center rounded-full text-sm font-semibold ${past ? "text-[#cfcbc4]" : ""}`}
+                    style={past ? undefined : { color: on ? "#fff" : ACCENT }}
                   >
-                    {i + 1}
+                    {!past && <Wheel accent={ACCENT} selected={on} />}
+                    <span className="relative">{i + 1}</span>
                   </button>
                 );
               })}

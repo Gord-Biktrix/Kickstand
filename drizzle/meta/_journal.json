@@ -169,6 +169,13 @@
       "when": 1794862815612,
       "tag": "0023_curvy_sandman",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1794867068621,
+      "tag": "0024_huge_gateway",
+      "breakpoints": true
     }
   ]
 }

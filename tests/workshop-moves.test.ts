@@ -252,6 +252,23 @@ describe("new tickets from the POS screen", () => {
     expect(parts).toEqual([{ itemId: "2", name: "Kutty X brake pads", price: 29 }]);
   });
 
+  it("photos are kept with the ticket and the work order's internal note points to them; bad data is dropped", async () => {
+    const { createTicket, ticketPhotoData, listTicketPhotos } = await import("@/lib/tickets");
+    expect(ticketPhotoData(["data:image/jpeg;base64,QUJD", "data:image/png;base64,QUJD", "nonsense", "data:image/jpeg;base64,REVG"])).toEqual(["QUJD", "REVG"]);
+    const calls: Call[] = [];
+    setLightspeedFetch(async (input, init) => {
+      const url = String(input);
+      calls.push({ method: init?.method ?? "GET", url, body: init?.body ? JSON.parse(String(init.body)) : null });
+      const json = (data: unknown) => new Response(JSON.stringify(data), { status: 200, headers: { "Content-Type": "application/json" } });
+      if (url.endsWith("Workorder.json")) return json({ Workorder: { workorderID: "10303" } });
+      return json({ Workorder: {} });
+    });
+    await createTicket(db, { showroom: van, ticket: { ...base, customer: { lsCustomerId: "9020", name: "Alan" }, photos: ["QUJD", "REVG"] }, actor: "staff-1" });
+    expect(await listTicketPhotos(db, "10303")).toHaveLength(2);
+    const put = calls.find((c) => c.method === "PUT" && c.url.endsWith("Workorder/10303.json"));
+    expect(String(put!.body!.internalNote)).toMatch(/^2 photos in Kickstand: .*\/app\/workshop\/w-10303$/);
+  });
+
   it("finds customers by the last digits of their phone", async () => {
     const { searchCustomers } = await import("@/lib/tickets");
     const { makeOrder } = await import("./helpers");

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { Picked } from "./customer-picker";
 import { ReadyPicker } from "./ready-picker";
 import { TicketCustomerBike } from "./ticket-customer-bike";
+import { estimateReady, type WeeklyHours } from "@/lib/ready-estimate";
 
 type Service = { key: string; name: string; minutes: number };
 type Part = { itemId: string; name: string; price: number | null };
@@ -20,9 +21,17 @@ function localValue(d: Date, tz: string): string {
   const p = Object.fromEntries(new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(d).map((x) => [x.type, x.value]));
   return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}`;
 }
-/** Ready-by default: now + the work, rounded up to the next quarter hour. */
-function readyAfter(minutes: number, tz: string): string {
-  return localValue(new Date(Math.ceil((Date.now() + minutes * 60_000) / 900_000) * 900_000), tz);
+/** Ready-by default: after the benches' queue plus this work, in open hours (lib/ready-estimate.ts). */
+function readyAfter(work: number, loads: number[], hours: WeeklyHours, tz: string): string {
+  return localValue(estimateReady({ now: new Date(), work, loads, hours, tz }), tz);
+}
+
+/** "next bench free now" / "next bench free in 1 h 30 min (3 h queued)". */
+function queueText(loads: number[]): string {
+  const free = Math.min(...loads);
+  const total = loads.reduce((a, b) => a + b, 0);
+  if (!total) return "all benches free";
+  return `${free ? `next bench free in ${mins(free)}` : "a bench is free now"} · ${mins(total)} queued`;
 }
 
 /**
@@ -38,6 +47,9 @@ export function TicketPos(props: {
   enabled: boolean;
   canSchedule: boolean;
   defaultMinutes: number;
+  benches: number;
+  loads: number[];
+  hours: WeeklyHours;
   initial: { pick: Picked | null; newCustomer: { nn: string; np: string; ne: string }; bike: string; serial: string; sid: string; services: string[]; labour: string[]; parts: string[]; said: string; ready: string; mech: string };
 }) {
   const { services, tz } = props;
@@ -93,7 +105,8 @@ export function TicketPos(props: {
 
   function update(next: Line[]) {
     setLines(next);
-    if (!readyTouched) setReady(readyAfter(next.reduce((s, l) => s + l.minutes * l.qty, 0) || props.defaultMinutes, tz));
+    const w = next.reduce((s, l) => s + l.minutes * l.qty, 0);
+    if (!readyTouched) setReady(next.length ? readyAfter(w || props.defaultMinutes, props.loads, props.hours, tz) : "");
   }
   function add(l: Omit<Line, "qty">) {
     const found = lines.find((x) => x.key === l.key);
@@ -116,10 +129,18 @@ export function TicketPos(props: {
 
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-[#f7f6f3] px-4 py-2.5 text-sm">
           <span><strong>New walk-in</strong> · drop-off now</span>
-          <span className="flex items-center gap-2">
-            <span>Ready by</span>
-            <ReadyPicker name="ready" value={ready} tz={tz} onChange={(v) => { setReady(v); setReadyTouched(true); }} />
-          </span>
+          {lines.length > 0 && ready ? (
+            <span className="flex items-center gap-2">
+              <span>Ready by</span>
+              <ReadyPicker name="ready" value={ready} tz={tz} onChange={(v) => { setReady(v); setReadyTouched(true); }} />
+            </span>
+          ) : (
+            <span className="text-muted">Ready by: add the work first</span>
+          )}
+          <p className="w-full text-xs text-muted">
+            {props.benches} bench{props.benches === 1 ? "" : "es"} · {queueText(props.loads)}
+            {readyTouched ? " · ready-by set by hand" : ""}
+          </p>
         </div>
 
         <div className="flex-1 px-4">
@@ -148,8 +169,9 @@ export function TicketPos(props: {
             </ul>
           )}
           <div className="border-t border-border py-3">
-            <label htmlFor="said" className={label}>What they say</label>
-            <textarea id="said" name="said" defaultValue={props.initial.said} rows={2} placeholder="In their words" className="input mt-1 min-h-16 py-2 text-base" />
+            <label htmlFor="said" className={label}>Notes</label>
+            <textarea id="said" name="said" defaultValue={props.initial.said} rows={2} placeholder="What they said, what you noticed" className="input mt-1 min-h-16 py-2 text-base" />
+            <PhotoAdd />
           </div>
         </div>
 
@@ -169,7 +191,18 @@ export function TicketPos(props: {
           </div>
           <button type="submit" disabled={!props.enabled} className="flex min-h-16 w-full items-center justify-center rounded-xl bg-[#ff6b1a] text-lg font-extrabold text-[#17181a] disabled:opacity-50">Check in · create ticket</button>
           {props.canSchedule && (
-            <button type="submit" formAction="/app/workshop/new" formMethod="get" name="schedule" value="1" className="btn mt-2 min-h-12 w-full">Schedule for later</button>
+            <button
+              type="submit"
+              formAction="/app/workshop/new"
+              formMethod="get"
+              name="schedule"
+              value="1"
+              // Photos don't ride along in the address; they're added at check-in.
+              onClick={(e) => e.currentTarget.form?.querySelectorAll<HTMLInputElement>('input[name="photo"]').forEach((i) => { i.disabled = true; })}
+              className="btn mt-2 min-h-12 w-full"
+            >
+              Schedule for later
+            </button>
           )}
           <p className="mt-2 text-xs text-muted">Check in creates the Lightspeed work order now (Open, with the parts as lines) and puts it in To do. Schedule books a service appointment instead.</p>
         </div>
@@ -234,5 +267,61 @@ export function TicketPos(props: {
         {tab !== "parts" && <p className="text-sm text-muted">Tap to add; tap again for more. Services and labour go on the work order&apos;s note.</p>}
       </section>
     </>
+  );
+}
+
+/** Shrink a photo on the device to 1280 px JPEG (~150–300 KB) before it's sent with the ticket. */
+async function shrink(file: File): Promise<string> {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = new Image();
+    img.src = url;
+    await img.decode();
+    const scale = Math.min(1, 1280 / Math.max(img.naturalWidth, img.naturalHeight));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(img.naturalWidth * scale);
+    canvas.height = Math.round(img.naturalHeight * scale);
+    canvas.getContext("2d")!.drawImage(img, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL("image/jpeg", 0.72);
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+/** "+ Photo": take or pick photos (up to 6), shown as thumbnails with ×, sent as `photo` with the ticket. */
+function PhotoAdd() {
+  const [photos, setPhotos] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+  const input = useRef<HTMLInputElement>(null);
+  async function onFiles(files: FileList | null) {
+    if (!files?.length) return;
+    setBusy(true);
+    const out: string[] = [];
+    for (const f of [...files].slice(0, 6 - photos.length)) {
+      if (!f.type.startsWith("image/")) continue;
+      try { out.push(await shrink(f)); } catch { /* skip a photo the browser can't read */ }
+    }
+    setPhotos((p) => [...p, ...out].slice(0, 6));
+    setBusy(false);
+    if (input.current) input.current.value = "";
+  }
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-2">
+      {photos.map((src, i) => (
+        <span key={i} className="relative">
+          <input type="hidden" name="photo" value={src} />
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={src} alt={`Photo ${i + 1}`} className="h-16 w-16 rounded-lg object-cover" />
+          <button type="button" onClick={() => setPhotos((p) => p.filter((_, j) => j !== i))} aria-label={`Remove photo ${i + 1}`} className="absolute -top-2 -right-2 h-6 w-6 rounded-full bg-[#17181a] text-xs text-white">×</button>
+        </span>
+      ))}
+      {photos.length < 6 && (
+        <label className="btn min-h-16 cursor-pointer px-4">
+          <input ref={input} type="file" accept="image/*" multiple className="sr-only" onChange={(e) => onFiles(e.target.files)} />
+          {busy ? "Adding…" : "+ Photo"}
+        </label>
+      )}
+      <span className="text-xs text-muted">Videos come once file storage is switched on.</span>
+    </div>
   );
 }

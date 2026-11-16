@@ -342,6 +342,20 @@ export const lsItems = pgTable("ls_items", {
   fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+/** Photos taken when a ticket is written (New ticket), shown on the job screen. Small JPEGs, base64. */
+export const ticketPhotos = pgTable(
+  "ticket_photos",
+  {
+    id: id(),
+    showroomId: uuid("showroom_id").notNull().references(() => showrooms.id),
+    workorderId: text("workorder_id").notNull(),
+    image: text("image").notNull(),
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("ticket_photos_workorder_idx").on(t.workorderId)],
+);
+
 export const lsWorkorders = pgTable(
   "ls_workorders",
   {

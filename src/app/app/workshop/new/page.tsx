@@ -9,7 +9,9 @@ import { TicketPos } from "@/components/ticket-pos";
 import { Flash } from "@/components/ui";
 import { requireUser } from "@/lib/auth";
 import { readQuestions } from "@/lib/booking-questions";
-import { colorOf, ensureDefaultBookingTypes, listBookingTypes, LOCATION_LABEL, type BookingLocation } from "@/lib/booking-types";
+import { colorOf, ensureDefaultBookingTypes, ensureStoreHours, listBookingTypes, LOCATION_LABEL, type BookingLocation } from "@/lib/booking-types";
+import { benchLoads, estimateReady } from "@/lib/ready-estimate";
+import { workshopJobs } from "@/lib/workshop";
 import { currentShowroom } from "@/lib/current-showroom";
 import { sp, type SearchParams } from "@/lib/flash";
 import { lightspeedEnabled } from "@/lib/lightspeed";
@@ -46,7 +48,12 @@ export default async function NewTicketPage({ searchParams }: { searchParams: Pr
   const labour = all(q.labour);
   const partLines = all(q.part);
   const work = services.reduce((s, n) => s + (SERVICE_MENU.find((x) => x.name === n)?.minutes ?? 0), 0) + labour.reduce((s, m) => s + (Number(m) || 0), 0);
-  const ready = v("ready") || formatInTimeZone(quarterHourAfter(new Date(), work || showroom.settings.repair_minutes), tz, "yyyy-MM-dd'T'HH:mm");
+  // Ready-by: the queue on the benches plus this job's work, in the store's open hours (lib/ready-estimate.ts).
+  const now = new Date();
+  const [hours, jobs] = await Promise.all([ensureStoreHours(db, showroom), workshopJobs(db, showroom, now)]);
+  const benches = showroom.settings.workshop_benches;
+  const loads = benchLoads(jobs, benches, now);
+  const ready = v("ready") || (work ? formatInTimeZone(estimateReady({ now, work, loads, hours, tz }), tz, "yyyy-MM-dd'T'HH:mm") : "");
 
   // After an error or while scheduling, the picked customer comes back in `c`.
   const picked = v("c");
@@ -73,6 +80,9 @@ export default async function NewTicketPage({ searchParams }: { searchParams: Pr
           enabled={ls}
           canSchedule={!!serviceType}
           defaultMinutes={showroom.settings.repair_minutes}
+          benches={benches}
+          loads={loads}
+          hours={hours}
           initial={{ pick: initialPick, newCustomer: { nn: v("nn"), np: v("np"), ne: v("ne") }, bike: v("bike"), serial: v("serial"), sid: v("sid"), services, labour, parts: partLines, said: v("said"), ready, mech: v("mech") }}
         />
       </form>
@@ -95,10 +105,6 @@ export default async function NewTicketPage({ searchParams }: { searchParams: Pr
   );
 }
 
-/** now + minutes, rounded up to the next quarter hour. */
-function quarterHourAfter(now: Date, minutes: number): Date {
-  return new Date(Math.ceil((now.getTime() + minutes * 60_000) / 900_000) * 900_000);
-}
 
 /** The booking calendar as a popup over the ticket, then the booking details with everything carried over. */
 async function SchedulePopup(props: {

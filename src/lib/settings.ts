@@ -6,6 +6,8 @@ export const settingsSchema = z.object({
   build_minutes: z.number().int().min(15).max(600).default(120),
   /** Workshop board: how long a Lightspeed repair takes when nothing says otherwise (start by = due − this). */
   repair_minutes: z.number().int().min(15).max(600).default(60),
+  /** Workshop: how many bikes can be worked on at once. New tickets' ready-by shares the queue across these. */
+  workshop_benches: z.number().int().min(1).max(20).default(2),
   /**
    * Workshop board: which Lightspeed work-order statuses sit in which column (status ids). Null = the
    * defaults worked out from the status names (see defaultWorkshopColumns). Statuses in no column stay off the board.
@@ -90,6 +92,7 @@ export const PROGRAM_KEYS = [
   "slot_minutes",
   "build_minutes",
   "repair_minutes",
+  "workshop_benches",
   "min_lead_hours",
   "booking_horizon_days",
   "book_by_days",

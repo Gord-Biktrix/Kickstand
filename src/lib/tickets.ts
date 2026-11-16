@@ -5,10 +5,11 @@
  */
 import { and, desc, eq, ilike, inArray, isNotNull, like, ne, or, sql } from "drizzle-orm";
 import type { Db } from "@/db/client";
-import { bookings, events, lsWorkorders, orders, units } from "@/db/schema";
+import { bookings, events, lsWorkorders, orders, ticketPhotos, units } from "@/db/schema";
 import { asList, LightspeedClient, lightspeedEnabled } from "./lightspeed";
 import { logger } from "./logger";
 import { normalizePhone } from "./phone";
+import { baseUrl } from "./messages";
 import { itemNames, lightspeedReason } from "./workorder-lines";
 import type { ShowroomCtx } from "./showroom";
 
@@ -219,7 +220,30 @@ export type NewTicket = {
   serializedId?: string | null;
   /** Parts picked from the Parts tab: added to the work order as Lightspeed lines (and listed in the note). */
   parts?: { itemId: string; name: string; qty: number }[];
+  /** Photos (base64 JPEG) taken at the counter; kept in Kickstand and shown on the job screen. */
+  photos?: string[];
 };
+
+const MAX_PHOTOS = 6;
+const MAX_PHOTO_CHARS = 900_000; // ~650 KB of JPEG; the device sends ~150–300 KB.
+
+/** The photo data URLs a New ticket sends (data:image/jpeg;base64,…): the base64 parts that are valid, up to 6. */
+export function ticketPhotoData(dataUrls: string[]): string[] {
+  return dataUrls
+    .map((u) => /^data:image\/jpeg;base64,([A-Za-z0-9+/=]+)$/.exec(u.trim())?.[1] ?? "")
+    .filter((b) => b && b.length <= MAX_PHOTO_CHARS)
+    .slice(0, MAX_PHOTOS);
+}
+
+export async function saveTicketPhotos(db: Db, args: { showroomId: string; workorderId: string; images: string[]; actor: string }): Promise<number> {
+  if (!args.images.length) return 0;
+  await db.insert(ticketPhotos).values(args.images.map((image) => ({ showroomId: args.showroomId, workorderId: args.workorderId, image, createdBy: args.actor })));
+  return args.images.length;
+}
+
+export async function listTicketPhotos(db: Db, workorderId: string): Promise<{ id: string; createdAt: Date }[]> {
+  return db.select({ id: ticketPhotos.id, createdAt: ticketPhotos.createdAt }).from(ticketPhotos).where(eq(ticketPhotos.workorderId, workorderId)).orderBy(ticketPhotos.createdAt);
+}
 
 export type TicketResult = { workorderId: string; partsAdded: number; partsFailed: string[] };
 
@@ -253,7 +277,7 @@ export async function createTicket(db: Db, args: { showroom: ShowroomCtx; ticket
   const note = [
     `${ticket.service.toUpperCase()} · ticket from Kickstand`,
     `Bike: ${ticket.bike.trim()}${ticket.serial.trim() ? ` · serial ${ticket.serial.trim()}` : ""}`,
-    ticket.said.trim() ? `Customer says: ${ticket.said.trim()}` : "",
+    ticket.said.trim() ? `Notes: ${ticket.said.trim()}` : "",
     ticket.parts?.length ? `Parts: ${ticket.parts.map((p) => `${p.name}${p.qty > 1 ? ` ×${p.qty}` : ""}`).join(", ")}` : "",
   ].filter(Boolean).join("\n");
   let workorderID: string;
@@ -307,6 +331,15 @@ export async function createTicket(db: Db, args: { showroom: ShowroomCtx; ticket
       logger.warn({ err: lightspeedReason(err), workorderID, itemId: p.itemId }, "part not added to the work order");
     }
   }
-  await db.insert(events).values({ showroomId: showroom.id, type: "ticket_created", actor: args.actor, payload: { workorder_id: workorderID, customer_id: customerId, service: ticket.service, parts_added: partsAdded, parts_failed: partsFailed } });
+  // Photos stay in Kickstand; the work order's internal note points staff in Lightspeed to them.
+  const photos = await saveTicketPhotos(db, { showroomId: showroom.id, workorderId: workorderID, images: ticket.photos ?? [], actor: args.actor });
+  if (photos) {
+    try {
+      await client.updateWorkorder(workorderID, { internalNote: `${photos} photo${photos > 1 ? "s" : ""} in Kickstand: ${baseUrl()}/app/workshop/w-${workorderID}` });
+    } catch (err) {
+      logger.warn({ err: lightspeedReason(err), workorderID }, "photo note not added to the work order");
+    }
+  }
+  await db.insert(events).values({ showroomId: showroom.id, type: "ticket_created", actor: args.actor, payload: { workorder_id: workorderID, customer_id: customerId, service: ticket.service, parts_added: partsAdded, parts_failed: partsFailed, photos } });
   return { workorderId: workorderID, partsAdded, partsFailed };
 }

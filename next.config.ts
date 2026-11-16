@@ -15,6 +15,8 @@ const EMBED_ORIGINS = [
 
 const nextConfig: NextConfig = {
   reactCompiler: true,
+  // New ticket photos (resized on the device to ~200 KB, at most 6) ride in the ticket form. Vercel's own cap is 4.5 MB.
+  experimental: { serverActions: { bodySizeLimit: "4mb" } },
   async headers() {
     return [
       // Staff app and pickup links: never inside someone else's frame (clickjacking).

@@ -173,7 +173,7 @@ export function monthCells(ym: string): (string | null)[] {
  * An open day drawn as a bike wheel (tyre, spokes, hub) in the booking type's colour; the date sits in the
  * hub. The chosen day is the same wheel filled in. Spokes turn a little on hover, unless motion is reduced.
  */
-function Wheel({ accent, selected }: { accent: string; selected: boolean }) {
+export function Wheel({ accent, selected }: { accent: string; selected: boolean }) {
   // A bike wheel side-on: thin black tyre, a fine rim, spokes running in to the hub, and the hub (in the type's
   // colour) where the date sits. The picked day gets a solid hub; the others a light one. Spokes turn on hover.
   const hub = selected ? accent : `color-mix(in srgb, ${accent} 14%, white)`;
