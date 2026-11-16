@@ -4,6 +4,16 @@ export const settingsSchema = z.object({
   slot_minutes: z.number().int().min(5).max(240).default(45),
   /** Workshop board: how long a bike build takes, so the board can show when to start it (ready-by − this). */
   build_minutes: z.number().int().min(15).max(600).default(120),
+  /** Workshop board: how long a Lightspeed repair takes when nothing says otherwise (start by = due − this). */
+  repair_minutes: z.number().int().min(15).max(600).default(60),
+  /**
+   * Workshop board: which Lightspeed work-order statuses sit in which column (status ids). Null = the
+   * defaults worked out from the status names (see defaultWorkshopColumns). Statuses in no column stay off the board.
+   */
+  workshop_columns: z
+    .object({ todo: z.array(z.number().int()), doing: z.array(z.number().int()), parts: z.array(z.number().int()), ready: z.array(z.number().int()) })
+    .nullable()
+    .default(null),
   min_lead_hours: z.number().min(0).default(48),
   booking_horizon_days: z.number().int().min(1).default(42),
   book_by_days: z.number().int().min(1).default(14),
@@ -79,6 +89,7 @@ export const DEFAULT_SETTINGS: ProgramSettings = settingsSchema.parse({});
 export const PROGRAM_KEYS = [
   "slot_minutes",
   "build_minutes",
+  "repair_minutes",
   "min_lead_hours",
   "booking_horizon_days",
   "book_by_days",

@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_SETTINGS } from "@/lib/settings";
 import type { ShowroomCtx } from "@/lib/showroom";
 import { localToUtc } from "@/lib/time";
-import { buildJob, buildReadyBy, repairJob, sortJobs } from "@/lib/workshop";
+import { buildJob, buildReadyBy, repairJob, sortJobs, withWorkorder, workorderJob } from "@/lib/workshop";
+import { columnOf, defaultWorkshopColumns } from "@/lib/workshop-columns";
 
 const TZ = "America/Vancouver";
 const rules = [0, 1, 2, 3, 4, 5, 6].map((weekday) => ({ weekday, capacity: weekday <= 1 ? 0 : 3, windowStart: "12:00", windowEnd: "17:15", maxConcurrent: 1 }));
@@ -63,5 +64,61 @@ describe("workshop jobs", () => {
     const late = buildJob(sr, { appointment: appt, unit: unit("booked", "a"), order: null }, at("2026-09-05", "12:00"), now);
     const early = buildJob(sr, { appointment: appt, unit: unit("booked", "b"), order: null }, at("2026-09-04", "12:00"), now);
     expect(sortJobs([late, early]).map((j) => j.unitId)).toEqual(["b", "a"]);
+  });
+});
+
+describe("Lightspeed work orders on the board", () => {
+  // Vancouver's status list, 2026-11-16 (id, name, systemValue).
+  const VAN: [number, string, string | null][] = [
+    [27, "Appointment", null], [7, "Parts On Order", null], [30, "Diagnosis", null], [15, "Parts on hold", null], [31, "Waiting For Response", null],
+    [1, "Open", "open"], [22, "Needs Testing", null], [28, "In Progress", null], [32, "QC Check", null], [4, "Finished", "finished"], [23, "Build", null],
+    [17, "Floor Bike Repair", null], [16, "URGENT", null], [29, "Build To Be Scheduled", null], [25, "Build for FLOOR", null], [6, "Warranty", null],
+    [14, "Parts arrived - next in the queue", null], [12, "Needs a test ride", null], [13, "CA# Not ready", null], [8, "CA# Ready for Pick up", null],
+    [24, "Ready to ship", null], [18, "Floor Bike Repair - Waiting on parts", null], [19, "Floor Bike Repair - High Priority ", null], [2, "Estimate", "estimate"],
+    [9, "Customer contacted", null], [5, "Done & Paid", "paid"], [3, "Waiting", "waiting"], [11, "Shop Inventory", null],
+  ];
+  const statuses = VAN.map(([id, name, systemValue]) => ({ id, name, systemValue }));
+
+  it("suggests columns from Vancouver's status names", () => {
+    const c = defaultWorkshopColumns(statuses);
+    const names = (ids: number[]) => ids.map((id) => VAN.find((v) => v[0] === id)![1]).sort();
+    expect(names(c.todo)).toEqual(["Appointment", "Build", "Build To Be Scheduled", "Build for FLOOR", "Diagnosis", "Floor Bike Repair", "Floor Bike Repair - High Priority ", "Open", "Parts arrived - next in the queue", "URGENT"].sort());
+    expect(names(c.doing)).toEqual(["In Progress", "Needs Testing", "Needs a test ride", "QC Check"].sort());
+    expect(names(c.parts)).toEqual(["Floor Bike Repair - Waiting on parts", "Parts On Order", "Parts on hold", "Waiting For Response", "Warranty"].sort());
+    expect(names(c.ready)).toEqual(["CA# Ready for Pick up", "Finished", "Ready to ship"].sort());
+    for (const off of [2, 5, 3, 11, 13]) expect(columnOf(c, off)).toBeNull();
+  });
+
+  const wo = (over: Partial<Parameters<typeof workorderJob>[0]> = {}) => ({ id: "10249", statusId: 1, customerName: "Tom Becker", item: "Juggernaut Classic · Black", note: "Brake bleed, rear pads\nCall when done", employeeId: "7", etaOut: at("2026-09-05", "13:30"), timeIn: at("2026-09-05", "09:30"), ...over });
+
+  it("a work order starts the repair time before it's due, and shows the mechanic and the first note line", () => {
+    const j = workorderJob(wo(), { column: "todo", status: "Open", mechanic: "Jordan Lee", repairMinutes: 60 }, at("2026-09-05", "11:00"));
+    expect(j).toMatchObject({ kind: "repair", column: "todo", title: "Juggernaut Classic · Black", note: "Brake bleed, rear pads", mechanic: "Jordan Lee", source: "lightspeed", late: false });
+    expect(j.startBy.toISOString()).toBe(at("2026-09-05", "12:30").toISOString());
+    expect(j.href).toContain("10249");
+    expect(workorderJob(wo(), { column: "todo", status: "Open", mechanic: null, repairMinutes: 60 }, at("2026-09-05", "12:45")).late).toBe(true);
+    expect(workorderJob(wo(), { column: "parts", status: "Parts On Order", mechanic: null, repairMinutes: 60 }, at("2026-09-06", "12:00")).late).toBe(false);
+  });
+
+  it("no due date sorts last and is never late; shop bikes and builds are told apart", () => {
+    const undated = workorderJob(wo({ etaOut: null }), { column: "todo", status: "Open", mechanic: null, repairMinutes: 60 }, at("2026-09-05", "11:00"));
+    expect(undated).toMatchObject({ noDate: true, late: false });
+    const dated = workorderJob(wo({ id: "2" }), { column: "todo", status: "Open", mechanic: null, repairMinutes: 60 }, at("2026-09-05", "11:00"));
+    expect(sortJobs([undated, dated]).map((j) => j.workorderId)).toEqual(["2", "10249"]);
+    expect(workorderJob(wo({ customerName: "" }), { column: "todo", status: "Floor Bike Repair", mechanic: null, repairMinutes: 60 }, at("2026-09-05", "11:00")).kind).toBe("floor");
+    expect(workorderJob(wo(), { column: "todo", status: "Build", mechanic: null, repairMinutes: 60 }, at("2026-09-05", "11:00")).kind).toBe("build");
+    expect(workorderJob(wo({ item: "", note: "" }), { column: "todo", status: "Open", mechanic: null, repairMinutes: 60 }, at("2026-09-05", "11:00")).title).toBe("Work order #10249");
+  });
+
+  it("a booked repair follows its work order's column; a bike keeps Kickstand's build status", () => {
+    const columns = defaultWorkshopColumns(statuses);
+    const ctx = { columns, statusName: (id: number) => VAN.find((v) => v[0] === id)![1], mechanicName: (id: string | null) => (id === "7" ? "Jordan Lee" : null) };
+    const booking = { id: "b1", startsAt: at("2026-09-05", "15:00"), endsAt: at("2026-09-05", "16:00"), customerName: "Ahmed Ali", lsWorkorderId: "10249" };
+    const repair = repairJob({ booking, type: { name: "Tune-up", durationMin: 60 } }, at("2026-09-05", "12:00"));
+    expect(withWorkorder(repair, wo({ statusId: 7 }), ctx, at("2026-09-05", "12:00"))).toMatchObject({ column: "parts", status: "Parts On Order", mechanic: "Jordan Lee" });
+    expect(withWorkorder(repair, undefined, ctx, at("2026-09-05", "12:00")).column).toBe("todo");
+    const sr = showroom();
+    const build = buildJob(sr, { appointment: { onDate: "2026-09-05", startsAt: at("2026-09-05", "14:00") }, unit: unit("building"), order: null }, at("2026-09-05", "10:00"), at("2026-09-05", "09:00"));
+    expect(withWorkorder(build, wo({ statusId: 4 }), ctx, at("2026-09-05", "09:00"))).toMatchObject({ column: "doing", mechanic: "Jordan Lee", status: "Finished" });
   });
 });

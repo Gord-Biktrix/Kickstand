@@ -155,6 +155,13 @@
       "when": 1794703050194,
       "tag": "0021_graceful_shinobi_shaw",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1794856009537,
+      "tag": "0022_amused_stature",
+      "breakpoints": true
     }
   ]
 }

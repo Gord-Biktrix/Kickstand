@@ -5,7 +5,8 @@ import { requireUser } from "@/lib/auth";
 import { currentShowroom } from "@/lib/current-showroom";
 import { sp, type SearchParams } from "@/lib/flash";
 import { listViews, listWorkorderStatuses, unassignedStatuses } from "@/lib/workorders";
-import { deleteViewAction, saveViewAction } from "../../actions";
+import { BOARD_COLUMNS, columnOf, workshopColumns } from "@/lib/workshop-columns";
+import { deleteViewAction, saveViewAction, saveWorkshopColumnsAction } from "../../actions";
 
 export const metadata = { title: "Views" };
 
@@ -17,6 +18,8 @@ export default async function ViewsSettingsPage({ searchParams }: { searchParams
   const [views, statuses] = await Promise.all([listViews(db, showroom), listWorkorderStatuses(db)]);
   const editing = views.find((v) => v.id === sp(q.edit)) ?? null;
   const free = unassignedStatuses(statuses, views);
+  const columns = workshopColumns(showroom.settings, statuses);
+  const usingDefaults = showroom.settings.workshop_columns === null;
 
   // Plain render helper (not a component) so React doesn't see a new component type on every render.
   const statusPicker = (selected: number[], prefix: string) => (
@@ -38,7 +41,35 @@ export default async function ViewsSettingsPage({ searchParams }: { searchParams
     <div>
       <PageHeader title="Work-order views" subtitle="Cut the Lightspeed work-order list into the views your team thinks in. A view is a name plus the statuses it shows; a status can be in several views." />
       <Flash ok={sp(q.ok)} error={sp(q.error)} />
-      <div className="grid gap-6 lg:grid-cols-2">
+      {statuses.length > 0 && (
+        <Card
+          title="Workshop board columns"
+          action={!usingDefaults ? <form action={saveWorkshopColumnsAction.bind(null, true)}><button type="submit" className="btn btn-sm">Reset to suggested</button></form> : undefined}
+        >
+          <p className="mb-3 text-sm text-muted">
+            Which column each Lightspeed status sits in on the Workshop board. &ldquo;Not on the board&rdquo; hides it (estimates, paid, shop inventory).
+            {usingDefaults && " These are suggestions from the status names until you save."}
+          </p>
+          <form action={saveWorkshopColumnsAction.bind(null, false)} className="space-y-3">
+            <div className="grid gap-x-6 gap-y-2 sm:grid-cols-2">
+              {statuses.map((s) => (
+                <label key={s.id} className="flex items-center justify-between gap-3 text-sm">
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span className="inline-block h-2.5 w-2.5 shrink-0 rounded-full border border-border" style={{ background: s.htmlColor ?? "transparent" }} aria-hidden />
+                    <span className="truncate">{s.name}</span>
+                  </span>
+                  <select name={`col_${s.id}`} defaultValue={columnOf(columns, s.id) ?? ""} className="input h-9 w-44 shrink-0">
+                    {BOARD_COLUMNS.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
+                    <option value="">Not on the board</option>
+                  </select>
+                </label>
+              ))}
+            </div>
+            <button type="submit" className="btn btn-primary">Save columns</button>
+          </form>
+        </Card>
+      )}
+      <div className="mt-6 grid gap-6 lg:grid-cols-2">
         <Card title={editing ? `Edit “${editing.name}”` : "New view"} action={editing ? <a href="/app/settings/views" className="btn btn-sm">Cancel</a> : undefined}>
           <form action={saveViewAction} className="space-y-4">
             {editing && <input type="hidden" name="id" value={editing.id} />}

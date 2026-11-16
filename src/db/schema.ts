@@ -327,6 +327,13 @@ export const lsWorkorderStatuses = pgTable("ls_workorder_statuses", {
  * clock and the Sync button; rows that are no longer open are deleted. `unit_id` links the ones Kickstand
  * created (units.ls_workorder_id).
  */
+/** Lightspeed employees (account-wide), so the Workshop board can show who a work order is assigned to. */
+export const lsEmployees = pgTable("ls_employees", {
+  id: text("id").primaryKey(), // Lightspeed employeeID
+  name: text("name").notNull(),
+  syncedAt: timestamp("synced_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const lsWorkorders = pgTable(
   "ls_workorders",
   {
@@ -467,6 +474,7 @@ export const workorderViews = pgTable("workorder_views", {
 
 export type LsWorkorder = typeof lsWorkorders.$inferSelect;
 export type LsWorkorderStatus = typeof lsWorkorderStatuses.$inferSelect;
+export type LsEmployee = typeof lsEmployees.$inferSelect;
 export type WorkorderView = typeof workorderViews.$inferSelect;
 export type BookingType = typeof bookingTypes.$inferSelect;
 export type Booking = typeof bookings.$inferSelect;

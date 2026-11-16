@@ -31,6 +31,7 @@ import { googleEnabled } from "@/lib/google-auth";
 import { mailerKind } from "@/lib/mailer";
 import { syncSpecialOrders } from "@/lib/special-orders";
 import { deleteView, saveView, syncWorkorders } from "@/lib/workorders";
+import type { BoardColumn } from "@/lib/workshop-columns";
 
 /** Run a mutation and land back on `returnTo` with a flash; auth errors surface the same way. */
 async function run(returnTo: string, fn: () => Promise<string | void>): Promise<never> {
@@ -610,6 +611,25 @@ export async function saveViewAction(formData: FormData) {
     const statusIds = formData.getAll("status_ids").map((v) => Number(v));
     const v = await saveView(db, { showroom, id, name: str(formData, "name"), statusIds, actor: user.id });
     return `${id ? "Updated" : "Created"} view “${v.name}” (${v.statusIds.length} status${v.statusIds.length === 1 ? "" : "es"}).`;
+  });
+}
+
+/** Settings › Views: which Lightspeed status goes in which Workshop column. `reset` goes back to the suggestions. */
+export async function saveWorkshopColumnsAction(reset: boolean, formData: FormData) {
+  return run("/app/settings/views", async () => {
+    const user = await requireActor("manager");
+    const showroom = await currentShowroom(user);
+    if (reset) {
+      await patchShowroomSettings(db, showroom.id, { workshop_columns: null });
+      return "Workshop columns back to the suggestions.";
+    }
+    const cols: Record<BoardColumn, number[]> = { todo: [], doing: [], parts: [], ready: [] };
+    for (const [key, value] of formData.entries()) {
+      const m = /^col_(\d+)$/.exec(key);
+      if (m && typeof value === "string" && value in cols) cols[value as BoardColumn].push(Number(m[1]));
+    }
+    await patchShowroomSettings(db, showroom.id, { workshop_columns: cols });
+    return "Workshop columns saved.";
   });
 }
 

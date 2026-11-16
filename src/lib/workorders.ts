@@ -6,9 +6,10 @@
  */
 import { and, asc, eq, inArray } from "drizzle-orm";
 import type { Db } from "@/db/client";
-import { lsWorkorders, lsWorkorderStatuses, units, workorderViews, type LsWorkorder, type LsWorkorderStatus, type WorkorderView } from "@/db/schema";
+import { lsEmployees, lsWorkorders, lsWorkorderStatuses, units, workorderViews, type LsWorkorder, type LsWorkorderStatus, type WorkorderView } from "@/db/schema";
 import { logEvent } from "./events";
 import { asList, getConnection, LightspeedClient } from "./lightspeed";
+import { logger } from "./logger";
 import type { ShowroomCtx } from "./showroom";
 
 export type WorkorderStatusRow = { id: number; name: string; systemValue: string | null; sortOrder: number; htmlColor: string | null; archived: boolean };
@@ -21,6 +22,8 @@ export type WorkorderRow = {
 export interface WorkorderSource {
   statuses(): Promise<WorkorderStatusRow[]>;
   openWorkorders(shopID: number): Promise<WorkorderRow[]>;
+  /** Mechanics' names for the Workshop board. Optional: a source without it leaves names as they were. */
+  employees?(): Promise<{ id: string; name: string }[]>;
 }
 
 const date = (v: unknown): Date | null => {
@@ -44,6 +47,9 @@ export class LightspeedWorkorderSource implements WorkorderSource {
       htmlColor: s.htmlColor ? String(s.htmlColor) : null,
       archived: String(s.archived) === "true",
     }));
+  }
+  async employees(): Promise<{ id: string; name: string }[]> {
+    return (await this.client.listEmployees()).map((e) => ({ id: e.employeeID, name: e.name }));
   }
   async openWorkorders(shopID: number): Promise<WorkorderRow[]> {
     const paid = (await this.statuses()).filter((s) => s.systemValue === "paid").map((s) => s.id);
@@ -93,6 +99,17 @@ export async function syncWorkorders(dbx: Db, args: { showroom: ShowroomCtx; act
       .insert(lsWorkorderStatuses)
       .values({ id: st.id, name: st.name, systemValue: st.systemValue, sortOrder: st.sortOrder, htmlColor: st.htmlColor, archived: st.archived, syncedAt: now })
       .onConflictDoUpdate({ target: lsWorkorderStatuses.id, set: { name: st.name, systemValue: st.systemValue, sortOrder: st.sortOrder, htmlColor: st.htmlColor, archived: st.archived, syncedAt: now } });
+  }
+
+  if (source.employees) {
+    try {
+      for (const e of await source.employees()) {
+        await dbx.insert(lsEmployees).values({ id: e.id, name: e.name, syncedAt: now }).onConflictDoUpdate({ target: lsEmployees.id, set: { name: e.name, syncedAt: now } });
+      }
+    } catch (err) {
+      // Names are nice to have; the work orders still sync without them.
+      logger.warn({ err: err instanceof Error ? err.message : String(err) }, "lightspeed employees not synced");
+    }
   }
 
   const open = await source.openWorkorders(shopID);

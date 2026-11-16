@@ -4,6 +4,7 @@ import type { Db } from "@/db/client";
 import { units } from "@/db/schema";
 import { patchShowroomSettings, type ShowroomCtx } from "@/lib/showroom";
 import { deleteView, listViews, listWorkorders, listWorkorderStatuses, saveView, syncWorkorders, unassignedStatuses, type WorkorderRow, type WorkorderSource, type WorkorderStatusRow } from "@/lib/workorders";
+import { workshopJobs } from "@/lib/workshop";
 import { makeOrder, makeUnit, resetDb, testDb } from "./helpers";
 
 const STATUSES: WorkorderStatusRow[] = [
@@ -21,6 +22,7 @@ class Fake implements WorkorderSource {
   constructor(public open: WorkorderRow[]) {}
   async statuses() { return STATUSES; }
   async openWorkorders() { return this.open; }
+  async employees() { return [{ id: "27", name: "Jordan Lee" }]; }
 }
 
 describe("work-order mirror and views", () => {
@@ -52,6 +54,27 @@ describe("work-order mirror and views", () => {
     const r2 = await syncWorkorders(db, { showroom, actor: "test", source: src });
     expect(r2).toMatchObject({ open: 1, added: 0, updated: 1, closed: 1 });
     expect((await listWorkorders(db, showroom)).map((w) => `${w.id}:${w.statusId}`)).toEqual(["9106:8"]);
+  });
+
+  it("puts mapped work orders on the Workshop board with the mechanic's name, once each", async () => {
+    const order = await makeOrder(db, showroom);
+    const unit = await makeUnit(db, showroom, order.id);
+    await db.update(units).set({ lsWorkorderId: "9106" }).where(eq(units.id, unit.id));
+    await syncWorkorders(db, { showroom, actor: "test", source: new Fake([
+      wo({ id: "9106", statusId: 1 }), // the bike's own work order: not a second card
+      wo({ id: "300", statusId: 1 }), // walk-in repair → To do
+      wo({ id: "301", statusId: 8, employeeId: null }), // → Ready
+      wo({ id: "302", statusId: 3 }), // "Waiting": off the board
+    ]) });
+    const jobs = await workshopJobs(db, showroom, new Date("2026-09-05T17:00:00Z"));
+    const ls = jobs.filter((j) => j.source === "lightspeed");
+    expect(ls.map((j) => `${j.workorderId}:${j.column}`).sort()).toEqual(["300:todo", "301:ready"]);
+    expect(ls.find((j) => j.workorderId === "300")).toMatchObject({ mechanic: "Jordan Lee", customer: "Test Test", status: "Open" });
+    expect(ls.find((j) => j.workorderId === "301")?.mechanic).toBeNull();
+    // A store's own mapping wins over the suggestions.
+    await patchShowroomSettings(db, showroom.id, { workshop_columns: { todo: [], doing: [1], parts: [3], ready: [] } });
+    const own = await workshopJobs(db, { ...showroom, settings: { ...showroom.settings, workshop_columns: { todo: [], doing: [1], parts: [3], ready: [] } } }, new Date("2026-09-05T17:00:00Z"));
+    expect(own.filter((j) => j.source === "lightspeed").map((j) => `${j.workorderId}:${j.column}`).sort()).toEqual(["300:doing", "302:parts"]);
   });
 
   it("views are named sets of statuses and filter the list", async () => {

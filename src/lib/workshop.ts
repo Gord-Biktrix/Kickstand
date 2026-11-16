@@ -1,11 +1,13 @@
 import { and, asc, between, eq, inArray, ne } from "drizzle-orm";
 import type { Db } from "@/db/client";
-import { appointments, bookings, bookingTypes, orders, units, type Appointment, type Booking, type BookingType, type Order, type Unit } from "@/db/schema";
+import { appointments, bookings, bookingTypes, lsEmployees, lsWorkorders, lsWorkorderStatuses, orders, units, type Appointment, type Booking, type BookingType, type LsWorkorder, type Order, type Unit } from "@/db/schema";
 import { buildDeadline } from "./build-schedule";
 import { effectiveCapacity, type OverrideLike, type RuleLike } from "./capacity";
 import { getCapacityConfig } from "./showroom";
 import type { ShowroomCtx } from "./showroom";
 import { addLocalDays, endOfLocalDay, localToUtc, toLocalDate, type LocalDate } from "./time";
+import { columnOf, workshopColumns, type BoardColumn, type WorkshopColumns } from "./workshop-columns";
+import { lightspeedWorkorderUrl } from "./workorders";
 
 /**
  * The Workshop board: every job on the bench, with the time it has to start.
@@ -13,14 +15,20 @@ import { addLocalDays, endOfLocalDay, localToUtc, toLocalDate, type LocalDate } 
  *   ready by = when the customer needs it (build deadline for a pickup, end of the appointment for a repair)
  *   start by = ready by − how long the job takes
  *
- * Builds take `settings.build_minutes`; repairs take the service type's duration. A job is late when
- * it hasn't started by its start-by (to do) or isn't done by its ready-by (in progress).
+ * Builds take `settings.build_minutes`; booked repairs take the service type's duration; other Lightspeed
+ * work orders take `settings.repair_minutes` before their due time. A job is late when it hasn't started by
+ * its start-by (to do) or isn't done by its ready-by (in progress). Waiting on parts is never "late".
+ *
+ * Every open Lightspeed work order whose status is mapped to a column (Settings › Views) is on the board too,
+ * so walk-ins and floor-bike repairs written at the counter show up beside Kickstand's own builds and bookings.
+ * A work order Kickstand made for a bike or a booking isn't shown twice: it rides on that job instead.
  */
-export type JobColumn = "todo" | "doing" | "ready";
+export type JobColumn = BoardColumn;
 
 export type WorkshopJob = {
   id: string;
-  kind: "build" | "repair";
+  /** floor = the shop's own bike (no customer). */
+  kind: "build" | "repair" | "floor";
   column: JobColumn;
   title: string;
   customer: string | null;
@@ -36,6 +44,15 @@ export type WorkshopJob = {
   tag: string | null;
   workorderId: string | null;
   href: string;
+  /** Lightspeed's status name and the mechanic on the work order, when there is one. */
+  status: string | null;
+  mechanicId: string | null;
+  mechanic: string | null;
+  /** A Lightspeed work order with no due date: sorted last, never late. */
+  noDate: boolean;
+  /** Kickstand's own job (bike pickup or booking) or a work order written in Lightspeed. */
+  source: "kickstand" | "lightspeed";
+  note: string | null;
 };
 
 type BuildInput = { appointment: Pick<Appointment, "onDate" | "startsAt">; unit: Pick<Unit, "id" | "status" | "model" | "boxTag" | "lsWorkorderId">; order: Pick<Order, "customerName"> | null };
@@ -70,6 +87,12 @@ export function buildJob(showroom: ShowroomCtx, r: BuildInput, readyBy: Date, no
     tag: r.unit.boxTag,
     workorderId: r.unit.lsWorkorderId,
     href: `/app/units/${r.unit.id}`,
+    status: null,
+    mechanicId: null,
+    mechanic: null,
+    noDate: false,
+    source: "kickstand",
+    note: null,
   };
 }
 
@@ -93,11 +116,70 @@ export function repairJob(r: RepairInput, now: Date): WorkshopJob {
     tag: null,
     workorderId: booking.lsWorkorderId,
     href: `/app/bookings/${booking.id}`,
+    status: null,
+    mechanicId: null,
+    mechanic: null,
+    noDate: false,
+    source: "kickstand",
+    note: null,
+  };
+}
+
+type WoInput = Pick<LsWorkorder, "id" | "statusId" | "customerName" | "item" | "note" | "employeeId" | "etaOut" | "timeIn">;
+
+/** A work order written in Lightspeed (walk-in, floor bike, build made at the counter). */
+export function workorderJob(
+  w: WoInput,
+  ctx: { column: BoardColumn; status: string; mechanic: string | null; repairMinutes: number },
+  now: Date,
+): WorkshopJob {
+  const { column } = ctx;
+  const noDate = !w.etaOut;
+  const readyBy = w.etaOut ?? new Date(8.64e15);
+  const minutes = ctx.repairMinutes;
+  const startBy = noDate ? readyBy : new Date(readyBy.getTime() - minutes * 60_000);
+  const kind: WorkshopJob["kind"] = /build/i.test(ctx.status) ? "build" : !w.customerName || /floor/i.test(ctx.status) ? "floor" : "repair";
+  const firstLine = w.note.split(/\r?\n/).map((l) => l.trim()).find(Boolean) ?? "";
+  const late = noDate ? false : column === "todo" ? now > startBy : column === "doing" ? now > readyBy : false;
+  return {
+    id: `w:${w.id}`,
+    kind,
+    column,
+    title: w.item || firstLine || `Work order #${w.id}`,
+    customer: w.customerName || null,
+    minutes,
+    startBy,
+    readyBy,
+    visitAt: w.timeIn ?? readyBy,
+    late,
+    unitId: null,
+    bookingId: null,
+    tag: null,
+    workorderId: w.id,
+    href: lightspeedWorkorderUrl(w.id),
+    status: ctx.status,
+    mechanicId: w.employeeId,
+    mechanic: ctx.mechanic,
+    noDate,
+    source: "lightspeed",
+    note: w.item && firstLine ? firstLine : null,
   };
 }
 
 export function sortJobs(jobs: WorkshopJob[]): WorkshopJob[] {
   return [...jobs].sort((a, b) => a.startBy.getTime() - b.startBy.getTime() || a.visitAt.getTime() - b.visitAt.getTime());
+}
+
+/** A Kickstand job whose work order is open in Lightspeed takes its column, status and mechanic from it. */
+export function withWorkorder(job: WorkshopJob, w: WoInput | undefined, ctx: { columns: WorkshopColumns; statusName: (id: number) => string; mechanicName: (id: string | null) => string | null }, now: Date): WorkshopJob {
+  if (!w) return job;
+  const status = ctx.statusName(w.statusId);
+  const mechanic = ctx.mechanicName(w.employeeId);
+  // Bikes keep Kickstand's own build status (Build / Ready buttons); a booked repair follows Lightspeed.
+  const col = job.kind === "repair" ? columnOf(ctx.columns, w.statusId) : null;
+  const column = col ?? job.column;
+  const late = column === "todo" ? now > job.startBy : column === "doing" ? now > job.readyBy : false;
+  return { ...job, column, late, status, mechanicId: w.employeeId, mechanic };
 }
 
 /**
@@ -145,5 +227,28 @@ export async function workshopJobs(dbx: Db, showroom: ShowroomCtx, now = new Dat
     );
   const repairs = repairRows.map((r) => repairJob(r, now));
 
-  return sortJobs([...builds, ...repairs]);
+  // Lightspeed work orders (the hourly mirror), their statuses and mechanics.
+  const [wos, statuses, employees] = await Promise.all([
+    dbx.select().from(lsWorkorders).where(eq(lsWorkorders.showroomId, showroom.id)),
+    dbx.select().from(lsWorkorderStatuses),
+    dbx.select().from(lsEmployees),
+  ]);
+  const columns = workshopColumns(showroom.settings, statuses);
+  const statusById = new Map(statuses.map((st) => [st.id, st.name]));
+  const nameById = new Map(employees.map((e) => [e.id, e.name]));
+  const ctx = { columns, statusName: (id: number) => statusById.get(id) ?? `Status ${id}`, mechanicName: (id: string | null) => (id ? (nameById.get(id) ?? null) : null) };
+  const woById = new Map(wos.map((w) => [w.id, w]));
+  const kickstandJobs = [...builds, ...repairs].map((j) => withWorkorder(j, j.workorderId ? woById.get(j.workorderId) : undefined, ctx, now));
+
+  const claimed = new Set(kickstandJobs.map((j) => j.workorderId).filter(Boolean));
+  const linkedToBikes = await dbx.select({ wo: units.lsWorkorderId }).from(units).where(and(eq(units.showroomId, showroom.id), inArray(units.lsWorkorderId, wos.length ? wos.map((w) => w.id) : ["-"])));
+  for (const r of linkedToBikes) if (r.wo) claimed.add(r.wo);
+  const lsJobs = wos.flatMap((w) => {
+    if (claimed.has(w.id) || w.unitId) return [];
+    const column = columnOf(columns, w.statusId);
+    if (!column) return [];
+    return [workorderJob(w, { column, status: ctx.statusName(w.statusId), mechanic: ctx.mechanicName(w.employeeId), repairMinutes: showroom.settings.repair_minutes }, now)];
+  });
+
+  return sortJobs([...kickstandJobs, ...lsJobs]);
 }
