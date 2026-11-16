@@ -194,7 +194,7 @@ describe("new tickets from the POS screen", () => {
       const url = String(input);
       calls.push({ method: init?.method ?? "GET", url, body: init?.body ? JSON.parse(String(init.body)) : null });
       const json = (data: unknown) => new Response(JSON.stringify(data), { status: 200, headers: { "Content-Type": "application/json" } });
-      if (url.includes("Serialized.json?customerID=9020")) return json({ Serialized: [{ serializedID: "501", description: "Stunner Lite 3", colorName: "Peach", sizeName: "", serial: "BX24-55120" }, { serializedID: "502", description: "Swift CVT 2", colorName: "Green", serial: "" }] });
+      if (url.includes("Serialized.json?customerID=9020")) return json({ Serialized: [{ serializedID: "501", description: "Stunner Lite 3", colorName: "Peach", sizeName: "", serial: "BX24-55120" }, { serializedID: "502", description: "Swift CVT 2", colorName: "Green", serial: "" }, { serializedID: "503", description: "", colorName: "", sizeName: "", serial: "S022YP01561", Item: { description: "86-Kutty X 2 Yellow" } }] });
       if (url.endsWith("Workorder.json")) return json({ Workorder: { workorderID: "10301" } });
       return new Response("{}", { status: 404 });
     });
@@ -202,6 +202,7 @@ describe("new tickets from the POS screen", () => {
     expect(bikes.map((b) => [b.label, b.serial, b.serializedId])).toEqual([
       ["Stunner Lite 3 · Peach", "BX24-55120", "501"],
       ["Swift CVT 2 · Green", null, "502"],
+      ["Kutty X 2 Yellow", "S022YP01561", "503"],
     ]);
     await createTicket(db, { showroom: van, ticket: { ...base, serializedId: "501", customer: { lsCustomerId: "9020", name: "Ahmed Ali" } }, actor: "s" });
     expect(calls.find((c) => c.url.endsWith("Workorder.json"))!.body).toMatchObject({ serializedID: 501 });

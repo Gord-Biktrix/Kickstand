@@ -94,6 +94,11 @@ export async function searchCustomers(db: Db, query: string, client?: Lightspeed
   return { matches: [...out.values()].slice(0, 10), lightspeedFailed };
 }
 
+/** "86-Kutty X 2 Yellow" → "Kutty X 2 Yellow": drops the numeric code some Lightspeed item names start with. */
+export function bikeName(raw: string): string {
+  return raw.replace(/^\d+\s*-\s*/, "").trim();
+}
+
 export type CustomerBike = { key: string; label: string; serial: string | null; serializedId: string | null; source: string };
 
 /**
@@ -115,12 +120,18 @@ export async function customerBikes(db: Db, who: { lsCustomerId: string | null; 
   // Lightspeed first: its records carry the serial and can be attached to the work order.
   if (who.lsCustomerId && client) {
     try {
-      const res = await client.request<Record<string, unknown>>("GET", `Serialized.json?customerID=${encodeURIComponent(who.lsCustomerId)}&limit=20`);
+      // The bike's name usually lives on the linked Item ("86-Juggernaut Classic Duo Step-Thru 17\" Champagne 24x4");
+      // the serialized record's own description, size and colour are often blank.
+      const res = await client.request<Record<string, unknown>>("GET", `Serialized.json?customerID=${encodeURIComponent(who.lsCustomerId)}&limit=20&load_relations=${encodeURIComponent('["Item"]')}`);
       for (const r of asList<Record<string, unknown>>(res, "Serialized")) {
         if (String(r.archived) === "true") continue;
+        const item = r.Item as Record<string, unknown> | undefined;
+        const name = bikeName(String(r.description ?? "").trim() || String(item?.description ?? "").trim());
+        const serial = r.serial ? String(r.serial).trim() : "";
+        const label = [name, r.colorName, r.sizeName].filter((x) => x && String(x).trim()).map(String).join(" · ") || (serial ? `Bike · serial ${serial}` : "");
         add(
-          { label: [r.description, r.colorName, r.sizeName].filter((x) => x && String(x).trim()).map(String).join(" · "), serial: r.serial ? String(r.serial) : null, serializedId: r.serializedID ? String(r.serializedID) : null, source: "Lightspeed" },
-          [r.description, r.colorName].filter((x) => x && String(x).trim()).map(String).join(" · "),
+          { label, serial: serial || null, serializedId: r.serializedID ? String(r.serializedID) : null, source: "Lightspeed" },
+          [name, r.colorName].filter((x) => x && String(x).trim()).map(String).join(" · ") || label,
         );
       }
     } catch (err) {
