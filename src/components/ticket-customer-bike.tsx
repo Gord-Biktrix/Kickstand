@@ -49,7 +49,7 @@ export function TicketCustomerBike(props: { initial: Picked | null; initialNew: 
 
   function choose(b: Bike) {
     setChosen(b.key);
-    setBike(b.label);
+    setBike(b.label.startsWith("Bike · serial") ? "" : b.label);
     setSerial(b.serial ?? "");
     setSid(b.serializedId ?? "");
   }
@@ -74,12 +74,13 @@ export function TicketCustomerBike(props: { initial: Picked | null; initialNew: 
           <div className="flex flex-wrap gap-2" role="group" aria-label="Their bikes">
             {loading && <span className="text-sm text-muted">Looking up their bikes…</span>}
             {bikes.map((b) => (
-              <button key={b.key} type="button" onClick={() => choose(b)} aria-pressed={chosen === b.key} title={b.source} className={`min-h-11 rounded-full border px-4 text-sm font-semibold ${chosen === b.key ? "border-[#17181a] bg-[#17181a] text-white" : "border-border bg-card"}`}>
-                {b.label}
+              <button key={b.key} type="button" onClick={() => choose(b)} aria-pressed={chosen === b.key} title={b.source} className={`min-h-12 rounded-xl border px-4 py-2 text-left ${chosen === b.key ? "border-[#17181a] bg-[#17181a] text-white" : "border-border bg-card"}`}>
+                <span className="block text-sm font-semibold">{b.label.startsWith("Bike · serial") ? "Bike (no name in Lightspeed)" : b.label}</span>
+                {b.serial && <span className={`block text-xs font-normal ${chosen === b.key ? "text-white/70" : "text-muted"}`}>Serial {b.serial}</span>}
               </button>
             ))}
             {!loading && (
-              <button type="button" onClick={other} aria-pressed={chosen === "other"} className={`min-h-11 rounded-full border px-4 text-sm font-semibold ${chosen === "other" ? "border-[#17181a] bg-[#17181a] text-white" : "border-border bg-card"}`}>+ Other bike</button>
+              <button type="button" onClick={other} aria-pressed={chosen === "other"} className={`min-h-12 rounded-xl border px-4 text-sm font-semibold ${chosen === "other" ? "border-[#17181a] bg-[#17181a] text-white" : "border-border bg-card"}`}>+ Other bike</button>
             )}
           </div>
         )}

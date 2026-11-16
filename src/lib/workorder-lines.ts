@@ -79,13 +79,15 @@ export async function itemNames(db: Db, ids: string[], client: LightspeedClient,
   await Promise.all(
     missing.map(async (id) => {
       try {
-        const r = await client.request<Record<string, unknown>>("GET", `Item/${id}.json?load_relations=${encodeURIComponent('["Prices"]')}`);
+        // Plain GET: Prices come with the Item already, and Lightspeed refuses relations it doesn't allow.
+        const r = await client.request<Record<string, unknown>>("GET", `Item/${id}.json`);
         const item = (r.Item ?? {}) as Record<string, unknown>;
         const entry = { name: String(item.description ?? "").trim(), price: itemPrice(item) };
         names.set(id, entry);
         await db.insert(lsItems).values({ id, ...entry, fetchedAt: now }).onConflictDoUpdate({ target: lsItems.id, set: { ...entry, fetchedAt: now } });
-      } catch {
+      } catch (err) {
         // A missing item still shows as a line, just without its name.
+        logger.warn({ err: err instanceof Error ? err.message : String(err), itemId: id }, "lightspeed item not read");
       }
     }),
   );
