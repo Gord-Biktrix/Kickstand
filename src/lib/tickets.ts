@@ -3,9 +3,9 @@
  * and what it needs, and Kickstand creates the Lightspeed work order in Open, due when it should be ready. It lands
  * in To do on the Workshop board straight away (Kickstand's copy is written at once, not at the next sync).
  */
-import { and, desc, ilike, inArray, isNotNull, like, or } from "drizzle-orm";
+import { and, desc, eq, ilike, inArray, isNotNull, like, ne, or, sql } from "drizzle-orm";
 import type { Db } from "@/db/client";
-import { bookings, events, lsWorkorders, orders } from "@/db/schema";
+import { bookings, events, lsWorkorders, orders, units } from "@/db/schema";
 import { asList, LightspeedClient, lightspeedEnabled } from "./lightspeed";
 import { logger } from "./logger";
 import { normalizePhone } from "./phone";
@@ -94,6 +94,64 @@ export async function searchCustomers(db: Db, query: string, client?: Lightspeed
   return { matches: [...out.values()].slice(0, 10), lightspeedFailed };
 }
 
+export type CustomerBike = { key: string; label: string; serial: string | null; serializedId: string | null; source: string };
+
+/**
+ * The bikes a customer has, for the New ticket bike buttons: bikes they picked up through Kickstand, bikes on
+ * their past work orders, and bikes registered to them in Lightspeed (Serialized items, which carry the serial).
+ */
+export async function customerBikes(db: Db, who: { lsCustomerId: string | null; phone: string | null; email: string | null }, client?: LightspeedClient): Promise<CustomerBike[]> {
+  const out = new Map<string, CustomerBike>();
+  // The same bike can come from Lightspeed and from a pickup with a size added, so match on model + colour.
+  const add = (b: Omit<CustomerBike, "key">, sameAs?: string) => {
+    const label = b.label.replace(/\s+/g, " ").trim();
+    if (!label) return;
+    const key = (sameAs ?? label).replace(/\s+/g, " ").trim().toLowerCase();
+    const prev = out.get(key);
+    if (!prev) out.set(key, { key, ...b, label });
+    else if (!prev.serial && b.serial) out.set(key, { ...prev, serial: b.serial, serializedId: b.serializedId ?? prev.serializedId });
+  };
+
+  // Lightspeed first: its records carry the serial and can be attached to the work order.
+  if (who.lsCustomerId && client) {
+    try {
+      const res = await client.request<Record<string, unknown>>("GET", `Serialized.json?customerID=${encodeURIComponent(who.lsCustomerId)}&limit=20`);
+      for (const r of asList<Record<string, unknown>>(res, "Serialized")) {
+        if (String(r.archived) === "true") continue;
+        add(
+          { label: [r.description, r.colorName, r.sizeName].filter((x) => x && String(x).trim()).map(String).join(" · "), serial: r.serial ? String(r.serial) : null, serializedId: r.serializedID ? String(r.serializedID) : null, source: "Lightspeed" },
+          [r.description, r.colorName].filter((x) => x && String(x).trim()).map(String).join(" · "),
+        );
+      }
+    } catch (err) {
+      logger.warn({ err: err instanceof Error ? err.message : String(err) }, "lightspeed bikes not read");
+    }
+  }
+
+  const phone = normalizePhone(who.phone);
+  const conds = [
+    who.lsCustomerId ? eq(orders.lsCustomerId, who.lsCustomerId) : undefined,
+    phone ? eq(orders.customerPhone, phone) : undefined,
+    who.email ? sql`lower(${orders.customerEmail}) = ${who.email.toLowerCase()}` : undefined,
+  ].filter(Boolean);
+  if (conds.length) {
+    const rows = await db
+      .select({ model: units.model, colour: units.colour, size: units.size })
+      .from(units)
+      .innerJoin(orders, eq(orders.id, units.orderId))
+      .where(and(or(...conds), ne(units.kind, "parts")))
+      .orderBy(desc(units.receivedAt))
+      .limit(10);
+    for (const r of rows) add({ label: [r.model, r.colour, r.size].filter(Boolean).join(" · "), serial: null, serializedId: null, source: "Bought here" }, [r.model, r.colour].filter(Boolean).join(" · "));
+  }
+
+  if (who.lsCustomerId) {
+    const rows = await db.select({ item: lsWorkorders.item, serial: lsWorkorders.serial }).from(lsWorkorders).where(eq(lsWorkorders.customerId, who.lsCustomerId)).limit(10);
+    for (const r of rows) add({ label: r.item, serial: r.serial, serializedId: null, source: "Past work order" });
+  }
+  return [...out.values()].slice(0, 6);
+}
+
 export type NewTicket = {
   customer: { lsCustomerId: string; name: string } | { name: string; phone: string; email: string };
   bike: string;
@@ -102,6 +160,8 @@ export type NewTicket = {
   said: string;
   readyBy: Date;
   employeeId: string | null;
+  /** A Lightspeed Serialized (the customer's registered bike) to attach to the work order. */
+  serializedId?: string | null;
 };
 
 export class TicketError extends Error {}
@@ -148,6 +208,7 @@ export async function createTicket(db: Db, args: { showroom: ShowroomCtx; ticket
       workorderStatusID: ls.open_status_id,
       hookIn: ticket.service.slice(0, 40),
       note,
+      ...(ticket.serializedId ? { serializedID: Number(ticket.serializedId) } : {}),
     });
   } catch (err) {
     logger.warn({ err: err instanceof Error ? err.message : String(err) }, "ticket not created in Lightspeed");

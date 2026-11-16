@@ -622,7 +622,7 @@ export async function createTicketAction(formData: FormData) {
   const user = await requireActor("staff");
   const showroom = await currentShowroom(user);
   const keep = new URLSearchParams();
-  for (const k of ["c", "nn", "np", "ne", "bike", "serial", "service", "said", "ready", "mech"]) {
+  for (const k of ["c", "nn", "np", "ne", "bike", "serial", "sid", "service", "said", "ready", "mech"]) {
     const val = str(formData, k);
     if (val) keep.set(k, val);
   }
@@ -640,7 +640,7 @@ export async function createTicketAction(formData: FormData) {
     const readyBy = d && t ? localToUtc(d, t.slice(0, 5), showroom.timezone) : new Date(Date.now() + showroom.settings.repair_minutes * 60_000);
     const id = await createTicket(db, {
       showroom,
-      ticket: { customer, bike: str(formData, "bike"), serial: str(formData, "serial"), service: str(formData, "service"), said: str(formData, "said"), readyBy, employeeId: str(formData, "mech") || null },
+      ticket: { customer, bike: str(formData, "bike"), serial: str(formData, "serial"), service: str(formData, "service"), said: str(formData, "said"), readyBy, employeeId: str(formData, "mech") || null, serializedId: str(formData, "sid") || null },
       actor: user.id,
     });
     target = withFlash(`${jobPath(`w:${id}`)}`, { ok: `Ticket created: Lightspeed work order #${id}.` });

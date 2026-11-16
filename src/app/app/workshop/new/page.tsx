@@ -7,7 +7,7 @@ import { requireUser } from "@/lib/auth";
 import { currentShowroom } from "@/lib/current-showroom";
 import { sp, type SearchParams } from "@/lib/flash";
 import { lightspeedEnabled } from "@/lib/lightspeed";
-import { CustomerPicker } from "@/components/customer-picker";
+import { TicketCustomerBike } from "@/components/ticket-customer-bike";
 import { SERVICE_MENU } from "@/lib/tickets";
 import { createTicketAction } from "../../actions";
 
@@ -54,16 +54,7 @@ export default async function NewTicketPage({ searchParams }: { searchParams: Pr
           </div>
 
           <div className="flex flex-col gap-4 p-4">
-            <div className="flex min-w-0 flex-col gap-2">
-              <p className={label}>Customer</p>
-              <CustomerPicker initial={initialPick} initialNew={{ nn: v("nn"), np: v("np"), ne: v("ne") }} />
-            </div>
-
-            <div className="grid gap-2">
-              <label htmlFor="bike" className={label}>Bike</label>
-              <input id="bike" name="bike" defaultValue={v("bike")} placeholder="e.g. Stunner Lite 3, peach" className="input h-11 text-base" />
-              <input name="serial" defaultValue={v("serial")} placeholder="Serial (optional)" aria-label="Serial number" className="input h-11 text-base" />
-            </div>
+            <TicketCustomerBike initial={initialPick} initialNew={{ nn: v("nn"), np: v("np"), ne: v("ne") }} bike={v("bike")} serial={v("serial")} sid={v("sid")} />
 
             <div className="grid gap-2">
               <label htmlFor="said" className={label}>What they say</label>

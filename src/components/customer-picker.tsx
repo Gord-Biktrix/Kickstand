@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 
 type Match = { key: string; lsCustomerId: string | null; name: string; phone: string | null; email: string | null; source: string };
-type Picked = { value: string; name: string; sub: string };
+export type Picked = { value: string; name: string; sub: string };
 
 const encode = (m: Match) => [m.lsCustomerId ?? "", m.name, m.phone ?? "", m.email ?? ""].join("|");
 const subOf = (m: Pick<Match, "phone" | "email">) => [m.phone, m.email].filter(Boolean).join(" · ");
@@ -13,7 +13,7 @@ const subOf = (m: Pick<Match, "phone" | "email">) => [m.phone, m.email].filter(B
  * as you type (Kickstand's own plus Lightspeed's). Tap one and it becomes the ticket's customer, with Change to pick
  * again; or "Add … as a new customer" opens three fields. Posts as `c` (a match, or "new") plus nn / np / ne.
  */
-export function CustomerPicker({ initial, initialNew }: { initial: Picked | null; initialNew: { nn: string; np: string; ne: string } }) {
+export function CustomerPicker({ initial, initialNew, onPick }: { initial: Picked | null; initialNew: { nn: string; np: string; ne: string }; onPick?: (p: Picked | null) => void }) {
   const [picked, setPicked] = useState<Picked | null>(initial);
   const [adding, setAdding] = useState(!initial && !!(initialNew.nn || initialNew.np));
   const [query, setQuery] = useState("");
@@ -48,7 +48,9 @@ export function CustomerPicker({ initial, initialNew }: { initial: Picked | null
   }, [query]);
 
   function pick(m: Match) {
-    setPicked({ value: encode(m), name: m.name, sub: subOf(m) || m.source });
+    const p = { value: encode(m), name: m.name, sub: subOf(m) || m.source };
+    setPicked(p);
+    onPick?.(p);
     setAdding(false);
     setQuery("");
     setResults([]);
@@ -60,6 +62,7 @@ export function CustomerPicker({ initial, initialNew }: { initial: Picked | null
     setNewFields((f) => ({ nn: f.nn || (digits.length >= 4 || q.includes("@") ? "" : q), np: f.np || (digits.length >= 4 ? q : ""), ne: f.ne || (q.includes("@") ? q : "") }));
     setAdding(true);
     setPicked(null);
+    onPick?.(null);
     setResults([]);
   }
 
@@ -78,7 +81,7 @@ export function CustomerPicker({ initial, initialNew }: { initial: Picked | null
           <span className="block font-bold">{picked.name}</span>
           <span className="block truncate text-xs text-muted">{picked.sub}</span>
         </span>
-        <button type="button" onClick={() => { setPicked(null); setTimeout(() => input.current?.focus(), 0); }} className="btn btn-sm">Change</button>
+        <button type="button" onClick={() => { setPicked(null); onPick?.(null); setTimeout(() => input.current?.focus(), 0); }} className="btn btn-sm">Change</button>
       </div>
     );
   }

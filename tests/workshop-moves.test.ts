@@ -183,6 +183,32 @@ describe("new tickets from the POS screen", () => {
     expect((await db.select().from(lsWorkorders)).map((w) => w.id)).toEqual(["10300"]);
   });
 
+  it("lists a customer's bikes from Lightspeed (with serial) and from pickups, and attaches a Lightspeed bike to the ticket", async () => {
+    const { customerBikes, createTicket } = await import("@/lib/tickets");
+    const { makeOrder, makeUnit } = await import("./helpers");
+    const { LightspeedClient } = await import("@/lib/lightspeed");
+    const order = await makeOrder(db, van, { customerName: "Ahmed Ali", customerPhone: "+16045550187", lsCustomerId: "9020" });
+    await makeUnit(db, van, order.id, { model: "Swift CVT 2", colour: "Green" });
+    const calls: Call[] = [];
+    setLightspeedFetch(async (input, init) => {
+      const url = String(input);
+      calls.push({ method: init?.method ?? "GET", url, body: init?.body ? JSON.parse(String(init.body)) : null });
+      const json = (data: unknown) => new Response(JSON.stringify(data), { status: 200, headers: { "Content-Type": "application/json" } });
+      if (url.includes("Serialized.json?customerID=9020")) return json({ Serialized: [{ serializedID: "501", description: "Stunner Lite 3", colorName: "Peach", sizeName: "", serial: "BX24-55120" }, { serializedID: "502", description: "Swift CVT 2", colorName: "Green", serial: "" }] });
+      if (url.endsWith("Workorder.json")) return json({ Workorder: { workorderID: "10301" } });
+      return new Response("{}", { status: 404 });
+    });
+    const bikes = await customerBikes(db, { lsCustomerId: "9020", phone: null, email: null }, new LightspeedClient(db));
+    expect(bikes.map((b) => [b.label, b.serial, b.serializedId])).toEqual([
+      ["Stunner Lite 3 · Peach", "BX24-55120", "501"],
+      ["Swift CVT 2 · Green", null, "502"],
+    ]);
+    await createTicket(db, { showroom: van, ticket: { ...base, serializedId: "501", customer: { lsCustomerId: "9020", name: "Ahmed Ali" } }, actor: "s" });
+    expect(calls.find((c) => c.url.endsWith("Workorder.json"))!.body).toMatchObject({ serializedID: 501 });
+    // Without Lightspeed, the pickup bike still shows.
+    expect((await customerBikes(db, { lsCustomerId: null, phone: "604 555 0187", email: null })).map((b) => b.label)).toEqual(["Swift CVT 2 · Green · Regular"]);
+  });
+
   it("finds customers by the last digits of their phone", async () => {
     const { searchCustomers } = await import("@/lib/tickets");
     const { makeOrder } = await import("./helpers");
