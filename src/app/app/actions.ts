@@ -695,6 +695,21 @@ export async function readyJobAction(jobId: string, back: string, formData: Form
   });
 }
 
+/** Settings › Services: the Lightspeed items shown as New ticket tiles. `reset` goes back to Kickstand's suggestions. */
+export async function saveServiceTilesAction(reset: boolean, formData: FormData) {
+  return run("/app/settings/services", async () => {
+    const user = await requireActor("manager");
+    const showroom = await currentShowroom(user);
+    if (reset) {
+      await patchShowroomSettings(db, showroom.id, { workshop_service_items: null });
+      return "Back to Kickstand's suggestions.";
+    }
+    const ids = [...new Set(formData.getAll("item").filter((v): v is string => typeof v === "string" && /^\d+$/.test(v)))];
+    await patchShowroomSettings(db, showroom.id, { workshop_service_items: ids });
+    return `Saved: ${ids.length} service${ids.length === 1 ? "" : "s"} on New ticket.`;
+  });
+}
+
 /** Settings › Views: which Lightspeed status goes in which Workshop column. `reset` goes back to the suggestions. */
 export async function saveWorkshopColumnsAction(reset: boolean, formData: FormData) {
   return run("/app/settings/views", async () => {

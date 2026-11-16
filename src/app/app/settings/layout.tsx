@@ -9,6 +9,7 @@ const TABS: { href: string; label: string; min?: Role; store?: boolean }[] = [
   { href: "/app/settings/capacity", label: "Capacity", store: true },
   { href: "/app/settings/program", label: "Program", store: true },
   { href: "/app/settings/views", label: "Views", store: true },
+  { href: "/app/settings/services", label: "Services", store: true },
   { href: "/app/settings/staff", label: "Staff" },
   { href: "/app/settings/import", label: "Import", store: true },
   { href: "/app/settings/stores", label: "Stores", min: "admin" },

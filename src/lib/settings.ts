@@ -6,6 +6,8 @@ export const settingsSchema = z.object({
   build_minutes: z.number().int().min(15).max(600).default(120),
   /** Workshop board: how long a Lightspeed repair takes when nothing says otherwise (start by = due − this). */
   repair_minutes: z.number().int().min(15).max(600).default(60),
+  /** New ticket: the Lightspeed items (itemIDs) staff ticked in Settings › Services to show as tiles. Null = Kickstand picks. */
+  workshop_service_items: z.array(z.string()).nullable().default(null),
   /** Workshop: how many bikes can be worked on at once. New tickets' ready-by shares the queue across these. */
   workshop_benches: z.number().int().min(1).max(20).default(2),
   /**

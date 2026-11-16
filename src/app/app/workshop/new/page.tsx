@@ -18,7 +18,8 @@ import { lightspeedEnabled } from "@/lib/lightspeed";
 import { formatLongDateFromLocal, formatTime } from "@/lib/time";
 import { getTypeAvailability } from "@/lib/type-slots";
 import { SERVICE_MENU } from "@/lib/tickets";
-import { loadServiceItems } from "@/lib/service-items";
+import { loadServiceItems, pickTiles } from "@/lib/service-items";
+import { listShowrooms } from "@/lib/showroom";
 import { LightspeedClient } from "@/lib/lightspeed";
 import { lightspeedReason } from "@/lib/workorder-lines";
 import type { ShowroomCtx } from "@/lib/showroom";
@@ -52,11 +53,12 @@ export default async function NewTicketPage({ searchParams }: { searchParams: Pr
   let tilesNote = "Lightspeed isn't linked for this store, so these are Kickstand's starter services.";
   if (ls) {
     try {
-      const items = await loadServiceItems(new LightspeedClient(db));
+      const others = (await listShowrooms(db)).filter((x) => x.id !== showroom.id).map((x) => `${x.name} ${x.slug}`);
+      const items = pickTiles(await loadServiceItems(new LightspeedClient(db)), { selected: showroom.settings.workshop_service_items, store: `${showroom.name} ${showroom.slug}`, otherStores: others });
       if (items.length) {
         tiles = items.map((i) => ({ key: i.itemId, name: i.name, minutes: i.minutes ?? showroom.settings.repair_minutes, itemId: i.itemId, price: i.price, labour: i.labour }));
         tilesNote = "";
-      } else tilesNote = "No service or labour items found in Lightspeed (categories named Labour, Service or Repair), so these are Kickstand's starter services.";
+      } else tilesNote = "None of your Lightspeed items look like workshop services, so these are Kickstand's starter services. Pick yours in Settings › Services.";
     } catch (err) {
       tilesNote = `Lightspeed didn't send its service items (${lightspeedReason(err)}), so these are Kickstand's starter services.`;
     }
