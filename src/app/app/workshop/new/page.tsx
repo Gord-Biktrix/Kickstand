@@ -1,40 +1,33 @@
 import Link from "next/link";
-import { formatInZone } from "@/lib/time";
 import { db } from "@/db/client";
 import { lsEmployees } from "@/db/schema";
-import { zoneLabel } from "@/app/book/zone";
-import { BookingCalendar, BookingInfo } from "@/components/booking-calendar";
 import { TicketPos } from "@/components/ticket-pos";
 import { Flash } from "@/components/ui";
 import { requireUser } from "@/lib/auth";
-import { colorOf, ensureDefaultBookingTypes, ensureStoreHours, listBookingTypes, LOCATION_LABEL, type BookingLocation } from "@/lib/booking-types";
+import { ensureDefaultBookingTypes, ensureStoreHours, listBookingTypes } from "@/lib/booking-types";
 import { benchLoads, estimateReady } from "@/lib/ready-estimate";
 import { workshopJobs } from "@/lib/workshop";
 import { currentShowroom } from "@/lib/current-showroom";
 import { sp, type SearchParams } from "@/lib/flash";
 import { lightspeedEnabled } from "@/lib/lightspeed";
-import { formatLongDateFromLocal, formatTime } from "@/lib/time";
+import { formatInZone, formatShortDateFromLocal, formatTime } from "@/lib/time";
 import { getTypeAvailability } from "@/lib/type-slots";
 import { SERVICE_MENU } from "@/lib/tickets";
 import { loadServiceItems, pickTiles } from "@/lib/service-items";
 import { listShowrooms } from "@/lib/showroom";
 import { LightspeedClient } from "@/lib/lightspeed";
 import { lightspeedReason } from "@/lib/workorder-lines";
-import type { ShowroomCtx } from "@/lib/showroom";
-import type { BookingType } from "@/db/schema";
 import { createTicketAction } from "../../actions";
 
 export const metadata = { title: "New ticket" };
 
-/** The ticket fields that ride along in the URL while the Schedule popup is open (and after an error). */
-const KEEP = ["c", "nn", "np", "ne", "bike", "serial", "sid", "service", "labour", "part", "said", "mech"] as const;
 const dropLabel = (d: Date, tz: string) => formatInZone(d, tz, "EEE d MMM, h:mm a").replace("AM", "am").replace("PM", "pm");
 const all = (v: string | string[] | undefined) => (Array.isArray(v) ? v : v ? [v] : []);
 
 /**
- * New ticket, POS style (components/ticket-pos.tsx): check the bike in now, or "Schedule for later", which opens
- * the booking calendar (the same one staff use to book for a customer) for the store's service type with the
- * customer, bike and notes carried over. Booking creates the service appointment and its Lightspeed work order.
+ * New ticket, POS style (components/ticket-pos.tsx): check the bike in now, or schedule the service for the
+ * earliest open slot or a day and time from the calendar on the ticket. Booking creates the service appointment
+ * (store's service type) and its Lightspeed work order with the ticket's lines.
  */
 export default async function NewTicketPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const q = await searchParams;
@@ -78,15 +71,13 @@ export default async function NewTicketPage({ searchParams }: { searchParams: Pr
   const [pLs, pName, pPhone, pEmail] = picked && picked !== "new" ? picked.split("|") : [];
   const initialPick = picked && picked !== "new" && pName ? { value: picked, name: pName, sub: [pPhone, pEmail].filter(Boolean).join(" · ") || (pLs ? "Lightspeed customer" : "") } : null;
 
-  // Drop-off: now (walk-in), the earliest open service slot, or a time picked in the calendar (comes back as ?dropoff=).
+  // Schedule service: now (walk-in), the earliest open service slot, or a day and time from the calendar.
   const serviceDays = serviceType ? await getTypeAvailability(db, { showroom, type: serviceType }) : [];
-  const firstSlot = serviceDays.flatMap((d) => d.slots).find((sl) => sl.startsAt > now);
-  const earliest = firstSlot ? { iso: firstSlot.startsAt.toISOString(), label: dropLabel(firstSlot.startsAt, tz) } : null;
-  const pickedDrop = v("dropoff") && v("dropoff") !== "now" && !Number.isNaN(new Date(v("dropoff")).getTime()) ? { iso: new Date(v("dropoff")).toISOString(), label: dropLabel(new Date(v("dropoff")), tz) } : null;
-
-  const keep = new URLSearchParams();
-  for (const k of KEEP) for (const val of all(q[k])) keep.append(k, val);
-  const ticketUrl = `/app/workshop/new${keep.size ? `?${keep.toString()}` : ""}`;
+  const days = serviceDays
+    .map((d) => ({ date: d.date, label: formatShortDateFromLocal(d.date), slots: d.slots.filter((sl) => sl.startsAt > now).map((sl) => ({ iso: sl.startsAt.toISOString(), time: formatTime(sl.startsAt, tz), label: dropLabel(sl.startsAt, tz) })) }))
+    .filter((d) => d.slots.length);
+  // After an error the chosen time comes back in ?dropoff=.
+  const initialDropoff = days.flatMap((d) => d.slots).some((sl) => sl.iso === v("dropoff")) ? v("dropoff") : "now";
 
   return (
     <div>
@@ -104,9 +95,8 @@ export default async function NewTicketPage({ searchParams }: { searchParams: Pr
           employees={employees}
           tz={tz}
           enabled={ls}
-          canSchedule={!!serviceType}
-          earliest={earliest}
-          pickedDropoff={pickedDrop}
+          days={days}
+          initialDropoff={initialDropoff}
           defaultMinutes={showroom.settings.repair_minutes}
           benches={benches}
           loads={loads}
@@ -115,81 +105,7 @@ export default async function NewTicketPage({ searchParams }: { searchParams: Pr
         />
       </form>
 
-      {v("schedule") === "1" && serviceType && (
-        <SchedulePopup
-          q={q}
-          ticketUrl={ticketUrl}
-          keep={keep}
-          customer={initialPick ? { ls: pLs ?? "", name: pName ?? "", phone: pPhone ?? "", email: pEmail ?? "" } : { ls: "", name: v("nn"), phone: v("np"), email: v("ne") }}
-          bike={v("bike")}
-          serial={v("serial")}
-          sid={v("sid")}
-          note={[[...services, ...labour.map((m) => `labour ${m} min`), ...partLines.map((p) => p.split("|").slice(2).join("|") || "part")].join(" + "), v("said")].filter(Boolean).join(". ")}
-          type={serviceType}
-          showroom={showroom}
-        />
-      )}
     </div>
   );
 }
 
-
-/** The booking calendar as a popup over the ticket, then the booking details with everything carried over. */
-async function SchedulePopup(props: {
-  q: SearchParams;
-  ticketUrl: string;
-  keep: URLSearchParams;
-  customer: { ls: string; name: string; phone: string; email: string };
-  bike: string;
-  serial: string;
-  sid: string;
-  note: string;
-  type: BookingType;
-  showroom: ShowroomCtx;
-}) {
-  const { q, type, showroom, customer } = props;
-  const tz = showroom.timezone;
-  const days = await getTypeAvailability(db, { showroom, type });
-  const date = sp(q.date);
-  const time = sp(q.time);
-  const slot = date && time && sp(q.confirm) === "1" ? days.find((d) => d.date === date)?.slots.find((s) => s.time === time) : undefined;
-  const base = `/app/workshop/new?${new URLSearchParams([...props.keep.entries(), ["schedule", "1"]]).toString()}`;
-
-  return (
-    <div role="dialog" aria-modal="true" aria-labelledby="sched-title" className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 p-4 sm:p-8">
-      <div className="w-full max-w-6xl rounded-2xl bg-[#edebe7] p-4 shadow-2xl sm:p-6">
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h2 id="sched-title" className="text-xl font-extrabold">Schedule {customer.name || "the customer"} · {type.name}</h2>
-            <p className="text-sm text-muted">{[props.bike, props.note].filter(Boolean).join(" · ") || "Pick a time."}</p>
-          </div>
-          <Link href={props.ticketUrl} className="btn">Close</Link>
-        </div>
-
-        {slot ? (
-          <div className="mx-auto max-w-md rounded-xl border border-border bg-card p-5 text-center">
-            <p className="text-sm text-muted">Drop-off</p>
-            <p className="text-lg font-bold">{formatLongDateFromLocal(date!)} · {formatTime(slot.startsAt, tz)}</p>
-            <div className="mt-4 flex flex-wrap justify-center gap-2">
-              <Link href={`${props.ticketUrl}${props.ticketUrl.includes("?") ? "&" : "?"}dropoff=${encodeURIComponent(slot.startsAt.toISOString())}`} className="btn btn-primary min-h-12 px-6">Use this time</Link>
-              <Link href={`${base}&date=${date}`} className="btn min-h-12">Pick another time</Link>
-            </div>
-            <p className="mt-3 text-xs text-muted">Back on the ticket, &ldquo;Book drop-off&rdquo; books it and puts the lines on the work order.</p>
-          </div>
-        ) : (
-          <BookingCalendar
-            days={days}
-            tz={tz}
-            base={base}
-            month={sp(q.month)}
-            date={date}
-            time={time}
-            accent={colorOf(type.color).hex}
-            zone={zoneLabel(tz)}
-            info={<BookingInfo brand={showroom.name} title={type.name} durationMin={type.durationMin} location={LOCATION_LABEL[type.location as BookingLocation]} />}
-          />
-        )}
-      </div>
-    </div>
-  );
-}

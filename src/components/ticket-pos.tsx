@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Picked } from "./customer-picker";
 import { ReadyPicker } from "./ready-picker";
+import { Wheel } from "./booking-calendar-picker";
 import { TicketCustomerBike } from "./ticket-customer-bike";
 import { estimateReady, type WeeklyHours } from "@/lib/ready-estimate";
 import { zoneAt } from "@/lib/tz-rules";
@@ -15,6 +16,7 @@ type Line = { key: string; kind: "service" | "labour" | "part"; name: string; mi
 
 const label = "text-[11px] font-extrabold tracking-wider text-[#3d3f43] uppercase";
 const LABOUR = [15, 30, 45, 60, 90];
+const ACCENT = "#c2410c";
 const mins = (m: number) => (m < 60 ? `${m} min` : `${Math.floor(m / 60)} h${m % 60 ? ` ${m % 60} min` : ""}`);
 const money = (n: number) => new Intl.NumberFormat("en-CA", { style: "currency", currency: "CAD" }).format(n);
 
@@ -54,11 +56,10 @@ export function TicketPos(props: {
   employees: { id: string; name: string }[];
   tz: string;
   enabled: boolean;
-  canSchedule: boolean;
-  /** The next open service slot, for "Earliest available". */
-  earliest: { iso: string; label: string } | null;
-  /** A drop-off picked in the calendar popup. */
-  pickedDropoff: { iso: string; label: string } | null;
+  /** Open service-appointment slots by day (empty when the store has no service type). The first is "Earliest available". */
+  days: ServiceDay[];
+  /** "now", or a slot's ISO time (comes back after an error). */
+  initialDropoff: string;
   defaultMinutes: number;
   benches: number;
   loads: number[];
@@ -94,8 +95,9 @@ export function TicketPos(props: {
   const [partsState, setPartsState] = useState<"idle" | "loading" | "error">("idle");
   const [partsError, setPartsError] = useState("");
   const seq = useRef(0);
-  const [dropoff, setDropoff] = useState<string>(props.pickedDropoff?.iso ?? "now");
-  const dropLabel = dropoff === "now" ? "" : dropoff === props.earliest?.iso ? props.earliest.label : (props.pickedDropoff?.label ?? "");
+  const [dropoff, setDropoff] = useState<string>(props.initialDropoff);
+  const earliest = props.days[0]?.slots[0] ?? null;
+  const dropLabel = props.days.flatMap((d) => d.slots).find((sl) => sl.iso === dropoff)?.label ?? "";
 
   const work = lines.reduce((s, l) => s + l.minutes * l.qty, 0);
   const partsTotal = lines.filter((l) => l.price != null).reduce((s, l) => s + (l.price ?? 0) * l.qty, 0);
@@ -153,26 +155,12 @@ export function TicketPos(props: {
         <div className="flex flex-col gap-3 border-b border-border bg-[#f7f6f3] px-4 py-3 text-sm">
           <input type="hidden" name="dropoff" value={dropoff} />
           <div>
-            <p className={label}>Drop-off</p>
-            <div className="mt-1.5 flex flex-wrap gap-2" role="radiogroup" aria-label="Drop-off">
+            <p className={label}>Schedule service</p>
+            <div className="mt-1.5 flex flex-wrap gap-2" role="radiogroup" aria-label="Schedule service">
               <DropButton on={dropoff === "now"} onClick={() => chooseDropoff("now")} title="Now" sub="walk-in" />
-              {props.earliest && <DropButton on={dropoff === props.earliest.iso} onClick={() => chooseDropoff(props.earliest!.iso)} title="Earliest available" sub={props.earliest.label} />}
-              {props.pickedDropoff && props.pickedDropoff.iso !== props.earliest?.iso && <DropButton on={dropoff === props.pickedDropoff.iso} onClick={() => chooseDropoff(props.pickedDropoff!.iso)} title="Picked" sub={props.pickedDropoff.label} />}
-              {props.canSchedule && (
-                <button
-                  type="submit"
-                  formAction="/app/workshop/new"
-                  formMethod="get"
-                  name="schedule"
-                  value="1"
-                  // Photos don't ride along in the address; add them after picking the time.
-                  onClick={(e) => e.currentTarget.form?.querySelectorAll<HTMLInputElement>('input[name="photo"]').forEach((i) => { i.disabled = true; })}
-                  className="min-h-12 rounded-lg border border-dashed border-[#cfcbc4] bg-card px-3 text-left text-sm font-semibold"
-                >
-                  Pick a time…
-                </button>
-              )}
+              {earliest && <DropButton on={dropoff === earliest.iso} onClick={() => chooseDropoff(earliest.iso)} title="Earliest available" sub={earliest.label} />}
             </div>
+            {props.days.length > 0 && <DayCalendar days={props.days} value={dropoff} onPick={chooseDropoff} />}
           </div>
           <div>
             <p className={label}>Ready by</p>
@@ -184,7 +172,7 @@ export function TicketPos(props: {
               )}
             </div>
             <p className="mt-1 text-xs text-muted">
-              {dropoff === "now" ? `${props.benches} bench${props.benches === 1 ? "" : "es"} · ${queueText(props.loads)}` : `From the drop-off at ${dropLabel}, in open hours`}
+              {dropoff === "now" ? `${props.benches} bench${props.benches === 1 ? "" : "es"} · ${queueText(props.loads)}` : `From ${dropLabel}, in open hours`}
               {readyTouched ? " · set by hand" : ""}
             </p>
           </div>
@@ -242,7 +230,7 @@ export function TicketPos(props: {
             <label className="mb-2 flex min-h-11 items-center gap-2 text-sm"><input type="checkbox" name="sms_consent" className="h-5 w-5" /> Customer agrees to texts about this booking</label>
           )}
           <button type="submit" disabled={!props.enabled} className="flex min-h-16 w-full items-center justify-center rounded-xl bg-[#ff6b1a] px-4 text-center text-lg font-extrabold text-[#17181a] disabled:opacity-50">
-            {dropoff === "now" ? "Check in · create ticket" : `Book drop-off · ${dropLabel}`}
+            {dropoff === "now" ? "Check in · create ticket" : `Book service · ${dropLabel}`}
           </button>
           <p className="mt-2 text-xs text-muted">{dropoff === "now" ? "Creates the Lightspeed work order now (Open, with the lines) and puts it in To do." : "Books the service appointment (the customer gets a confirmation) and puts the lines on its Lightspeed work order."}</p>
         </div>
@@ -411,7 +399,74 @@ function Tile({ name, sub, qty, onAdd, onStep, muted = false }: { name: string; 
   );
 }
 
-/** One drop-off choice: a title and the time under it. */
+type ServiceDay = { date: string; label: string; slots: { iso: string; time: string; label: string }[] };
+
+const WEEK = ["S", "M", "T", "W", "T", "F", "S"];
+const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+/** "YYYY-MM-DD" plus n days, as plain calendar maths. */
+function plusDays(d: string, n: number): string {
+  const [y, m, day] = d.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, day + n)).toISOString().slice(0, 10);
+}
+const weekdayOf = (d: string) => new Date(`${d}T12:00:00Z`).getUTCDay();
+
+/**
+ * The open days as small wheels, one month at a time (like the booking calendar); tap a day for its times, tap a
+ * time to schedule the service then.
+ */
+function DayCalendar({ days, value, onPick }: { days: ServiceDay[]; value: string; onPick: (iso: string) => void }) {
+  const picked = days.find((d) => d.slots.some((sl) => sl.iso === value));
+  const [open, setOpen] = useState<string | null>(picked?.date ?? null);
+  const months = [...new Set(days.map((d) => d.date.slice(0, 7)))];
+  const [month, setMonth] = useState(() => (picked?.date ?? days[0].date).slice(0, 7));
+  const at = Math.max(0, months.indexOf(month));
+  const byDate = new Map(days.map((d) => [d.date, d]));
+  const first = `${month}-01`;
+  const cells: string[] = [];
+  for (let d = plusDays(first, -weekdayOf(first)); d.slice(0, 7) <= month; d = plusDays(d, 1)) cells.push(d);
+  while (cells.length % 7) cells.push(plusDays(cells[cells.length - 1], 1));
+  const day = open ? byDate.get(open) : undefined;
+  return (
+    <div className="mt-3 rounded-xl border border-border bg-card p-3">
+      <div className="mb-1 flex items-center justify-between">
+        <button type="button" disabled={at === 0} onClick={() => setMonth(months[at - 1])} aria-label="Previous month" className="h-8 w-8 rounded-full text-lg hover:bg-[#f7f6f3] disabled:opacity-30">‹</button>
+        <p className="text-sm font-bold">{MONTHS[Number(month.slice(5)) - 1]} {month.slice(0, 4)}</p>
+        <button type="button" disabled={at >= months.length - 1} onClick={() => setMonth(months[at + 1])} aria-label="Next month" className="h-8 w-8 rounded-full text-lg hover:bg-[#f7f6f3] disabled:opacity-30">›</button>
+      </div>
+      <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-bold text-muted">{WEEK.map((w, i) => <span key={i}>{w}</span>)}</div>
+      <div className="mt-1 grid grid-cols-7 gap-1">
+        {cells.map((d) => {
+          if (d.slice(0, 7) !== month) return <span key={d} />;
+          const has = byDate.has(d);
+          const on = d === open;
+          const chosen = d === picked?.date;
+          return has ? (
+            <button key={d} type="button" onClick={() => setOpen(on ? null : d)} aria-pressed={on} aria-label={byDate.get(d)!.label} className="group relative mx-auto flex h-10 w-10 items-center justify-center text-sm font-semibold" style={{ color: on || chosen ? "#fff" : ACCENT }}>
+              <Wheel accent={ACCENT} selected={on || chosen} />
+              <span className="relative">{Number(d.slice(8))}</span>
+            </button>
+          ) : (
+            <span key={d} className="mx-auto flex h-10 w-10 items-center justify-center text-sm text-[#cfcbc4]">{Number(d.slice(8))}</span>
+          );
+        })}
+      </div>
+      {day && (
+        <div className="mt-3 border-t border-border pt-3">
+          <p className="mb-2 text-sm font-bold">{day.label}</p>
+          <div className="grid grid-cols-3 gap-1.5">
+            {day.slots.map((sl) => (
+              <button key={sl.iso} type="button" onClick={() => onPick(sl.iso)} aria-pressed={sl.iso === value} className={`rounded-lg border py-2 text-sm font-semibold ${sl.iso === value ? "border-[#c2410c] bg-[#c2410c] text-white" : "border-[#c2410c] text-[#9a3412] hover:bg-[#fff1e8]"}`}>
+                {sl.time}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** One schedule choice: a title and the time under it. */
 function DropButton({ on, onClick, title, sub }: { on: boolean; onClick: () => void; title: string; sub: string }) {
   return (
     <button type="button" role="radio" aria-checked={on} onClick={onClick} className={`min-h-12 rounded-lg border px-3 py-1.5 text-left ${on ? "border-[#17181a] bg-[#17181a] text-white" : "border-border bg-card"}`}>
