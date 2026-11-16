@@ -1,4 +1,4 @@
-import { formatInTimeZone } from "date-fns-tz";
+import { formatInZone } from "./time";
 import { and, desc, eq, sql } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import {
@@ -559,7 +559,7 @@ async function activeAppointment(dbx: Db, unitId: string): Promise<Appointment |
 
 /** "Saturday 10:00 am (5 Sep)" — weekday and time first, the date as a tie-breaker. Fits Hook Out. */
 function shortWhen(instant: Date, tz: string): string {
-  return `${formatInTimeZone(instant, tz, "EEEE h:mm aaa")} (${formatInTimeZone(instant, tz, "d MMM")})`;
+  return `${formatInZone(instant, tz, "EEEE h:mm aaa")} (${formatInZone(instant, tz, "d MMM")})`;
 }
 
 function receiptNote(showroom: ShowroomCtx, unit: Unit, order: Order | null, appt: Appointment | null, buildBy: LocalDate | null, assemblyDue: Date | null, previous: Appointment[] = []): string {

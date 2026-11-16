@@ -1,5 +1,5 @@
 import type { Appointment } from "@/db/schema";
-import { formatInTimeZone } from "date-fns-tz";
+import { formatInZone } from "./time";
 import { buildByDate, effectiveCapacity, type OverrideLike, type RuleLike } from "./capacity";
 import type { ShowroomCtx } from "./showroom";
 import { endOfLocalDay, localToUtc, minutesToTime, timeToMinutes, type LocalDate } from "./time";
@@ -53,7 +53,7 @@ function leadDeadline(
 ): BuildDeadline {
   const tz = showroom.timezone;
   let date: LocalDate = appt.onDate;
-  let minutes = timeToMinutes(formatInTimeZone(appt.startsAt, tz, "HH:mm"));
+  let minutes = timeToMinutes(formatInZone(appt.startsAt, tz, "HH:mm"));
   let left = Math.max(1, leadHours) * 60;
   const wholeDays = Math.floor(left / (WORK_DAY_HOURS * 60));
   for (let i = 0; i < wholeDays; i++) date = buildByDate(date, rules, overrides);

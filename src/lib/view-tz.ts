@@ -6,6 +6,7 @@
  */
 import type { TypeDay, TypeSlot } from "./type-slots";
 import { toLocalDate, type LocalDate } from "./time";
+import { zoneAt } from "./tz-rules";
 
 export function validTimeZone(tz: string | undefined | null): string | null {
   if (!tz || tz.length > 64 || !/^[A-Za-z_]+(\/[A-Za-z0-9_+-]+){0,2}$/.test(tz)) return null;
@@ -23,7 +24,7 @@ export function viewZone(param: string | undefined, storeTz: string): string {
 }
 
 function localHHMM(instant: Date, tz: string): string {
-  const parts = new Intl.DateTimeFormat("en-GB", { timeZone: tz, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(instant);
+  const parts = new Intl.DateTimeFormat("en-GB", { timeZone: zoneAt(tz, instant), hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(instant);
   const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "00";
   return `${get("hour")}:${get("minute")}`;
 }

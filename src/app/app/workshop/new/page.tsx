@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { formatInTimeZone } from "date-fns-tz";
+import { formatInZone } from "@/lib/time";
 import { db } from "@/db/client";
 import { lsEmployees } from "@/db/schema";
 import { zoneLabel } from "@/app/book/zone";
@@ -28,7 +28,7 @@ export const metadata = { title: "New ticket" };
 
 /** The ticket fields that ride along in the URL while the Schedule popup is open (and after an error). */
 const KEEP = ["c", "nn", "np", "ne", "bike", "serial", "sid", "service", "labour", "part", "said", "mech"] as const;
-const dropLabel = (d: Date, tz: string) => formatInTimeZone(d, tz, "EEE d MMM, h:mm a").replace("AM", "am").replace("PM", "pm");
+const dropLabel = (d: Date, tz: string) => formatInZone(d, tz, "EEE d MMM, h:mm a").replace("AM", "am").replace("PM", "pm");
 const all = (v: string | string[] | undefined) => (Array.isArray(v) ? v : v ? [v] : []);
 
 /**
@@ -71,7 +71,7 @@ export default async function NewTicketPage({ searchParams }: { searchParams: Pr
   const [hours, jobs] = await Promise.all([ensureStoreHours(db, showroom), workshopJobs(db, showroom, now)]);
   const benches = showroom.settings.workshop_benches;
   const loads = benchLoads(jobs, benches, now);
-  const ready = v("ready") || (work ? formatInTimeZone(estimateReady({ now, work, loads, hours, tz }), tz, "yyyy-MM-dd'T'HH:mm") : "");
+  const ready = v("ready") || (work ? formatInZone(estimateReady({ now, work, loads, hours, tz }), tz, "yyyy-MM-dd'T'HH:mm") : "");
 
   // After an error or while scheduling, the picked customer comes back in `c`.
   const picked = v("c");

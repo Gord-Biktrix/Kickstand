@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { formatInTimeZone } from "date-fns-tz";
+import { formatInZone } from "@/lib/time";
 import { db } from "@/db/client";
 import { Empty, Flash, PageHeader } from "@/components/ui";
 import { requireUser } from "@/lib/auth";
@@ -35,7 +35,7 @@ function when(d: Date, tz: string, today: string) {
   const date = toLocalDate(d, tz);
   if (date === today) return time;
   const thisWeek = date > today && date <= addLocalDays(today, 6);
-  return `${formatInTimeZone(d, tz, thisWeek ? "EEE" : "EEE d MMM")} ${time}`;
+  return `${formatInZone(d, tz, thisWeek ? "EEE" : "EEE d MMM")} ${time}`;
 }
 
 function hours(min: number) {

@@ -5,6 +5,7 @@ import type { Picked } from "./customer-picker";
 import { ReadyPicker } from "./ready-picker";
 import { TicketCustomerBike } from "./ticket-customer-bike";
 import { estimateReady, type WeeklyHours } from "@/lib/ready-estimate";
+import { zoneAt } from "@/lib/tz-rules";
 
 /** A service or labour tile: a Lightspeed item (itemId, price) or one of Kickstand's starter services. */
 type Service = { key: string; name: string; minutes: number; itemId?: string; price?: number | null };
@@ -19,7 +20,7 @@ const money = (n: number) => new Intl.NumberFormat("en-CA", { style: "currency",
 
 /** "2026-11-16T17:30" in the store's time zone. */
 function localValue(d: Date, tz: string): string {
-  const p = Object.fromEntries(new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(d).map((x) => [x.type, x.value]));
+  const p = Object.fromEntries(new Intl.DateTimeFormat("en-CA", { timeZone: zoneAt(tz, d), year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(d).map((x) => [x.type, x.value]));
   return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}`;
 }
 /** Ready-by default: after the benches' queue plus this work, in open hours (lib/ready-estimate.ts). */

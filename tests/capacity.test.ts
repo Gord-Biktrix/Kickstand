@@ -113,11 +113,11 @@ describe("slotsForDay (§6.2)", () => {
     expect(storageEstimateCents(unit, 2, settings, "2026-12-01", TZ)).toBe(15000); // capped
   });
 
-  it("keeps local wall-clock times across the DST fall-back", () => {
+  it("keeps local wall-clock times across 1 Nov 2026 (B.C. no longer falls back)", () => {
     const now = localToUtc("2026-10-20", "10:00", TZ);
     const inv = localToUtc("2026-10-20", "10:00", TZ);
     const pb = localToUtc("2026-11-10", "23:59:59", TZ);
-    // Sunday 1 Nov 2026 is the fall-back day; open Tuesday 3 Nov must still read 12:00–16:30.
+    // Sunday 1 Nov 2026 was the old fall-back day; B.C. now stays on UTC-7. Tuesday 3 Nov still reads 12:00–16:30.
     const slots = slotsForDay("2026-11-03", effectiveCapacity("2026-11-03", rules, []), {
       ...base,
       now,
@@ -126,7 +126,7 @@ describe("slotsForDay (§6.2)", () => {
     });
     expect(formatTime(slots[0].startsAt, TZ)).toBe("12:00 pm");
     expect(toLocalDate(slots[0].startsAt, TZ)).toBe("2026-11-03");
-    expect(slots[0].startsAt.toISOString()).toBe("2026-11-03T20:00:00.000Z"); // PST = UTC-8
+    expect(slots[0].startsAt.toISOString()).toBe("2026-11-03T19:00:00.000Z"); // UTC-7 year-round
     const before = slotsForDay("2026-10-27", effectiveCapacity("2026-10-27", rules, []), { ...base, now, invitedAt: inv, pickupBy: pb });
     expect(before[0].startsAt.toISOString()).toBe("2026-10-27T19:00:00.000Z"); // PDT = UTC-7
   });

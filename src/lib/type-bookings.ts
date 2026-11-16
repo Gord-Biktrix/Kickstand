@@ -9,7 +9,7 @@ import { bookingSlackMessage, bookingThreadReply, getSlackBot, postSlack, type B
 import { collectAnswers, readAnswers, readQuestions } from "./booking-questions";
 import type { Db, DbOrTx } from "@/db/client";
 import { bookings, bookingTypes, events, lsWorkorders, lsWorkorderStatuses, orders, type Booking, type BookingType } from "@/db/schema";
-import { formatInTimeZone } from "date-fns-tz";
+import { formatInZone } from "./time";
 import { LightspeedClient, lightspeedEnabled } from "./lightspeed";
 import { getCalendarWriter } from "./google-calendar";
 import { LOCATION_LABEL, type BookingLocation } from "./booking-types";
@@ -461,7 +461,7 @@ export async function syncBookingWorkorder(db: Db, args: { showroom: ShowroomCtx
     internalNote: `Kickstand booking ${baseUrl()}/app/bookings/${b.id}`,
     etaOut: b.startsAt.toISOString(),
     hookIn: type.name.slice(0, 40),
-    hookOut: b.status === "cancelled" ? "CANCELLED" : `Booked ${formatInTimeZone(b.startsAt, tz, "EEE d MMM h:mm aaa")}`,
+    hookOut: b.status === "cancelled" ? "CANCELLED" : `Booked ${formatInZone(b.startsAt, tz, "EEE d MMM h:mm aaa")}`,
   };
   try {
     const client = new LightspeedClient(db);

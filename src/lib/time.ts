@@ -1,20 +1,26 @@
 import { addDays, differenceInCalendarDays, format, getDay, parseISO } from "date-fns";
 import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
+import { zoneAt, zoneForLocal } from "./tz-rules";
 
 /** Calendar date in the showroom's zone, as YYYY-MM-DD. Compares lexicographically. */
 export type LocalDate = string;
 
+/** formatInTimeZone with the 2026 Canadian clock changes applied (lib/tz-rules.ts). Use this, not date-fns-tz. */
+export function formatInZone(instant: Date, tz: string, pattern: string): string {
+  return formatInTimeZone(instant, zoneAt(tz, instant), pattern);
+}
+
 export function toLocalDate(instant: Date, tz: string): LocalDate {
-  return formatInTimeZone(instant, tz, "yyyy-MM-dd");
+  return formatInZone(instant, tz, "yyyy-MM-dd");
 }
 
 export function localHour(instant: Date, tz: string): number {
-  return Number(formatInTimeZone(instant, tz, "H"));
+  return Number(formatInZone(instant, tz, "H"));
 }
 
 /** Local wall-clock (date + HH:mm[:ss]) to an instant, honouring DST for that date. */
 export function localToUtc(date: LocalDate, time: string, tz: string): Date {
-  return fromZonedTime(`${date}T${normalizeTime(time)}`, tz);
+  return fromZonedTime(`${date}T${normalizeTime(time)}`, zoneForLocal(tz, date));
 }
 
 export function startOfLocalDay(date: LocalDate, tz: string): Date {
@@ -63,7 +69,7 @@ export function minutesToTime(min: number): string {
 
 /** "Saturday 12 September" */
 export function formatLongDate(instant: Date, tz: string): string {
-  return formatInTimeZone(instant, tz, "EEEE d MMMM");
+  return formatInZone(instant, tz, "EEEE d MMMM");
 }
 
 export function formatLongDateFromLocal(date: LocalDate): string {
@@ -76,7 +82,7 @@ export function formatShortDateFromLocal(date: LocalDate): string {
 
 /** "1:30 pm" */
 export function formatTime(instant: Date, tz: string): string {
-  return formatInTimeZone(instant, tz, "h:mm aaa");
+  return formatInZone(instant, tz, "h:mm aaa");
 }
 
 /** "Saturday 12 September at 1:30 pm" */

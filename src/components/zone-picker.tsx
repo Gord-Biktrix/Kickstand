@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { CANADIAN_ZONE_NAMES } from "@/app/book/zone";
+import { zoneAt } from "@/lib/tz-rules";
 
 /** Point the page at another zone: drops the picked day and time, which are labelled in the old zone. */
 function zoneUrl(tz: string, keepSelection = false): string {
@@ -44,13 +45,14 @@ type ZoneRow = { tz: string; offset: string; minutes: number; abbr: string; labe
 /** "GMT-08:00", minutes east of UTC, and "PST" (or "GMT-12" where there's no common abbreviation). */
 function describe(tz: string, at: Date): ZoneRow | null {
   try {
-    const long = new Intl.DateTimeFormat("en-US", { timeZone: tz, timeZoneName: "longOffset" }).formatToParts(at).find((p) => p.type === "timeZoneName")?.value ?? "GMT";
+    const z = zoneAt(tz, at);
+    const long = new Intl.DateTimeFormat("en-US", { timeZone: z, timeZoneName: "longOffset" }).formatToParts(at).find((p) => p.type === "timeZoneName")?.value ?? "GMT";
     const m = /GMT([+-])(\d{2}):(\d{2})/.exec(long);
     const minutes = m ? (m[1] === "-" ? -1 : 1) * (Number(m[2]) * 60 + Number(m[3])) : 0;
     const offset = m ? `GMT${m[1]}${m[2]}:${m[3]}` : "GMT+00:00";
-    const short = new Intl.DateTimeFormat("en-US", { timeZone: tz, timeZoneName: "short" }).formatToParts(at).find((p) => p.type === "timeZoneName")?.value ?? "";
+    const short = new Intl.DateTimeFormat("en-US", { timeZone: z, timeZoneName: "short" }).formatToParts(at).find((p) => p.type === "timeZoneName")?.value ?? "";
     const abbr = CANADIAN_ZONE_NAMES[tz] ?? (/^GMT[+-]?\d*/.test(short) || !short ? (m ? `GMT${m[1]}${Number(m[2])}${m[3] !== "00" ? `:${m[3]}` : ""}` : "GMT") : short);
-    const now = new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "2-digit", minute: "2-digit" }).format(at);
+    const now = new Intl.DateTimeFormat("en-US", { timeZone: z, hour: "2-digit", minute: "2-digit" }).format(at);
     return { tz, offset, minutes, abbr, label: `${offset} ${tz} (${abbr})`, now };
   } catch {
     return null;

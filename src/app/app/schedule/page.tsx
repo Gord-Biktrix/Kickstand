@@ -6,7 +6,7 @@ import { currentShowroom } from "@/lib/current-showroom";
 import { sp, type SearchParams } from "@/lib/flash";
 import { weekSchedule, type ScheduleDay, type ScheduleRow } from "@/lib/queries";
 import { addLocalDays, formatLongDateFromLocal, formatShortDateFromLocal, formatTime, localToUtc, minutesToTime, timeToMinutes, toLocalDate, weekdayOf } from "@/lib/time";
-import { formatInTimeZone } from "date-fns-tz";
+import { formatInZone } from "@/lib/time";
 import { listBookings, type BookingRow } from "@/lib/type-bookings";
 import { colorOf, effectiveHours, listBookingTypes, type WeeklyHours, doneWords } from "@/lib/booking-types";
 import { parseISO, format } from "date-fns";
@@ -103,7 +103,7 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
 
   // Time grid bounds: earliest opening to latest close across the visible open days.
   const open = online ? [] : days.filter((d) => !d.closed);
-  const bookingMins = (mode === "pickups" ? bookingRows : []).flatMap((r) => [timeToMinutes(formatInTimeZone(r.booking.startsAt, tz, "HH:mm")), timeToMinutes(formatInTimeZone(r.booking.endsAt, tz, "HH:mm"))]);
+  const bookingMins = (mode === "pickups" ? bookingRows : []).flatMap((r) => [timeToMinutes(formatInZone(r.booking.startsAt, tz, "HH:mm")), timeToMinutes(formatInZone(r.booking.endsAt, tz, "HH:mm"))]);
   // Booking types' own hours widen the grid too (the online team has no pickup hours at all).
   const typeRanges = mode === "pickups" ? types.filter((t) => t.kind === "standard" && t.active).flatMap((t) => Object.values(effectiveHours(t, showroom.bookingHours as WeeklyHours)).flat()) : [];
   const starts = [...open.map((d) => timeToMinutes(d.windowStart)), ...bookingMins, ...typeRanges.map(([a]) => timeToMinutes(a))];
@@ -115,7 +115,7 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
   for (let m = Math.floor(gridStart / 60) * 60; m <= gridEnd; m += 60) hours.push(m);
   const pxPerHour = 64;
   const gridHeight = (span / 60) * pxPerHour;
-  const yOf = (instant: Date) => ((timeToMinutes(formatInTimeZone(instant, tz, "HH:mm")) - gridStart) / span) * gridHeight;
+  const yOf = (instant: Date) => ((timeToMinutes(formatInZone(instant, tz, "HH:mm")) - gridStart) / span) * gridHeight;
 
   // Render helpers (plain functions, not components — see react-hooks/static-components).
   const blocksOf = (d: ScheduleDay) => (mode === "builds" ? buildBlocksOf(d, tz) : visitsOf(d));

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Wheel } from "./booking-calendar-picker";
+import { zoneAt } from "@/lib/tz-rules";
 
 const ACCENT = "#c2410c";
 
@@ -32,7 +33,8 @@ export function readyLabel(v: string) {
 }
 /** Today's date and time in the store's zone, read when the picker opens. */
 function nowIn(tz: string) {
-  const p = Object.fromEntries(new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(new Date()).map((x) => [x.type, x.value]));
+  const at = new Date();
+  const p = Object.fromEntries(new Intl.DateTimeFormat("en-CA", { timeZone: zoneAt(tz, at), year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(at).map((x) => [x.type, x.value]));
   return { date: `${p.year}-${p.month}-${p.day}`, time: `${p.hour}:${p.minute}` };
 }
 
