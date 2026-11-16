@@ -246,11 +246,12 @@ export function bookingProperties(showroom: ShowroomCtx, type: BookingType, b: B
  */
 async function notifyBooking(
   db: Db,
-  args: { showroom: ShowroomCtx; type: BookingType; booking: Booking; metric: string; actor: string; extra?: Record<string, unknown> },
+  args: { showroom: ShowroomCtx; type: BookingType; booking: Booking; metric: string; actor: string; extra?: Record<string, unknown>; resend?: boolean },
 ): Promise<"sent" | "failed"> {
   const { showroom, type, booking, metric } = args;
-  const properties = { ...bookingProperties(showroom, type, booking), ...args.extra };
-  const uniqueId = `${booking.id}:${metric}:${booking.rescheduleCount}`;
+  const properties = { ...bookingProperties(showroom, type, booking), ...args.extra, ...(args.resend ? { resent: true } : {}) };
+  // A resend needs its own id, or Klaviyo drops it as a duplicate of the first event.
+  const uniqueId = `${booking.id}:${metric}:${booking.rescheduleCount}${args.resend ? `:resend:${Date.now()}` : ""}`;
   let status: "sent" | "failed" = "sent";
   try {
     await getNotifier().send(metric, { email: booking.customerEmail, phone: booking.customerPhone, name: booking.customerName, smsConsent: booking.smsConsent }, properties, uniqueId);
@@ -258,10 +259,10 @@ async function notifyBooking(
     status = "failed";
     logger.warn({ err: err instanceof Error ? err.message : String(err), metric, bookingId: booking.id }, "booking event not sent");
   }
-  await pingSlack(db, showroom, type, booking, metric, args.extra);
+  if (!args.resend) await pingSlack(db, showroom, type, booking, metric, args.extra);
   await db.insert(events).values({
     showroomId: showroom.id,
-    type: `booking_${metric.replace(/^Booking:\s*/, "").toLowerCase().replace(/\s+/g, "_")}`,
+    type: args.resend ? "booking_confirmation_resent" : `booking_${metric.replace(/^Booking:\s*/, "").toLowerCase().replace(/\s+/g, "_")}`,
     actor: args.actor,
     payload: { booking_id: booking.id, booking_type_id: type.id, booking_type: type.name, starts_at: booking.startsAt.toISOString(), metric },
     klaviyoStatus: status,
@@ -293,6 +294,19 @@ export async function sendBookingReminders(db: Db, showroom: ShowroomCtx, tomorr
     else failed++;
   }
   return { sent, failed };
+}
+
+/** Staff: send the "you're booked" email again (the Booking: Confirmed flow), for an upcoming booking only. No Slack post. */
+export async function resendBookingConfirmation(db: Db, args: { showroomId: string; bookingId: string; actor: string; now?: Date }): Promise<"sent" | "failed"> {
+  const [row] = await db
+    .select({ booking: bookings, type: bookingTypes })
+    .from(bookings)
+    .innerJoin(bookingTypes, eq(bookingTypes.id, bookings.bookingTypeId))
+    .where(and(eq(bookings.id, args.bookingId), eq(bookings.showroomId, args.showroomId)));
+  if (!row || row.booking.status !== "booked" || row.booking.endsAt <= (args.now ?? new Date())) throw new TypeBookingError("NOT_ACTIVE");
+  const showroom = await getShowroomById(db, row.booking.showroomId);
+  if (!showroom) throw new TypeBookingError("NOT_ACTIVE");
+  return notifyBooking(db, { showroom, type: row.type, booking: row.booking, metric: BOOKING_METRIC.confirmed, actor: args.actor, resend: true });
 }
 
 // ---- Staff side ---------------------------------------------------------------------------------

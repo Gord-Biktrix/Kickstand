@@ -24,7 +24,7 @@ import { hashToken } from "@/lib/tokens";
 import { attachUnit, bookableCompanions, bookableSiblings, linkOrdersForPickup, mergeIntoVisit, splitFromVisit, unlinkOrderPickup, collectParts, completeHandover, createOrder, deleteUnit, detachUnit, futureVisitFor, grantExtension, inviteAllReceived, inviteOrders, inviteUnit, inviteUnits, joinVisit, markReady, receiveUnit, resendInvite, retagUnit, startBuild, unreceiveUnit, waiveStorage } from "@/lib/units";
 import { currentShowroom } from "@/lib/current-showroom";
 import { createShowroom, importShowroomsFromLightspeed, isProfileKind, setLightspeedLink, updateShowroomDetails } from "@/lib/showroom-admin";
-import { cancelTypeBooking, createTypeBooking, getBookingDetail, rescheduleTypeBooking, setBookingOutcome, syncBookingWorkorder } from "@/lib/type-bookings";
+import { cancelTypeBooking, createTypeBooking, getBookingDetail, rescheduleTypeBooking, resendBookingConfirmation, setBookingOutcome, syncBookingWorkorder } from "@/lib/type-bookings";
 import { createBookingType, getBookingType, hoursFromForm, NEW_TYPE_DEFAULTS, setBookingTypeActive, setStoreHours, updateBookingType, updatePickupType, validateBookingType, type BookingTypeInput } from "@/lib/booking-types";
 import { LightspeedClient } from "@/lib/lightspeed";
 import { googleEnabled } from "@/lib/google-auth";
@@ -1200,13 +1200,23 @@ async function staffBooking(id: string) {
 }
 
 /** The booking page's Status control: Booked, Done (Checked in for visits) or No-show. */
-export async function setBookingStatusAction(id: string, status: "booked" | "completed" | "no_show") {
-  return run(`/app/bookings/${id}`, async () => {
+export async function setBookingStatusAction(id: string, status: "booked" | "completed" | "no_show", back = "") {
+  return run(safeReturn(back, `/app/bookings/${id}`), async () => {
     const { user, showroom, detail } = await staffBooking(id);
     await setBookingOutcome(db, { showroomId: showroom.id, bookingId: id, outcome: status, actor: user.id });
     if (status === "no_show") return "Marked as a no-show.";
     if (status === "booked") return "Back to booked.";
     return detail.type.location === "in_person" ? "Checked in." : "Marked as done.";
+  });
+}
+
+/** Send the confirmation email again (same Klaviyo flow), e.g. when the customer can't find it. */
+export async function resendBookingConfirmationAction(id: string) {
+  return run(`/app/bookings/${id}`, async () => {
+    const { user, showroom } = await staffBooking(id);
+    const outcome = await resendBookingConfirmation(db, { showroomId: showroom.id, bookingId: id, actor: user.id });
+    if (outcome === "failed") throw new Error("Klaviyo didn't take it. Try again in a minute.");
+    return "Confirmation sent again.";
   });
 }
 

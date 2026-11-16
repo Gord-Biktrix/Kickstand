@@ -4,6 +4,7 @@ import { readAnswers } from "@/lib/booking-questions";
 import { notFound } from "next/navigation";
 import { db } from "@/db/client";
 import { ConfirmButton } from "@/components/confirm-button";
+import { BookingStatusControl } from "@/components/booking-status";
 import { zoneLabel } from "@/app/book/zone";
 import { BookingCalendar, BookingInfo } from "@/components/booking-calendar";
 import { Badge, Card, Flash, PageHeader } from "@/components/ui";
@@ -17,7 +18,7 @@ import { bookingCustomerKey } from "@/lib/customers";
 import { getTypeAvailability } from "@/lib/type-slots";
 import { lightspeedEnabled } from "@/lib/lightspeed";
 import { lightspeedWorkorderUrl } from "@/lib/workorders";
-import { retryBookingWorkorderAction, setBookingStatusAction, staffCancelTypeBookingAction, staffRescheduleTypeBookingAction } from "../../actions";
+import { resendBookingConfirmationAction, retryBookingWorkorderAction, staffCancelTypeBookingAction, staffRescheduleTypeBookingAction } from "../../actions";
 
 export const metadata = { title: "Booking" };
 
@@ -33,6 +34,7 @@ const EVENT_LABEL: Record<string, string> = {
   booking_rescheduled: "Moved to a new time",
   booking_cancelled: "Cancelled",
   booking_reminder_day_before: "Day-before reminder sent",
+  booking_confirmation_resent: "Confirmation resent",
   booking_checked_in: "Checked in", // "Done" for phone and video calls (below)
   booking_no_show: "Marked no-show",
   booking_outcome_undone: "Back to booked",
@@ -103,22 +105,17 @@ export default async function BookingPage({ params, searchParams }: { params: Pr
             {b.status !== "cancelled" && (
               <div>
                 <p className="mb-1 text-xs font-medium text-muted">Status</p>
-                <div className="flex overflow-hidden rounded-lg border border-border text-sm" role="group" aria-label="Status">
-                  {([["booked", "Booked"], ["completed", words.action === "Check in" ? "Checked in" : "Done"], ["no_show", "No-show"]] as const).map(([value, label]) => {
-                    const on = b.status === value;
-                    const early = value === "no_show" && b.startsAt > now;
-                    return (
-                      <form key={value} action={setBookingStatusAction.bind(null, b.id, value)} className="flex-1 border-l border-border first:border-l-0">
-                        <button type="submit" disabled={on || early} aria-pressed={on} title={early ? "After the start time" : undefined} className={`h-9 w-full whitespace-nowrap px-3 font-medium ${on ? (value === "no_show" ? "bg-danger text-white" : value === "completed" ? "bg-ok text-white" : "bg-accent text-white") : early ? "cursor-not-allowed text-muted/50" : "hover:bg-background"}`}>{label}</button>
-                      </form>
-                    );
-                  })}
-                </div>
+                <BookingStatusControl booking={b} type={type} now={now} />
               </div>
             )}
             {b.status === "booked" && (
               <>
                 {b.startsAt > now && <Link href={`${self}?move=1`} className="btn btn-sm">Change time</Link>}
+                {b.endsAt > now && (
+                  <form action={resendBookingConfirmationAction.bind(null, b.id)}>
+                    <button type="submit" className="btn btn-sm w-full" title={`Emails ${b.customerEmail} the booking confirmation again`}>Resend confirmation</button>
+                  </form>
+                )}
                 <form action={staffCancelTypeBookingAction.bind(null, b.id)}><ConfirmButton className="btn btn-danger btn-sm w-full" message={`Cancel ${b.customerName}'s ${type.name}? They're told through Klaviyo.`}>Cancel</ConfirmButton></form>
               </>
             )}

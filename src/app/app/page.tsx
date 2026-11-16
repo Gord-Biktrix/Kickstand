@@ -14,6 +14,7 @@ import { colorOf, doneWords, LOCATION_LABEL, type BookingLocation } from "@/lib/
 import { listBookings, type BookingRow } from "@/lib/type-bookings";
 import { currentShowroom } from "@/lib/current-showroom";
 import { ContactFlag } from "@/components/contact-flag";
+import { BookingStatusControl } from "@/components/booking-status";
 
 export const metadata = { title: { absolute: "Today · Kickstand" } };
 
@@ -93,7 +94,7 @@ export default async function TodayPage({ searchParams }: { searchParams: Promis
               ? <div key="now" role="separator" aria-label={`Now, ${formatTime(now, showroom.timezone)}`} className="flex items-center gap-2 text-xs font-bold text-danger"><span>NOW {formatTime(now, showroom.timezone)}</span><span aria-hidden="true" className="h-0.5 flex-1 bg-danger" /></div>
               : null;
             const card = (() => {
-            if (item.kind === "booking") return <BookingCard key={item.row.booking.id} row={item.row} tz={showroom.timezone} />;
+            if (item.kind === "booking") return <BookingCard key={item.row.booking.id} row={item.row} tz={showroom.timezone} now={now} back={chipHref(filter)} />;
             const visit = item.visit;
             const first = visit[0];
             const { appointment } = first;
@@ -205,7 +206,7 @@ const OUTCOME: Record<string, { label: string; tone: "ok" | "danger" | "neutral"
 };
 
 /** A booking of a booking type on the day list: who, what, how to reach them; Open for the booking (status, move, cancel). */
-function BookingCard({ row, tz }: { row: BookingRow; tz: string }) {
+function BookingCard({ row, tz, now, back }: { row: BookingRow; tz: string; now: Date; back: string }) {
   const { booking: b, type } = row;
   const outcome = b.status === "completed" ? { ...OUTCOME.completed, label: doneWords(type.location).done } : OUTCOME[b.status];
   return (
@@ -228,7 +229,10 @@ function BookingCard({ row, tz }: { row: BookingRow; tz: string }) {
           </div>
           {b.customerNote && <p className="mt-1 text-sm text-muted">&ldquo;{b.customerNote}&rdquo;</p>}
         </div>
-        <Link href={`/app/bookings/${b.id}`} className={`btn btn-sm shrink-0 ${b.status === "booked" ? "btn-primary" : ""}`}>Open</Link>
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          <BookingStatusControl booking={b} type={type} now={now} back={back} size="sm" />
+          <Link href={`/app/bookings/${b.id}`} className={`btn btn-sm ${b.status === "booked" ? "btn-primary" : ""}`}>Open</Link>
+        </div>
       </div>
     </Card>
   );

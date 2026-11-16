@@ -10,7 +10,7 @@ import { SUGGESTED_CALL_QUESTIONS } from "@/lib/booking-questions";
 import type { ShowroomCtx } from "@/lib/showroom";
 import { createShowroom } from "@/lib/showroom-admin";
 import { localToUtc } from "@/lib/time";
-import { BOOKING_METRIC, cancelTypeBooking, cleanDetails, createTypeBooking, getBookingByToken, getBookingDetail, listBookings, rescheduleTypeBooking, sendBookingReminders, setBookingOutcome, TypeBookingError } from "@/lib/type-bookings";
+import { BOOKING_METRIC, cancelTypeBooking, cleanDetails, createTypeBooking, getBookingByToken, getBookingDetail, listBookings, rescheduleTypeBooking, resendBookingConfirmation, sendBookingReminders, setBookingOutcome, TypeBookingError } from "@/lib/type-bookings";
 import { getTypeAvailability, typeSlots } from "@/lib/type-slots";
 import { addClosedDays, bookingsOnClosedDays, listClosedDays, removeClosedDay } from "@/lib/closed-days";
 import { resetDb, testDb } from "./helpers";
@@ -183,6 +183,27 @@ describe("booking a booking type", () => {
     await expect(cancelTypeBooking(db, { bookingId: booking.id, actor: "customer", reason: "customer" })).rejects.toMatchObject({ code: "NOT_ACTIVE" });
     expect(notifier.sent.map((s) => s.metric)).toEqual([BOOKING_METRIC.confirmed, BOOKING_METRIC.rescheduled, BOOKING_METRIC.cancelled]);
     expect(new Set(notifier.sent.map((s) => s.uniqueId)).size).toBe(3);
+  });
+
+  it("staff can resend the confirmation: a fresh Klaviyo event, no Slack post, only while it's upcoming", async () => {
+    const slack = new MemorySlack();
+    setSlackPoster(slack);
+    await patchShowroomSettings(db, online.id, { slack_webhook_url: "https://hooks.slack.com/services/T/B/x" });
+    online = await getShowroomById(db, online.id);
+    const { booking } = await createTypeBooking(db, { showroom: online, type, startsAt: slot("10:00"), details, createdBy: "customer", now: NOW });
+    const posts = slack.posted.length;
+    expect(posts).toBe(1);
+    expect(await resendBookingConfirmation(db, { showroomId: online.id, bookingId: booking.id, actor: "staff-1", now: NOW })).toBe("sent");
+    expect(notifier.sent.map((s) => s.metric)).toEqual([BOOKING_METRIC.confirmed, BOOKING_METRIC.confirmed]);
+    expect(notifier.sent[1].uniqueId).not.toBe(notifier.sent[0].uniqueId);
+    expect(notifier.sent[1].properties).toMatchObject({ resent: true, booking_type: "Video call with an expert" });
+    expect(slack.posted.length).toBe(posts);
+    const [ev] = await db.select().from(events).where(eq(events.type, "booking_confirmation_resent"));
+    expect(ev).toMatchObject({ actor: "staff-1", klaviyoStatus: "sent" });
+    await expect(resendBookingConfirmation(db, { showroomId: online.id, bookingId: booking.id, actor: "staff-1", now: slot("11:00") })).rejects.toMatchObject({ code: "NOT_ACTIVE" });
+    await cancelTypeBooking(db, { bookingId: booking.id, actor: "customer", reason: "customer", now: NOW });
+    await expect(resendBookingConfirmation(db, { showroomId: online.id, bookingId: booking.id, actor: "staff-1", now: NOW })).rejects.toMatchObject({ code: "NOT_ACTIVE" });
+    setSlackPoster(null);
   });
 
   it("keeps the booking when Klaviyo fails, and marks the event failed", async () => {
