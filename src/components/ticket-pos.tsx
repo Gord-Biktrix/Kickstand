@@ -232,45 +232,21 @@ export function TicketPos(props: {
 
         <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 xl:grid-cols-4">
           {tab === "services" &&
-            shown.map((s) => {
-              const n = qtyOf(`s:${s.name}`);
-              return (
-                <button key={s.key} type="button" onClick={() => add({ key: `s:${s.name}`, kind: "service", name: s.name, minutes: s.minutes, itemId: s.itemId, price: s.price ?? null })} className={`flex min-h-24 flex-col justify-between rounded-xl border bg-card p-3 text-left ${n ? "border-2 border-[#17181a]" : "border-border"}`}>
-                  <span className="line-clamp-2 font-bold">{s.name}</span>
-                  <span className="text-sm text-muted">{[s.price != null ? money(s.price) : null, `about ${mins(s.minutes)}`].filter(Boolean).join(" · ")}{n ? ` · ×${n}` : ""}</span>
-                </button>
-              );
-            })}
+            shown.map((s) => (
+              <Tile key={s.key} name={s.name} sub={[s.price != null ? money(s.price) : null, `about ${mins(s.minutes)}`].filter(Boolean).join(" · ")} qty={qtyOf(`s:${s.name}`)} onAdd={() => add({ key: `s:${s.name}`, kind: "service", name: s.name, minutes: s.minutes, itemId: s.itemId, price: s.price ?? null })} onStep={(by) => step(`s:${s.name}`, by)} />
+            ))}
           {tab === "labour" && props.labourItems.length > 0 &&
-            props.labourItems.map((s) => {
-              const n = qtyOf(`s:${s.name}`);
-              return (
-                <button key={s.key} type="button" onClick={() => add({ key: `s:${s.name}`, kind: "service", name: s.name, minutes: s.minutes, itemId: s.itemId, price: s.price ?? null })} className={`flex min-h-24 flex-col justify-between rounded-xl border bg-[#f7f6f3] p-3 text-left ${n ? "border-2 border-[#17181a]" : "border-border"}`}>
-                  <span className="font-bold">{s.name}</span>
-                  <span className="text-sm text-muted">{[s.price != null ? money(s.price) : null, "Labour"].filter(Boolean).join(" · ")}{n ? ` · ×${n}` : ""}</span>
-                </button>
-              );
-            })}
+            props.labourItems.map((s) => (
+              <Tile key={s.key} muted name={s.name} sub={[s.price != null ? money(s.price) : null, "Labour"].filter(Boolean).join(" · ")} qty={qtyOf(`s:${s.name}`)} onAdd={() => add({ key: `s:${s.name}`, kind: "service", name: s.name, minutes: s.minutes, itemId: s.itemId, price: s.price ?? null })} onStep={(by) => step(`s:${s.name}`, by)} />
+            ))}
           {tab === "labour" && props.labourItems.length === 0 &&
-            LABOUR.map((m) => {
-              const n = qtyOf(`l:${m}`);
-              return (
-                <button key={m} type="button" onClick={() => add({ key: `l:${m}`, kind: "labour", name: `Labour ${mins(m)}`, minutes: m })} className={`flex min-h-24 flex-col justify-between rounded-xl border bg-[#f7f6f3] p-3 text-left ${n ? "border-2 border-[#17181a]" : "border-border"}`}>
-                  <span className="font-bold">+ {mins(m)}</span>
-                  <span className="text-sm text-muted">Labour{n ? ` · ×${n}` : ""}</span>
-                </button>
-              );
-            })}
+            LABOUR.map((m) => (
+              <Tile key={m} muted name={`+ ${mins(m)}`} sub="Labour" qty={qtyOf(`l:${m}`)} onAdd={() => add({ key: `l:${m}`, kind: "labour", name: `Labour ${mins(m)}`, minutes: m })} onStep={(by) => step(`l:${m}`, by)} />
+            ))}
           {tab === "parts" &&
-            parts.map((p) => {
-              const n = qtyOf(`p:${p.itemId}`);
-              return (
-                <button key={p.itemId} type="button" onClick={() => add({ key: `p:${p.itemId}`, kind: "part", name: p.name, minutes: 0, itemId: p.itemId, price: p.price })} className={`flex min-h-24 flex-col justify-between rounded-xl border bg-card p-3 text-left ${n ? "border-2 border-[#17181a]" : "border-border"}`}>
-                  <span className="line-clamp-2 font-bold">{p.name}</span>
-                  <span className="text-sm text-muted">{p.price != null ? money(p.price) : "Price in Lightspeed"}{n ? ` · ×${n}` : ""}</span>
-                </button>
-              );
-            })}
+            parts.map((p) => (
+              <Tile key={p.itemId} name={p.name} sub={p.price != null ? money(p.price) : "Price in Lightspeed"} qty={qtyOf(`p:${p.itemId}`)} onAdd={() => add({ key: `p:${p.itemId}`, kind: "part", name: p.name, minutes: 0, itemId: p.itemId, price: p.price })} onStep={(by) => step(`p:${p.itemId}`, by)} />
+            ))}
         </div>
         {tab === "parts" && (
           <p className="text-sm text-muted">
@@ -378,6 +354,28 @@ function PhotoAdd() {
             </span>
           ))}
           {full && <p className="self-center text-xs text-muted">6 photos is the most per ticket.</p>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * A tile on the right: tap it to add one. Once added it gets a dark border and a − n + in its corner (separate
+ * buttons, not inside the tap target) so the quantity can be set from the tile as well as from the ticket.
+ */
+function Tile({ name, sub, qty, onAdd, onStep, muted = false }: { name: string; sub: string; qty: number; onAdd: () => void; onStep: (by: number) => void; muted?: boolean }) {
+  return (
+    <div className={`relative rounded-xl border ${muted ? "bg-[#f7f6f3]" : "bg-card"} ${qty ? "border-2 border-[#17181a]" : "border-border"}`}>
+      <button type="button" onClick={onAdd} aria-label={qty ? `Add another ${name}` : `Add ${name}`} className="flex min-h-24 w-full flex-col justify-between p-3 text-left">
+        <span className="line-clamp-2 font-bold">{name}</span>
+        <span className={`text-sm text-muted ${qty ? "pr-24" : ""}`}>{sub}</span>
+      </button>
+      {qty > 0 && (
+        <div className="absolute right-2 bottom-2 flex items-center rounded-full border border-border bg-card" role="group" aria-label={`${name} quantity`}>
+          <button type="button" onClick={() => onStep(-1)} aria-label={`One less ${name}`} className="h-8 w-8 rounded-full text-base font-bold hover:bg-[#f7f6f3]">−</button>
+          <span className="w-5 text-center text-sm font-bold tabular-nums" aria-live="polite">{qty}</span>
+          <button type="button" onClick={() => onStep(1)} aria-label={`One more ${name}`} className="h-8 w-8 rounded-full text-base font-bold hover:bg-[#f7f6f3]">+</button>
         </div>
       )}
     </div>
