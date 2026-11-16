@@ -194,7 +194,9 @@ describe("new tickets from the POS screen", () => {
       const url = String(input);
       calls.push({ method: init?.method ?? "GET", url, body: init?.body ? JSON.parse(String(init.body)) : null });
       const json = (data: unknown) => new Response(JSON.stringify(data), { status: 200, headers: { "Content-Type": "application/json" } });
-      if (url.includes("Serialized.json?customerID=9020")) return json({ Serialized: [{ serializedID: "501", description: "Stunner Lite 3", colorName: "Peach", sizeName: "", serial: "BX24-55120" }, { serializedID: "502", description: "Swift CVT 2", colorName: "Green", serial: "" }, { serializedID: "503", description: "", colorName: "", sizeName: "", serial: "S022YP01561", Item: { description: "86-Kutty X 2 Yellow" } }] });
+      if (url.includes("Serialized.json") && url.includes("load_relations")) return new Response(JSON.stringify({ message: "Tried to load one or more relations that are not allowed: Item" }), { status: 400 });
+      if (url.includes("Serialized.json?customerID=9020")) return json({ Serialized: [{ serializedID: "501", description: "Stunner Lite 3", colorName: "Peach", sizeName: "", serial: "BX24-55120" }, { serializedID: "502", description: "Swift CVT 2", colorName: "Green", serial: "" }, { serializedID: "503", description: "", colorName: "", sizeName: "", serial: "S022YP01561", itemID: "880" }] });
+      if (url.includes("Item/880.json")) return json({ Item: { description: "86-Kutty X 2 Yellow" } });
       if (url.endsWith("Workorder.json")) return json({ Workorder: { workorderID: "10301" } });
       return new Response("{}", { status: 404 });
     });

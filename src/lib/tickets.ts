@@ -9,6 +9,7 @@ import { bookings, events, lsWorkorders, orders, units } from "@/db/schema";
 import { asList, LightspeedClient, lightspeedEnabled } from "./lightspeed";
 import { logger } from "./logger";
 import { normalizePhone } from "./phone";
+import { itemNames } from "./workorder-lines";
 import type { ShowroomCtx } from "./showroom";
 
 /** The service menu, until stores set their own (Settings › Services): name and usual time. */
@@ -131,12 +132,14 @@ export async function customerBikesWithStatus(db: Db, who: { lsCustomerId: strin
   if (who.lsCustomerId && client) {
     try {
       // The bike's name usually lives on the linked Item ("86-Juggernaut Classic Duo Step-Thru 17\" Champagne 24x4");
-      // the serialized record's own description, size and colour are often blank.
-      const res = await client.request<Record<string, unknown>>("GET", `Serialized.json?customerID=${encodeURIComponent(who.lsCustomerId)}&limit=20&load_relations=${encodeURIComponent('["Item"]')}`);
-      for (const r of asList<Record<string, unknown>>(res, "Serialized")) {
-        if (String(r.archived) === "true") continue;
-        const item = r.Item as Record<string, unknown> | undefined;
-        const name = bikeName(String(r.description ?? "").trim() || String(item?.description ?? "").trim());
+      // the serialized record's own description, size and colour are often blank. Lightspeed won't load the Item
+      // relation on Serialized, so names come from the item lookup (remembered in ls_items).
+      const res = await client.request<Record<string, unknown>>("GET", `Serialized.json?customerID=${encodeURIComponent(who.lsCustomerId)}&limit=20`);
+      const rows = asList<Record<string, unknown>>(res, "Serialized").filter((r) => String(r.archived) !== "true");
+      const itemIds = [...new Set(rows.map((r) => String(r.itemID ?? "")).filter((id) => id && id !== "0"))];
+      const items = await itemNames(db, itemIds, client);
+      for (const r of rows) {
+        const name = bikeName(String(r.description ?? "").trim() || items.get(String(r.itemID ?? ""))?.name || "");
         const serial = r.serial ? String(r.serial).trim() : "";
         const label = [name, r.colorName, r.sizeName].filter((x) => x && String(x).trim()).map(String).join(" · ") || (serial ? `Bike · serial ${serial}` : "");
         add(
