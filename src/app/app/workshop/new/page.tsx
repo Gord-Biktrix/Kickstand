@@ -99,6 +99,7 @@ export default async function NewTicketPage({ searchParams }: { searchParams: Pr
           enabled={ls}
           days={days}
           initialDropoff={initialDropoff}
+          todayLabel={formatInZone(now, tz, "EEE d MMM")}
           defaultMinutes={showroom.settings.repair_minutes}
           benches={benches}
           loads={loads}

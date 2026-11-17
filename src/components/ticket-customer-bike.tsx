@@ -95,10 +95,10 @@ export function TicketCustomerBike(props: { initial: Picked | null; initialNew: 
         )}
         {/* Typing is only for a bike we couldn't find: a picked bike already says what and which. */}
         {showFields ? (
-          <>
+          <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)] gap-2 lg:grid-cols-1">
             <input id="bike" name="bike" value={bike} onChange={(e) => { setBike(e.target.value); setSid(""); props.onBike?.(e.target.value); }} placeholder="e.g. Stunner Lite 3, peach" className="input h-11 text-base" autoFocus={chosen === "other"} />
             <input name="serial" value={serial} onChange={(e) => setSerial(e.target.value)} placeholder="Serial (optional)" aria-label="Serial number" className="input h-11 text-base" />
-          </>
+          </div>
         ) : (
           <>
             <input type="hidden" name="bike" value={bike} />

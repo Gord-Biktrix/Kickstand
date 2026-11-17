@@ -60,6 +60,8 @@ export function TicketPos(props: {
   days: ServiceDay[];
   /** "now", or a slot's ISO time (comes back after an error). */
   initialDropoff: string;
+  /** Today in the store, e.g. "Mon 16 Nov": what the date field shows until a day is picked. */
+  todayLabel: string;
   defaultMinutes: number;
   benches: number;
   loads: number[];
@@ -97,6 +99,19 @@ export function TicketPos(props: {
   const [dropoff, setDropoff] = useState<string>(props.initialDropoff);
   const earliest = props.days[0]?.slots[0] ?? null;
   const dropLabel = props.days.flatMap((d) => d.slots).find((sl) => sl.iso === dropoff)?.label ?? "";
+  // The date field opens the calendar in a modal; picking a time (or Esc, or a click outside) closes it.
+  const [calOpen, setCalOpen] = useState(false);
+  // Phones: the tiles live in a sheet over the ticket, opened from "Add service, labour or part" (always shown on lg).
+  const [addOpen, setAddOpen] = useState(false);
+  useEffect(() => {
+    if (!addOpen) return;
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && setAddOpen(false);
+    document.addEventListener("keydown", esc);
+    const overflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.removeEventListener("keydown", esc); document.body.style.overflow = overflow; };
+  }, [addOpen]);
+  const pickedDay = dropoff !== "now" && dropoff !== earliest?.iso;
 
   const work = lines.reduce((s, l) => s + l.minutes * l.qty, 0);
   const partsTotal = lines.filter((l) => l.price != null).reduce((s, l) => s + (l.price ?? 0) * l.qty, 0);
@@ -155,13 +170,19 @@ export function TicketPos(props: {
           <input type="hidden" name="dropoff" value={dropoff} />
           <div>
             <p className={label}>Schedule service</p>
-            <div className="mt-1.5 flex flex-wrap gap-2" role="radiogroup" aria-label="Schedule service">
+            <div className="mt-1.5 grid grid-cols-3 gap-2 lg:flex lg:flex-wrap" role="radiogroup" aria-label="Schedule service">
               <DropButton on={dropoff === "now"} onClick={() => chooseDropoff("now")} title="Now" sub="walk-in" />
-              {earliest && <DropButton on={dropoff === earliest.iso} onClick={() => chooseDropoff(earliest.iso)} title="Earliest available" sub={earliest.label} />}
+              {earliest && <DropButton on={dropoff === earliest.iso} onClick={() => chooseDropoff(earliest.iso)} title={<><span className="lg:hidden">Earliest</span><span className="hidden lg:inline">Earliest available</span></>} sub={earliest.label} />}
+              {earliest && (
+                <button type="button" role="radio" aria-checked={pickedDay} onClick={() => setCalOpen(true)} className={`flex min-h-12 min-w-0 flex-col items-start justify-center gap-0.5 rounded-lg border px-2.5 py-1.5 text-left lg:flex-row lg:items-center lg:gap-2 lg:px-3 ${pickedDay ? "border-[#17181a] bg-[#17181a] text-white" : "border-border bg-card"}`}>
+                  <CalendarIcon />
+                  <span className="text-xs font-bold lg:text-sm">{pickedDay ? dropLabel : props.todayLabel}</span>
+                </button>
+              )}
             </div>
-            {props.days.length > 0 && <DayCalendar days={props.days} value={dropoff} onPick={chooseDropoff} />}
+            {calOpen && props.days.length > 0 && <CalendarModal onClose={() => setCalOpen(false)}><DayCalendar days={props.days} value={dropoff} onPick={(iso) => { chooseDropoff(iso); setCalOpen(false); }} /></CalendarModal>}
           </div>
-          <div>
+          <div className="hidden lg:block">
             <p className={label}>Ready by</p>
             <div className="mt-1.5 flex flex-wrap items-center gap-2">
               {lines.length > 0 && ready ? (
@@ -181,7 +202,7 @@ export function TicketPos(props: {
 
         <div className="flex-1 px-4">
           {lines.length === 0 ? (
-            <p className="py-6 text-center text-sm text-muted">Tap what it needs on the right.</p>
+            <p className="hidden py-6 text-center text-sm text-muted lg:block">Tap what it needs on the right.</p>
           ) : (
             <ul className="divide-y divide-border">
               {lines.map((l) => (
@@ -206,23 +227,29 @@ export function TicketPos(props: {
               ))}
             </ul>
           )}
+          <button type="button" onClick={() => setAddOpen(true)} className="my-3 flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-[#cfcbc4] text-sm font-bold lg:hidden">
+            <span aria-hidden className="text-lg leading-none">+</span> Add service, labour or part
+          </button>
           <div className="border-t border-border py-3">
             <label htmlFor="said" className={label}>Notes</label>
             <textarea id="said" name="said" defaultValue={props.initial.said} rows={2} placeholder="What they said, what you noticed" className="input mt-1 min-h-16 py-2 text-base" />
             <PhotoAdd />
-          </div>
-        </div>
-
-        <div className="border-t border-border p-4">
-          <div className="mb-3 flex items-end justify-between gap-3">
-            <label className="grid gap-1 text-sm">
+            <label className="mt-3 flex items-center justify-between gap-3 text-sm">
               <span className={label}>Mechanic</span>
               <select name="mech" defaultValue={props.initial.mech} className="input h-10 w-auto text-base">
                 <option value="">Not assigned</option>
                 {props.employees.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
               </select>
             </label>
-            <div className="text-right">
+          </div>
+        </div>
+
+        {/* Phones: the total, Ready by and the button stay at the bottom of the screen. */}
+        <div className="sticky bottom-0 z-30 rounded-b-xl border-t border-border bg-card p-4 max-lg:px-3 max-lg:py-2.5 max-lg:shadow-[0_-4px_12px_rgba(0,0,0,0.06)] lg:static">
+          <div className="mb-3 flex items-end justify-between gap-3 max-lg:mb-2 max-lg:items-baseline">
+            <p className="text-sm text-muted lg:hidden">{work ? `${mins(work)} of work` : "No work yet"}{partsTotal ? ` · ${money(partsTotal)}` : ""}</p>
+            <p className="text-sm font-bold lg:hidden">{lines.length > 0 && ready ? `Ready ${readyLabel(ready)}` : ""}</p>
+            <div className="hidden text-right lg:ml-auto lg:block">
               <p className="text-sm text-muted">Work{partsTotal ? " · before tax" : ""}</p>
               <p className="text-xl font-extrabold">{work ? mins(work) : "—"}{partsTotal ? ` · ${money(partsTotal)}` : ""}</p>
             </div>
@@ -230,15 +257,19 @@ export function TicketPos(props: {
           {dropoff !== "now" && (
             <label className="mb-2 flex min-h-11 items-center gap-2 text-sm"><input type="checkbox" name="sms_consent" className="h-5 w-5" /> Customer agrees to texts about this booking</label>
           )}
-          <button type="submit" disabled={!props.enabled} className="flex min-h-16 w-full items-center justify-center rounded-xl bg-[#ff6b1a] px-4 text-center text-lg font-extrabold text-[#17181a] disabled:opacity-50">
+          <button type="submit" disabled={!props.enabled} className="flex min-h-14 w-full items-center justify-center rounded-xl lg:min-h-16 bg-[#ff6b1a] px-4 text-center text-lg font-extrabold text-[#17181a] disabled:opacity-50">
             {dropoff === "now" ? "Check in · create ticket" : `Book service · ${dropLabel}`}
           </button>
-          <p className="mt-2 text-xs text-muted">{dropoff === "now" ? "Creates the Lightspeed work order now (Open, with the lines) and puts it in To do." : "Books the service appointment (the customer gets a confirmation) and puts the lines on its Lightspeed work order."}</p>
+          <p className="mt-2 hidden text-xs text-muted lg:block">{dropoff === "now" ? "Creates the Lightspeed work order now (Open, with the lines) and puts it in To do." : "Books the service appointment (the customer gets a confirmation) and puts the lines on its Lightspeed work order."}</p>
         </div>
       </section>
 
       {/* What you can add, like POS tiles. */}
-      <section aria-label="Add to the ticket" className="flex min-w-0 flex-col gap-3">
+      {addOpen && <div className="fixed inset-0 z-40 bg-black/40 lg:hidden" onClick={() => setAddOpen(false)} aria-hidden />}
+      <section aria-label="Add to the ticket" className={`min-w-0 flex-col gap-3 lg:static lg:z-auto lg:flex lg:overflow-visible lg:rounded-none lg:bg-transparent lg:p-0 lg:shadow-none ${addOpen ? "fixed inset-x-0 top-12 bottom-0 z-50 flex overflow-y-auto rounded-t-2xl bg-card p-4 shadow-2xl" : "hidden"}`}>
+        <div className="flex items-center justify-between lg:hidden">
+          <span aria-hidden className="mx-auto h-1 w-10 rounded-full bg-[#cfcbc4]" />
+        </div>
         <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder={tab === "parts" ? `Search parts${model ? ` (showing ${model})` : ""}…` : "Search services…"} aria-label="Search" className="input h-12 text-base" />
         <div role="tablist" aria-label="What to add" className="flex flex-wrap gap-2">
           {([["services", "Services"], ["labour", "Labour"], ["parts", model ? `Parts for ${model}` : "Parts"]] as const).map(([t, text]) => (
@@ -284,6 +315,9 @@ export function TicketPos(props: {
             {props.tilesNote || "Your Lightspeed service and labour items. Tap to add (again for more); each goes on the work order as a line at its Lightspeed price."}
           </p>
         )}
+        <button type="button" onClick={() => setAddOpen(false)} className="sticky bottom-0 mt-auto min-h-12 w-full rounded-xl bg-[#17181a] text-base font-bold text-white lg:hidden">
+          Done{lines.length ? ` · ${lines.reduce((n, l) => n + l.qty, 0)} item${lines.reduce((n, l) => n + l.qty, 0) === 1 ? "" : "s"}${work ? ` · ${mins(work)}` : ""}` : ""}
+        </button>
       </section>
     </>
   );
@@ -341,19 +375,19 @@ function PhotoAdd() {
           onDragOver={(e) => { e.preventDefault(); setOver(true); }}
           onDragLeave={() => setOver(false)}
           onDrop={(e) => { e.preventDefault(); setOver(false); onFiles(e.dataTransfer.files); }}
-          className={`flex flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed px-4 py-6 text-center transition-colors ${over ? "border-[#c2410c] bg-[#fff1e8]" : "border-[#cfcbc4] bg-[#f7f6f3]"}`}
+          className={`flex flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed px-4 py-6 text-center transition-colors max-lg:border-0 max-lg:bg-transparent max-lg:p-0 ${over ? "border-[#c2410c] bg-[#fff1e8]" : "border-[#cfcbc4] bg-[#f7f6f3]"}`}
         >
-          <div>
+          <div className="hidden lg:block">
             <p className="font-semibold">{busy ? "Adding…" : "Drag and drop or select photos"}</p>
             <p className="mt-0.5 text-xs text-muted">Photos from the camera or library · up to 6 · videos once file storage is on</p>
           </div>
-          <div className="flex flex-wrap justify-center gap-2">
-            <label className="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-lg border border-[#cfcbc4] bg-card px-4 text-sm font-semibold">
+          <div className="flex w-full flex-wrap justify-center gap-2 max-lg:grid max-lg:grid-cols-2">
+            <label className="inline-flex min-h-11 justify-center cursor-pointer items-center gap-2 rounded-lg border border-[#cfcbc4] bg-card px-4 text-sm font-semibold">
               <svg aria-hidden width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 16V4M7 9l5-5 5 5M4 20h16" /></svg>
-              Select photos
+              {busy ? "Adding…" : "Select photos"}
               <input ref={pick} type="file" accept="image/*" multiple className="sr-only" onChange={(e) => onFiles(e.target.files)} />
             </label>
-            <label className="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-lg border border-[#cfcbc4] bg-card px-4 text-sm font-semibold sm:hidden">
+            <label className="inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-lg border border-[#cfcbc4] bg-card px-4 text-sm font-semibold sm:hidden">
               <svg aria-hidden width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 8h3l2-3h6l2 3h3v11H4z" /><circle cx="12" cy="13" r="3.5" /></svg>
               Take photo
               <input ref={camera} type="file" accept="image/*" capture="environment" className="sr-only" onChange={(e) => onFiles(e.target.files)} />
@@ -467,10 +501,38 @@ function DayCalendar({ days, value, onPick }: { days: ServiceDay[]; value: strin
   );
 }
 
-/** One schedule choice: a title and the time under it. */
-function DropButton({ on, onClick, title, sub }: { on: boolean; onClick: () => void; title: string; sub: string }) {
+/** The calendar as a modal: a native dialog, so Esc closes it; a click on the backdrop closes it too. */
+function CalendarModal({ onClose, children }: { onClose: () => void; children: React.ReactNode }) {
+  const ref = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const d = ref.current;
+    if (d && !d.open) d.showModal();
+  }, []);
   return (
-    <button type="button" role="radio" aria-checked={on} onClick={onClick} className={`min-h-12 rounded-lg border px-3 py-1.5 text-left ${on ? "border-[#17181a] bg-[#17181a] text-white" : "border-border bg-card"}`}>
+    <dialog ref={ref} onClose={onClose} onClick={(e) => { if (e.target === ref.current) ref.current?.close(); }} aria-label="Pick a day" className="m-auto w-[min(380px,calc(100vw-32px))] rounded-2xl bg-transparent p-0 backdrop:bg-black/40 max-sm:mb-0 max-sm:w-full max-sm:max-w-none max-sm:rounded-b-none">
+      <div className="rounded-2xl bg-card p-4 shadow-xl max-sm:rounded-b-none max-sm:pb-6">
+        <div className="flex items-center justify-between">
+          <p className="text-base font-bold">Schedule service</p>
+          <button type="button" onClick={() => ref.current?.close()} aria-label="Close" className="h-8 w-8 rounded-full text-xl leading-none hover:bg-[#f7f6f3]">×</button>
+        </div>
+        {children}
+      </div>
+    </dialog>
+  );
+}
+
+function CalendarIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+      <rect x="3" y="5" width="18" height="16" rx="2" /><path d="M3 10h18M8 3v4M16 3v4" />
+    </svg>
+  );
+}
+
+/** One schedule choice: a title and the time under it. */
+function DropButton({ on, onClick, title, sub }: { on: boolean; onClick: () => void; title: React.ReactNode; sub: string }) {
+  return (
+    <button type="button" role="radio" aria-checked={on} onClick={onClick} className={`min-h-12 min-w-0 rounded-lg border px-2.5 py-1.5 text-left lg:px-3 ${on ? "border-[#17181a] bg-[#17181a] text-white" : "border-border bg-card"}`}>
       <span className="block text-sm font-bold">{title}</span>
       <span className={`block text-xs ${on ? "text-white/75" : "text-muted"}`}>{sub}</span>
     </button>
