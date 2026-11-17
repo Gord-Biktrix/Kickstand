@@ -14,7 +14,8 @@ import { lightspeedWorkorderUrl } from "@/lib/workorders";
 import { listTicketPhotos } from "@/lib/tickets";
 import { loadJobLog, recordTaskTotal } from "@/lib/job-log";
 import { currentStep, deriveTrack, fmtMinutes, jobTasks, openTasks, STEP_LABEL, STEP_ORDER, type JobStep, type Task, type Track } from "@/lib/job-track";
-import { jobReadyAction, jobResumeAction, jobStepAction, jobTaskAction, moveJobAction, setBookingStatusAction } from "../../actions";
+import { ConfirmButton } from "@/components/confirm-button";
+import { jobReadyAction, jobResumeAction, jobStepAction, jobTaskAction, moveJobAction, setBookingStatusAction, staffCancelTypeBookingAction } from "../../actions";
 
 export const metadata = { title: "Job" };
 
@@ -140,7 +141,16 @@ export default async function JobPage({ params, searchParams }: { params: Promis
               {booking?.customerEmail && (<><dt className="text-muted">Email</dt><dd className="truncate">{booking.customerEmail}</dd></>)}
               {wo?.serial && (<><dt className="text-muted">Serial</dt><dd>{wo.serial}</dd></>)}
             </dl>
-            {booking && <Link href={`/app/bookings/${booking.id}`} className="mt-2 inline-block text-sm underline">Booking</Link>}
+            {booking && booking.status === "booked" && job.notHereYet ? (
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <Link href={`/app/bookings/${booking.id}`} className="btn btn-sm">Change time</Link>
+                <form action={staffCancelTypeBookingAction.bind(null, booking.id)}>
+                  <ConfirmButton className="btn btn-danger btn-sm w-full" message={`Cancel ${booking.customerName}'s booking? They're told through Klaviyo, and the Lightspeed work order is archived.`}>Cancel booking</ConfirmButton>
+                </form>
+              </div>
+            ) : booking ? (
+              <Link href={`/app/bookings/${booking.id}`} className="mt-2 inline-block text-sm underline">Booking</Link>
+            ) : null}
           </section>
 
           {lines && lines.length > 0 && (
