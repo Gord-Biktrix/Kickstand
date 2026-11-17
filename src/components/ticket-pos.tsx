@@ -89,7 +89,7 @@ export function TicketPos(props: {
     return out;
   });
   const [ready, setReady] = useState(props.initial.ready);
-  const [tab, setTab] = useState<"services" | "labour" | "parts">("services");
+  const [tab, setTab] = useState<"all" | "services" | "labour" | "parts">("all");
   const [search, setSearch] = useState("");
   const [bike, setBike] = useState(props.initial.bike);
   const [parts, setParts] = useState<Part[]>([]);
@@ -129,16 +129,15 @@ export function TicketPos(props: {
   const work = lines.reduce((s, l) => s + l.minutes * l.qty, 0);
   const partsTotal = lines.filter((l) => l.price != null).reduce((s, l) => s + (l.price ?? 0) * l.qty, 0);
 
-  // Parts tab: Lightspeed items for the chosen bike, or what's typed.
+  // Parts tab: Lightspeed items for the chosen bike, or what's typed. All: parts matching what's typed (2+ letters).
   useEffect(() => {
-    if (tab !== "parts") return;
     const q = search.trim();
-    if (!q && !bike) return;
+    if (tab === "all" ? q.length < 2 : tab !== "parts" || (!q && !bike)) return;
     const mine = ++seq.current;
     const t = setTimeout(async () => {
       setPartsState("loading");
       try {
-        const res = await fetch(`/api/parts?${new URLSearchParams({ q, bike }).toString()}`, { cache: "no-store" });
+        const res = await fetch(`/api/parts?${new URLSearchParams({ q, bike: tab === "all" ? "" : bike }).toString()}`, { cache: "no-store" });
         const json = (await res.json()) as { parts?: Part[]; error?: string };
         if (mine !== seq.current) return;
         setParts(json.parts ?? []);
@@ -168,8 +167,21 @@ export function TicketPos(props: {
     update(lines.flatMap((x) => (x.key !== key ? [x] : x.qty + by <= 0 ? [] : [{ ...x, qty: Math.min(99, x.qty + by) }])));
   }
   const qtyOf = (key: string) => lines.find((l) => l.key === key)?.qty ?? 0;
-  const shown = services.filter((s) => !search.trim() || s.name.toLowerCase().includes(search.trim().toLowerCase()));
+  const query = search.trim().toLowerCase();
+  const match = (name: string) => !query || name.toLowerCase().includes(query);
+  const shown = services.filter((s) => match(s.name));
+  const labourShown = props.labourItems.filter((s) => match(s.name));
+  const presetsShown = props.labourItems.length ? [] : LABOUR.filter((m) => match(`${mins(m)} labour`));
+  // All: services and labour as they match; Lightspeed parts once 2+ letters are typed.
+  const partsInAll = tab === "all" && query.length >= 2;
   const model = bike.replace(/^\d+\s*-\s*/, "").split(/[·,]/)[0].trim().split(/\s+/).slice(0, 2).join(" ");
+
+  const serviceTile = (s: (typeof services)[number], muted: boolean) => (
+    <Tile key={s.key} muted={muted} name={s.name} sub={[s.price != null ? money(s.price) : null, muted ? "Labour" : `about ${mins(s.minutes)}`].filter(Boolean).join(" · ")} qty={qtyOf(`s:${s.name}`)} onAdd={() => add({ key: `s:${s.name}`, kind: "service", name: s.name, minutes: s.minutes, itemId: s.itemId, price: s.price ?? null })} onStep={(by) => step(`s:${s.name}`, by)} />
+  );
+  const partTile = (p: Part) => (
+    <Tile key={p.itemId} name={p.name} sub={p.price != null ? money(p.price) : "Price in Lightspeed"} qty={qtyOf(`p:${p.itemId}`)} onAdd={() => add({ key: `p:${p.itemId}`, kind: "part", name: p.name, minutes: 0, itemId: p.itemId, price: p.price })} onStep={(by) => step(`p:${p.itemId}`, by)} />
+  );
 
   return (
     <>
@@ -189,7 +201,7 @@ export function TicketPos(props: {
               <DropButton on={dropoff === "now"} onClick={() => chooseDropoff("now")} title="Now" sub="walk-in" />
               {earliest && <DropButton on={dropoff === earliest.iso} onClick={() => chooseDropoff(earliest.iso)} title={<><span className="lg:hidden">Earliest</span><span className="hidden lg:inline">Earliest available</span></>} sub={earliest.label} />}
               {earliest && (
-                <button type="button" role="radio" aria-checked={pickedDay} onClick={() => setCalOpen(true)} className={`flex min-h-12 min-w-0 flex-col items-start justify-center gap-0.5 rounded-lg border px-2.5 py-1.5 text-left lg:flex-row lg:items-center lg:gap-2 lg:px-3 ${pickedDay ? "border-[#17181a] bg-[#17181a] text-white" : "border-border bg-card"}`}>
+                <button type="button" role="radio" aria-checked={pickedDay} onClick={() => setCalOpen(true)} className={`flex min-h-12 min-w-0 flex-col items-start justify-center gap-0.5 rounded-lg border px-2.5 py-1.5 text-left lg:flex-row lg:items-center lg:gap-2 lg:px-3 ${pickedDay ? "border-[#015d47] bg-[#015d47] text-white" : "border-border bg-card"}`}>
                   <CalendarIcon />
                   <span className="text-xs font-bold lg:text-sm">{pickedDay ? dropLabel : props.todayLabel}</span>
                 </button>
@@ -288,10 +300,10 @@ export function TicketPos(props: {
         </div>
         {/* Laptops: search and tabs stay at the top while the tiles scroll. */}
         <div className="flex flex-col gap-3 lg:sticky lg:top-0 lg:z-10 lg:-mt-4 lg:bg-background lg:pt-4 lg:pb-1">
-        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder={tab === "parts" ? `Search parts${model ? ` (showing ${model})` : ""}…` : "Search services…"} aria-label="Search" className="input h-12 text-base" />
+        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder={tab === "parts" && model ? `Search items (showing parts for ${model})…` : "Search items…"} aria-label="Search" className="input h-12 text-base" />
         <div role="tablist" aria-label="What to add" className="flex flex-wrap gap-2">
-          {([["services", "Services"], ["labour", "Labour"], ["parts", model ? `Parts for ${model}` : "Parts"]] as const).map(([t, text]) => (
-            <button key={t} type="button" role="tab" aria-selected={tab === t} onClick={() => setTab(t)} className={`min-h-10 rounded-full border px-4 text-sm font-semibold ${tab === t ? "border-[#17181a] bg-[#17181a] text-white" : "border-border bg-card"}`}>
+          {([["all", "All"], ["services", "Services"], ["labour", "Labour"], ["parts", model ? `Parts for ${model}` : "Parts"]] as const).map(([t, text]) => (
+            <button key={t} type="button" role="tab" aria-selected={tab === t} onClick={() => setTab(t)} className={`min-h-10 rounded-full border px-4 text-sm font-semibold ${tab === t ? "border-[#015d47] bg-[#015d47] text-white" : "border-border bg-card"}`}>
               {text}
             </button>
           ))}
@@ -299,23 +311,25 @@ export function TicketPos(props: {
         </div>
 
         <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 xl:grid-cols-4">
-          {tab === "services" &&
-            shown.map((s) => (
-              <Tile key={s.key} name={s.name} sub={[s.price != null ? money(s.price) : null, `about ${mins(s.minutes)}`].filter(Boolean).join(" · ")} qty={qtyOf(`s:${s.name}`)} onAdd={() => add({ key: `s:${s.name}`, kind: "service", name: s.name, minutes: s.minutes, itemId: s.itemId, price: s.price ?? null })} onStep={(by) => step(`s:${s.name}`, by)} />
-            ))}
-          {tab === "labour" && props.labourItems.length > 0 &&
-            props.labourItems.map((s) => (
-              <Tile key={s.key} muted name={s.name} sub={[s.price != null ? money(s.price) : null, "Labour"].filter(Boolean).join(" · ")} qty={qtyOf(`s:${s.name}`)} onAdd={() => add({ key: `s:${s.name}`, kind: "service", name: s.name, minutes: s.minutes, itemId: s.itemId, price: s.price ?? null })} onStep={(by) => step(`s:${s.name}`, by)} />
-            ))}
-          {tab === "labour" && props.labourItems.length === 0 &&
-            LABOUR.map((m) => (
+          {(tab === "all" || tab === "services") && shown.map((s) => serviceTile(s, false))}
+          {(tab === "all" || tab === "labour") && labourShown.map((s) => serviceTile(s, true))}
+          {(tab === "all" || tab === "labour") &&
+            presetsShown.map((m) => (
               <Tile key={m} muted name={`+ ${mins(m)}`} sub="Labour" qty={qtyOf(`l:${m}`)} onAdd={() => add({ key: `l:${m}`, kind: "labour", name: `Labour ${mins(m)}`, minutes: m })} onStep={(by) => step(`l:${m}`, by)} />
             ))}
-          {tab === "parts" &&
-            parts.map((p) => (
-              <Tile key={p.itemId} name={p.name} sub={p.price != null ? money(p.price) : "Price in Lightspeed"} qty={qtyOf(`p:${p.itemId}`)} onAdd={() => add({ key: `p:${p.itemId}`, kind: "part", name: p.name, minutes: 0, itemId: p.itemId, price: p.price })} onStep={(by) => step(`p:${p.itemId}`, by)} />
-            ))}
+          {tab === "parts" && parts.map(partTile)}
         </div>
+        {partsInAll && (
+          <>
+            <p className={`${label} mt-1`}>Parts in Lightspeed</p>
+            {parts.length > 0 && partsState !== "loading" && <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 xl:grid-cols-4">{parts.map(partTile)}</div>}
+            <p className="text-sm text-muted">
+              {partsState === "loading" ? "Looking in Lightspeed…" : partsState === "error" ? `Lightspeed didn't send parts (${partsError}).` : parts.length === 0 ? `No parts match “${search.trim()}”.` : "Tap to add; parts go on the work order as lines."}
+            </p>
+          </>
+        )}
+        {tab === "all" && !query && <p className="text-sm text-muted">Type to search parts too.</p>}
+        {(tab === "services" || tab === "labour") && !shown.length && !labourShown.length && !presetsShown.length && query && <p className="text-sm text-muted">Nothing matches “{search.trim()}”.</p>}
         {tab === "parts" && (
           <p className="text-sm text-muted">
             {partsState === "loading"
@@ -329,7 +343,7 @@ export function TicketPos(props: {
                     : `Lightspeed items matching “${search.trim() || model}”. Tap to add; they go on the work order as lines.`}
           </p>
         )}
-        {tab !== "parts" && (
+        {tab !== "parts" && !partsInAll && (
           <p className="text-sm text-muted">
             {props.tilesNote || "Your Lightspeed service and labour items. Tap to add (again for more); each goes on the work order as a line at its Lightspeed price."}
           </p>
@@ -437,16 +451,17 @@ function PhotoAdd() {
  */
 function Tile({ name, sub, qty, onAdd, onStep, muted = false }: { name: string; sub: string; qty: number; onAdd: () => void; onStep: (by: number) => void; muted?: boolean }) {
   return (
-    <div className={`relative rounded-xl border ${muted ? "bg-[#f7f6f3]" : "bg-card"} ${qty ? "border-2 border-[#17181a]" : "border-border"}`}>
+    // Picked: forest edge with a crest-yellow glow (the screen's one accent; orange stays on the button).
+    <div className={`relative rounded-xl border ${qty ? "border-2 border-[#015d47] bg-[#fbfee8] shadow-[0_0_0_4px_rgba(224,243,84,0.8)]" : `border-border ${muted ? "bg-[#f7f6f3]" : "bg-card"}`}`}>
       <button type="button" onClick={onAdd} aria-label={qty ? `Add another ${name}` : `Add ${name}`} className="flex min-h-24 w-full flex-col justify-between p-3 text-left">
         <span className="line-clamp-2 font-bold">{name}</span>
         <span className={`text-sm text-muted ${qty ? "pr-24" : ""}`}>{sub}</span>
       </button>
       {qty > 0 && (
-        <div className="absolute right-2 bottom-2 flex items-center rounded-full border border-border bg-card" role="group" aria-label={`${name} quantity`}>
-          <button type="button" onClick={() => onStep(-1)} aria-label={`One less ${name}`} className="h-8 w-8 rounded-full text-base font-bold hover:bg-[#f7f6f3]">−</button>
+        <div className="absolute right-2 bottom-2 flex items-center rounded-full bg-[#015d47] text-white" role="group" aria-label={`${name} quantity`}>
+          <button type="button" onClick={() => onStep(-1)} aria-label={`One less ${name}`} className="h-8 w-8 rounded-full text-base font-bold hover:bg-white/15">−</button>
           <span className="w-5 text-center text-sm font-bold tabular-nums" aria-live="polite">{qty}</span>
-          <button type="button" onClick={() => onStep(1)} aria-label={`One more ${name}`} className="h-8 w-8 rounded-full text-base font-bold hover:bg-[#f7f6f3]">+</button>
+          <button type="button" onClick={() => onStep(1)} aria-label={`One more ${name}`} className="h-8 w-8 rounded-full text-base font-bold hover:bg-white/15">+</button>
         </div>
       )}
     </div>
@@ -551,7 +566,7 @@ function CalendarIcon() {
 /** One schedule choice: a title and the time under it. */
 function DropButton({ on, onClick, title, sub }: { on: boolean; onClick: () => void; title: React.ReactNode; sub: string }) {
   return (
-    <button type="button" role="radio" aria-checked={on} onClick={onClick} className={`min-h-12 min-w-0 rounded-lg border px-2.5 py-1.5 text-left lg:px-3 ${on ? "border-[#17181a] bg-[#17181a] text-white" : "border-border bg-card"}`}>
+    <button type="button" role="radio" aria-checked={on} onClick={onClick} className={`min-h-12 min-w-0 rounded-lg border px-2.5 py-1.5 text-left lg:px-3 ${on ? "border-[#015d47] bg-[#015d47] text-white" : "border-border bg-card"}`}>
       <span className="block text-sm font-bold">{title}</span>
       <span className={`block text-xs ${on ? "text-white/75" : "text-muted"}`}>{sub}</span>
     </button>
