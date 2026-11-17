@@ -8,6 +8,8 @@ import { currentShowroom } from "@/lib/current-showroom";
 import { sp, type SearchParams } from "@/lib/flash";
 import { addLocalDays, formatTime, toLocalDate } from "@/lib/time";
 import { jobPath, workshopJobs, type JobColumn, type WorkshopJob } from "@/lib/workshop";
+import { loadJobLogs } from "@/lib/job-log";
+import { currentStep, deriveTrack, fmtMinutes, STEP_LABEL, type Track } from "@/lib/job-track";
 import { markReadyAction, moveJobAction, readyJobAction, setBookingStatusAction, startBuildAction } from "../actions";
 
 export const metadata = { title: "Workshop" };
@@ -72,6 +74,9 @@ export default async function WorkshopPage({ searchParams }: { searchParams: Pro
   const ls = showroom.settings.lightspeed.shop_id !== null;
   const back = mech ? `/app/workshop?mech=${encodeURIComponent(mech)}` : RETURN;
   const readying = all.find((j) => j.id === sp(q.ready) && movable(j));
+  // The job tracker: each repair's step, tasks done and clock (lib/job-track.ts).
+  const logs = await loadJobLogs(db, jobs.filter((j) => movable(j) && j.workorderId).map((j) => j.workorderId!));
+  const tracks = new Map([...logs].map(([wo, entries]) => [wo, deriveTrack(entries, now)]));
 
   return (
     <div>
@@ -112,7 +117,7 @@ export default async function WorkshopPage({ searchParams }: { searchParams: Pro
                 {c.label}
                 <span className="text-muted">{list.length}</span>
               </h2>
-              {list.length === 0 ? <Empty>{c.empty}</Empty> : list.map((j) => <JobCard key={j.id} job={j} tz={tz} today={today} back={back} />)}
+              {list.length === 0 ? <Empty>{c.empty}</Empty> : list.map((j) => <JobCard key={j.id} job={j} tz={tz} today={today} back={back} track={j.workorderId && movable(j) ? tracks.get(j.workorderId) : undefined} />)}
             </section>
           );
         })}
@@ -126,7 +131,7 @@ export default async function WorkshopPage({ searchParams }: { searchParams: Pro
   );
 }
 
-function JobCard({ job, tz, today, back }: { job: WorkshopJob; tz: string; today: string; back: string }) {
+function JobCard({ job, tz, today, back, track }: { job: WorkshopJob; tz: string; today: string; back: string; track?: Track }) {
   const k = KIND[job.kind];
   const timing = job.noDate
     ? job.column === "parts" ? "Waiting on parts" : "No due date"
@@ -167,6 +172,7 @@ function JobCard({ job, tz, today, back }: { job: WorkshopJob; tz: string; today
         {job.title}
       </Link>
       <p className="mt-0.5 text-sm text-muted">{detail.filter(Boolean).join(" · ")}</p>
+      {track && <TrackLine job={job} track={track} />}
       <div className="mt-2 flex flex-wrap items-center gap-2">
         {job.unitId && job.column === "todo" && (
           <form action={startBuildAction.bind(null, job.unitId, RETURN)}>
@@ -195,6 +201,28 @@ function JobCard({ job, tz, today, back }: { job: WorkshopJob; tz: string; today
         <Mechanic name={job.mechanic} assigned={!!job.mechanicId} />
       </div>
     </article>
+  );
+}
+
+/** "Repair · 2 of 4 · ● 1 h 05 min" or "❚❚ paused at 22 min": where the job is in the tracker, and its clock. */
+function TrackLine({ job, track }: { job: WorkshopJob; track: Track }) {
+  const step = currentStep(track, job.column);
+  const done = [...track.tasks.values()].filter((t) => t.status === "done").length;
+  const progress = step === "repair" && track.taskTotal ? `${done} of ${track.taskTotal}` : null;
+  return (
+    <div className="mt-2">
+      <p className="flex flex-wrap items-center justify-between gap-2 text-xs font-bold">
+        <span>{[STEP_LABEL[step], progress].filter(Boolean).join(" · ")}</span>
+        {track.handsOn > 0 && (
+          <span className={`rounded-md px-1.5 py-0.5 ${track.running ? "bg-[#fff1e8] text-[#9a3412]" : "bg-[#f3f1ee] text-[#5b5f66]"}`}>
+            {track.running ? `● ${fmtMinutes(track.handsOn)}` : step === "pickup" ? fmtMinutes(track.handsOn) : `❚❚ paused at ${fmtMinutes(track.handsOn)}`}
+          </span>
+        )}
+      </p>
+      {progress && track.taskTotal ? (
+        <div aria-hidden className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-[#efede9]"><div className="h-full bg-[#015d47]" style={{ width: `${Math.min(100, (done / track.taskTotal) * 100)}%` }} /></div>
+      ) : null}
+    </div>
   );
 }
 

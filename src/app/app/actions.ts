@@ -32,7 +32,8 @@ import { mailerKind } from "@/lib/mailer";
 import { syncSpecialOrders } from "@/lib/special-orders";
 import { deleteView, saveView, syncWorkorders } from "@/lib/workorders";
 import type { BoardColumn } from "@/lib/workshop-columns";
-import { markJobReady, moveJob } from "@/lib/workshop-moves";
+import { markJobReady, moveJob, resolveJob } from "@/lib/workshop-moves";
+import { logJob } from "@/lib/job-log";
 import { createTicket, scheduleTicket, ticketPhotoData } from "@/lib/tickets";
 import { jobPath } from "@/lib/workshop";
 
@@ -699,6 +700,65 @@ export async function moveJobAction(jobId: string, column: BoardColumn, back: st
     const showroom = await currentShowroom(user);
     const r = await moveJob(db, { showroom, jobId, column, actor: user.id });
     return `Moved. Lightspeed work order #${r.workorderId} is now ${r.status}.`;
+  });
+}
+
+/**
+ * Job tracker (job page): Start inspection moves the work order to In progress (the tracker follows the move);
+ * Inspection done starts Repair. No flash: the page itself shows the new step.
+ */
+export async function jobStepAction(jobId: string, step: "inspection" | "repair", back: string) {
+  return run(safeReturn(back, "/app/workshop"), async () => {
+    const user = await requireActor("staff");
+    const showroom = await currentShowroom(user);
+    if (step === "inspection") {
+      await moveJob(db, { showroom, jobId, column: "doing", actor: user.id });
+      return;
+    }
+    const job = await resolveJob(db, showroom, jobId);
+    await logJob(db, { showroomId: showroom.id, workorderId: job.workorderId, actor: user.id, entry: { kind: "step", step } });
+  });
+}
+
+/** Job tracker: tick a task done (or untick it). Its time is the running time since the last tick. */
+export async function jobTaskAction(jobId: string, taskKey: string, taskLabel: string, done: boolean, back: string) {
+  return run(safeReturn(back, "/app/workshop"), async () => {
+    const user = await requireActor("staff");
+    const showroom = await currentShowroom(user);
+    const job = await resolveJob(db, showroom, jobId);
+    await logJob(db, { showroomId: showroom.id, workorderId: job.workorderId, actor: user.id, entry: { kind: done ? "task_done" : "task_undone", taskKey, taskLabel } });
+  });
+}
+
+/** Job tracker: restart the clock after it was paused (another bike was started). */
+export async function jobResumeAction(jobId: string, back: string) {
+  return run(safeReturn(back, "/app/workshop"), async () => {
+    const user = await requireActor("staff");
+    const showroom = await currentShowroom(user);
+    const job = await resolveJob(db, showroom, jobId);
+    await logJob(db, { showroomId: showroom.id, workorderId: job.workorderId, actor: user.id, entry: { kind: "resume" } });
+  });
+}
+
+/**
+ * Job page Ready: tasks still open are skipped with the reason picked for each (form fields "skip" = "key|label",
+ * "reason:<key>"); the job is marked ready as on the board (Lightspeed status, optional Klaviyo text) first.
+ */
+export async function jobReadyAction(jobId: string, back: string, formData: FormData) {
+  return run(safeReturn(back, "/app/workshop"), async () => {
+    const user = await requireActor("staff");
+    const showroom = await currentShowroom(user);
+    const job = await resolveJob(db, showroom, jobId);
+    // Lightspeed first: if the move fails, nothing is recorded as skipped.
+    const r = await markJobReady(db, { showroom, jobId, notify: formData.get("notify") === "on", actor: user.id });
+    for (const v of formData.getAll("skip")) {
+      const [taskKey, ...rest] = String(v).split("|");
+      if (!taskKey) continue;
+      const reason = String(formData.get(`reason:${taskKey}`) ?? "").trim() || "Not needed";
+      await logJob(db, { showroomId: showroom.id, workorderId: job.workorderId, actor: user.id, entry: { kind: "task_skipped", taskKey, taskLabel: rest.join("|") || taskKey, reason } });
+    }
+    const told = r.told === "sent" ? " The customer has been told." : r.told === "failed" ? " The message to the customer didn't go out; call them." : r.told === "no_contact" ? " There's no phone or email to tell the customer." : "";
+    return `Ready. Lightspeed says ${r.status}.${told}`;
   });
 }
 

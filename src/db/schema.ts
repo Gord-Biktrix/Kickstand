@@ -494,6 +494,36 @@ export const workorderViews = pgTable("workorder_views", {
   ...timestamps,
 });
 
+/**
+ * The job's time stamps (lib/job-track.ts): every step change, task tick, skip, pause and resume on a repair, keyed
+ * by its Lightspeed work order. The job's step, hands-on time and task times are worked out from these rows, so
+ * nothing is stored twice. `actor` is the staff user who tapped (null for Kickstand itself).
+ */
+export const jobLog = pgTable(
+  "job_log",
+  {
+    id: id(),
+    showroomId: uuid("showroom_id")
+      .notNull()
+      .references(() => showrooms.id),
+    workorderId: text("workorder_id").notNull(),
+    kind: text("kind").notNull(),
+    step: text("step"),
+    taskKey: text("task_key"),
+    taskLabel: text("task_label"),
+    reason: text("reason"),
+    total: integer("total"),
+    actor: uuid("actor"),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("job_log_workorder_idx").on(t.workorderId, t.at),
+    index("job_log_actor_idx").on(t.actor, t.at),
+    check("job_log_kind_check", sql`${t.kind} in ('step','task_done','task_undone','task_skipped','pause','resume','tasks')`),
+  ],
+);
+
+export type JobLogRow = typeof jobLog.$inferSelect;
 export type LsWorkorder = typeof lsWorkorders.$inferSelect;
 export type LsWorkorderStatus = typeof lsWorkorderStatuses.$inferSelect;
 export type LsEmployee = typeof lsEmployees.$inferSelect;

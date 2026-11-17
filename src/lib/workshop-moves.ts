@@ -11,6 +11,7 @@ import type { Db } from "@/db/client";
 import { bookings, bookingTypes, events, lsWorkorders, lsWorkorderStatuses, type Booking, type LsWorkorder } from "@/db/schema";
 import { LightspeedClient, lightspeedEnabled } from "./lightspeed";
 import { logger } from "./logger";
+import { syncColumnMove } from "./job-log";
 import { getNotifier, type Profile } from "./notifier";
 import type { ShowroomCtx } from "./showroom";
 import { workshopColumns, type BoardColumn, type WorkshopColumns } from "./workshop-columns";
@@ -41,7 +42,7 @@ export function parseJobId(id: string): { kind: "workorder" | "booking"; id: str
 
 export class WorkshopMoveError extends Error {}
 
-async function resolveJob(db: Db, showroom: ShowroomCtx, jobId: string): Promise<{ workorderId: string; booking: Booking | null; wo: LsWorkorder | null; typeName: string | null }> {
+export async function resolveJob(db: Db, showroom: ShowroomCtx, jobId: string): Promise<{ workorderId: string; booking: Booking | null; wo: LsWorkorder | null; typeName: string | null }> {
   const ref = parseJobId(jobId);
   if (!ref) throw new WorkshopMoveError("That job couldn't be found.");
   if (ref.kind === "booking") {
@@ -80,6 +81,12 @@ export async function moveJob(db: Db, args: { showroom: ShowroomCtx; jobId: stri
   }
   await db.update(lsWorkorders).set({ statusId: target.id, lsUpdatedAt: new Date() }).where(eq(lsWorkorders.id, job.workorderId));
   await db.insert(events).values({ showroomId: showroom.id, type: "workorder_moved", actor: args.actor, payload: { workorder_id: job.workorderId, booking_id: job.booking?.id ?? null, from, to: target.id, column: args.column } });
+  // The job tracker follows the board (Start begins the inspection, Waiting on parts pauses, Ready is Pickup).
+  try {
+    await syncColumnMove(db, { showroomId: showroom.id, workorderId: job.workorderId, column: args.column, actor: /^[0-9a-f-]{36}$/i.test(args.actor) ? args.actor : null });
+  } catch (err) {
+    logger.warn({ err: err instanceof Error ? err.message : String(err), workorderId: job.workorderId }, "job tracker not updated after a move");
+  }
   return { status: target.name, ...job };
 }
 
