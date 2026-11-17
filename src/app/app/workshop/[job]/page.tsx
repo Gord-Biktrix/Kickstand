@@ -15,7 +15,7 @@ import { listTicketPhotos } from "@/lib/tickets";
 import { loadJobLog, recordTaskTotal } from "@/lib/job-log";
 import { currentStep, deriveTrack, fmtMinutes, INSPECTION_TASKS, jobTasks, openTasks, repairDone, STEP_LABEL, STEP_ORDER, type JobStep, type Task, type Track } from "@/lib/job-track";
 import { ConfirmButton } from "@/components/confirm-button";
-import { jobReadyAction, jobResumeAction, jobStepAction, jobStepBackAction, jobTaskAction, moveJobAction, setBookingStatusAction, staffCancelTypeBookingAction } from "../../actions";
+import { jobReadyAction, jobResumeAction, jobStepAction, jobStepBackAction, jobTaskAction, cancelTicketAction, moveJobAction, setBookingStatusAction, staffCancelTypeBookingAction } from "../../actions";
 
 export const metadata = { title: "Job" };
 
@@ -158,6 +158,10 @@ export default async function JobPage({ params, searchParams }: { params: Promis
               </div>
             ) : booking ? (
               <Link href={`/app/bookings/${booking.id}`} className="mt-2 inline-block text-sm underline">Booking</Link>
+            ) : job.workorderId && job.source === "lightspeed" && step !== "pickup" && !wo?.saleId ? (
+              <form action={cancelTicketAction.bind(null, job.id)} className="mt-3">
+                <ConfirmButton className="btn btn-danger btn-sm w-full" message={`Cancel this ticket? Work order #${job.workorderId} is archived in Lightspeed and leaves the board. Nobody is texted.`}>Cancel ticket</ConfirmButton>
+              </form>
             ) : null}
           </section>
 

@@ -6,7 +6,7 @@ import { saveConnection, setLightspeedFetch } from "@/lib/lightspeed";
 import { MemoryNotifier, setNotifier } from "@/lib/notifier";
 import type { ShowroomCtx } from "@/lib/showroom";
 import { defaultWorkshopColumns } from "@/lib/workshop-columns";
-import { markJobReady, moveJob, parseJobId, WORKSHOP_READY_METRIC, writeStatusFor } from "@/lib/workshop-moves";
+import { cancelTicket, markJobReady, moveJob, parseJobId, WORKSHOP_READY_METRIC, writeStatusFor } from "@/lib/workshop-moves";
 import { resetDb, testDb, withSettings } from "./helpers";
 
 type Call = { method: string; url: string; body: Record<string, unknown> | null };
@@ -90,6 +90,19 @@ describe("moving jobs on the Workshop board", () => {
   it("won't move work orders for a store with Lightspeed off", async () => {
     const off = await withSettings(db, van, { lightspeed: { ...van.settings.lightspeed, enabled: false } });
     await expect(moveJob(db, { showroom: off, jobId: "w:10237", column: "doing", actor: "staff-1" })).rejects.toThrow(/isn't switched on/);
+  });
+
+  it("Cancel ticket archives a walk-in's work order and takes it off the board; Lightspeed refusing keeps it", async () => {
+    setLightspeedFetch(fakeLightspeed({ fail: true }).fetchImpl);
+    await expect(cancelTicket(db, { showroom: van, jobId: "w:10237", actor: "staff-1" })).rejects.toThrow(/didn't archive/);
+    expect(await db.select().from(lsWorkorders).where(eq(lsWorkorders.id, "10237"))).toHaveLength(1);
+    const ls = fakeLightspeed();
+    setLightspeedFetch(ls.fetchImpl);
+    await cancelTicket(db, { showroom: van, jobId: "w:10237", actor: "staff-1" });
+    expect(ls.calls).toEqual([expect.objectContaining({ method: "DELETE", url: expect.stringMatching(/Workorder\/10237\.json$/) })]);
+    expect(await db.select().from(lsWorkorders).where(eq(lsWorkorders.id, "10237"))).toHaveLength(0);
+    const [ev] = await db.select().from(events).where(eq(events.type, "workorder_cancelled"));
+    expect(ev).toMatchObject({ actor: "staff-1", payload: { workorder_id: "10237", customer: "Hana Sato" } });
   });
 
   it("Ready tells a walk-in through Klaviyo using their Lightspeed contact; unticked tells nobody; shop bikes have nobody to tell", async () => {

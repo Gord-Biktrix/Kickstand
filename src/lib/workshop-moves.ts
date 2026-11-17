@@ -58,6 +58,27 @@ export async function resolveJob(db: Db, showroom: ShowroomCtx, jobId: string): 
   return { workorderId: wo.id, booking: booking ?? null, wo, typeName: null };
 }
 
+/**
+ * Cancel a ticket that has no booking (a walk-in, or a work order made in Lightspeed): archive the work order in
+ * Lightspeed and take it off the board. Booked jobs are cancelled from their booking, which tells the customer.
+ */
+export async function cancelTicket(db: Db, args: { showroom: ShowroomCtx; jobId: string; actor: string; client?: LightspeedClient }): Promise<{ workorderId: string }> {
+  const { showroom } = args;
+  if (!lightspeedEnabled(showroom)) throw new WorkshopMoveError("Lightspeed isn't switched on for this store, so tickets can't be cancelled here.");
+  const job = await resolveJob(db, showroom, args.jobId);
+  if (job.booking) throw new WorkshopMoveError("This job has a booking. Cancel the booking instead, so the customer is told.");
+  if (job.wo?.saleId) throw new WorkshopMoveError("This work order is already on a sale in Lightspeed, so it can't be cancelled here.");
+  try {
+    await (args.client ?? new LightspeedClient(db)).archiveWorkorder(job.workorderId);
+  } catch (err) {
+    logger.warn({ err: err instanceof Error ? err.message : String(err), workorderId: job.workorderId }, "work order not archived in Lightspeed");
+    throw new WorkshopMoveError("Lightspeed didn't archive the work order, so the ticket is still open. Try again in a minute.");
+  }
+  await db.delete(lsWorkorders).where(eq(lsWorkorders.id, job.workorderId));
+  await db.insert(events).values({ showroomId: showroom.id, type: "workorder_cancelled", actor: args.actor, payload: { workorder_id: job.workorderId, customer: job.wo?.customerName ?? null } });
+  return { workorderId: job.workorderId };
+}
+
 /** Move a job to a column: writes the column's status to Lightspeed, then updates Kickstand's copy. */
 export async function moveJob(db: Db, args: { showroom: ShowroomCtx; jobId: string; column: BoardColumn; actor: string; client?: LightspeedClient }): Promise<{ status: string; workorderId: string; booking: Booking | null; wo: LsWorkorder | null; typeName: string | null }> {
   const { showroom } = args;

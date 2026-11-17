@@ -32,7 +32,7 @@ import { mailerKind } from "@/lib/mailer";
 import { syncSpecialOrders } from "@/lib/special-orders";
 import { deleteView, saveView, syncWorkorders } from "@/lib/workorders";
 import type { BoardColumn } from "@/lib/workshop-columns";
-import { assignMechanic, markJobReady, moveJob, resolveJob } from "@/lib/workshop-moves";
+import { assignMechanic, cancelTicket, markJobReady, moveJob, resolveJob } from "@/lib/workshop-moves";
 import { loadJobLog, logJob } from "@/lib/job-log";
 import { deriveTrack, isInspectionTask } from "@/lib/job-track";
 import { createTicket, scheduleTicket, ticketPhotoData } from "@/lib/tickets";
@@ -799,6 +799,16 @@ export async function assignMechanicAction(jobId: string, employeeId: string, ba
     await assignMechanic(db, { showroom, jobId, employeeId: employeeId || null, actor: user.id });
     const [emp] = employeeId ? await db.select({ name: lsEmployees.name }).from(lsEmployees).where(eq(lsEmployees.id, employeeId)) : [];
     return employeeId ? `Given to ${emp?.name ?? "the mechanic"}.` : "Unassigned.";
+  });
+}
+
+/** Job page: cancel a walk-in ticket (archives its Lightspeed work order); back to the Workshop. */
+export async function cancelTicketAction(jobId: string) {
+  return run("/app/workshop", async () => {
+    const user = await requireActor("staff");
+    const showroom = await currentShowroom(user);
+    const r = await cancelTicket(db, { showroom, jobId, actor: user.id });
+    return `Ticket cancelled. Work order #${r.workorderId} is archived in Lightspeed.`;
   });
 }
 
