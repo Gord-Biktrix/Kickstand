@@ -259,15 +259,8 @@ function DayView({ plan, jobs, tz, now, back }: { plan: DayPlan; jobs: WorkshopJ
     planned: "border-border bg-white",
   } as const;
   const mark = { done: "✓ ", running: "● ", waiting: "❚❚ ", planned: "" } as const;
-  const chip = "rounded-lg border px-3 py-2 text-sm";
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex flex-wrap gap-2">
-        {plan.unassigned > 0 && <span className={`${chip} border-border bg-card`}><b>{plan.unassigned} unassigned</b> · drag onto a mechanic</span>}
-        {plan.late > 0 && <span className={`${chip} border-[#f3b4b4] bg-[#fdecec] text-[#9f1d1d]`}><b>{plan.late} will be late</b></span>}
-        {plan.waiting > 0 && <span className={`${chip} border-border bg-card`}>{plan.waiting} waiting on parts</span>}
-        {plan.overflow > 0 && <span className={`${chip} border-border bg-card`}>{plan.overflow} more than fit today</span>}
-      </div>
       <DayDnd back={back}>
         <section aria-label="Day plan" className="overflow-x-auto rounded-xl border border-border bg-card">
           <div className="min-w-[900px]">
