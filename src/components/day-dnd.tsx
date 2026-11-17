@@ -5,11 +5,17 @@
  * (data-lane = a Lightspeed employee id, "" = Unassigned) gives the job to that mechanic. Only Lightspeed work
  * orders can be reassigned (data-assignable). The block dims while Lightspeed saves.
  */
-import { useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { assignMechanicAction } from "@/app/app/actions";
 
-export function DayDnd({ back, children }: { back: string; children: React.ReactNode }) {
+export function DayDnd({ back, nowX, children }: { back: string; nowX: number | null; children: React.ReactNode }) {
   const root = useRef<HTMLDivElement>(null);
+  // Open the day at now: the orange line a quarter of the way across the visible timeline.
+  useEffect(() => {
+    const sc = root.current?.querySelector<HTMLElement>("[data-scroll]");
+    if (!sc || nowX === null) return;
+    sc.scrollLeft = Math.max(0, nowX - (sc.clientWidth - 180) * 0.25);
+  }, [nowX]);
   const drag = useRef<{ job: string; lane: string } | null>(null);
   const [moving, setMoving] = useState<string | null>(null);
   const [pending, start] = useTransition();

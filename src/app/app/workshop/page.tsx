@@ -4,7 +4,7 @@ import { db } from "@/db/client";
 import { BoardDnd } from "@/components/board-dnd";
 import { DayDnd } from "@/components/day-dnd";
 import { ensureStoreHours } from "@/lib/booking-types";
-import { pct, planDay, type DayPlan, type PlanTrack } from "@/lib/day-plan";
+import { planDay, type DayPlan, type PlanTrack } from "@/lib/day-plan";
 import { Empty, Flash, PageHeader } from "@/components/ui";
 import { AutoSubmitSelect } from "@/components/auto-submit-select";
 import { requireUser } from "@/lib/auth";
@@ -101,6 +101,8 @@ export default async function WorkshopPage({ searchParams }: { searchParams: Pro
       tracks: planTracks,
       start: localToUtc(today, open, tz),
       end: localToUtc(today, close, tz),
+      // Work past close is still drawn (after hours) up to midnight, so you can see how far behind a lane is.
+      until: localToUtc(addLocalDays(today, 1), "00:00", tz),
       now,
     });
   }
@@ -234,12 +236,22 @@ function JobCard({ job, tz, today, back, track }: { job: WorkshopJob; tz: string
  * The Day view: one lane per mechanic across today's open hours (lib/day-plan.ts). Blocks link to the job; a
  * Lightspeed work order can be dragged onto another lane to give it to that mechanic.
  */
+/** Pixels per hour on the Day view: wide enough to read a block; the day scrolls sideways and opens at now. */
+const HOUR_PX = 220;
+const LANE_COL = 180;
+
 function DayView({ plan, jobs, tz, now, back }: { plan: DayPlan; jobs: WorkshopJob[]; tz: string; now: Date; back: string }) {
   const byId = new Map(jobs.map((j) => [j.id, j]));
   const today = toLocalDate(now, tz);
+  const startMs = plan.start.getTime();
+  const lastMs = Math.ceil(plan.last.getTime() / 3_600_000) * 3_600_000;
+  const x = (d: Date) => Math.max(0, ((Math.min(d.getTime(), lastMs) - startMs) / 3_600_000) * HOUR_PX);
+  const trackW = ((lastMs - startMs) / 3_600_000) * HOUR_PX;
   const hourMarks: Date[] = [];
-  for (let t = new Date(Math.ceil(plan.start.getTime() / 3_600_000) * 3_600_000); t < plan.end; t = new Date(t.getTime() + 3_600_000)) hourMarks.push(t);
-  const nowPct = now >= plan.start && now <= plan.end ? pct(now, plan) : null;
+  for (let t = new Date(Math.ceil(startMs / 3_600_000) * 3_600_000); t.getTime() < lastMs; t = new Date(t.getTime() + 3_600_000)) hourMarks.push(t);
+  const nowX = now >= plan.start && now.getTime() <= lastMs ? x(now) : null;
+  const closeX = x(plan.end);
+  const afterHours = closeX < trackW ? <div aria-hidden className="pointer-events-none absolute top-0 bottom-0 bg-[repeating-linear-gradient(135deg,transparent_0_6px,rgba(0,0,0,.035)_6px_12px)]" style={{ left: closeX, width: trackW - closeX }} /> : null;
   const STYLE = {
     done: "border-border bg-[#f3f1ee] text-[#5b5f66]",
     running: "border-2 border-[#17181a] bg-white",
@@ -247,61 +259,62 @@ function DayView({ plan, jobs, tz, now, back }: { plan: DayPlan; jobs: WorkshopJ
     planned: "border-border bg-white",
   } as const;
   const mark = { done: "✓ ", running: "● ", waiting: "❚❚ ", planned: "" } as const;
+  const sticky = "sticky left-0 z-20 border-r border-border";
   return (
-    <div className="flex flex-col gap-3">
-      <DayDnd back={back}>
-        <section aria-label="Day plan" className="overflow-x-auto rounded-xl border border-border bg-card">
-          <div className="min-w-[900px]">
-            <div className="grid grid-cols-[180px_minmax(0,1fr)] bg-[#f7f6f3]">
-              <div className="border-r border-border px-3.5 py-2.5 text-[11px] font-extrabold tracking-wider text-[#3d3f43] uppercase">Mechanic</div>
-              <div className="relative h-9">
-                {hourMarks.map((h) => (
-                  <span key={h.getTime()} className="absolute top-0 h-full border-l border-border pt-2.5 pl-2 text-xs font-bold whitespace-nowrap text-muted" style={{ left: `${pct(h, plan)}%` }}>{formatTime(h, tz).replace(":00", "")}</span>
-                ))}
-              </div>
-            </div>
-            <div className="relative">
-              {nowPct !== null && (
-                <div aria-hidden className="pointer-events-none absolute top-0 bottom-0 z-10 w-0.5 bg-[#ff6b1a]" style={{ left: `calc(180px + (100% - 180px) * ${nowPct / 100})` }}>
-                  <span className="absolute -top-0.5 left-1 text-[11px] font-extrabold whitespace-nowrap text-[#c2410c]">now {formatTime(now, tz)}</span>
-                </div>
-              )}
-              {plan.lanes.map((l) => (
-                <div key={l.mechanicId ?? "none"} data-lane={l.mechanicId ?? ""} className={`grid min-h-[88px] grid-cols-[180px_minmax(0,1fr)] border-t border-border transition-colors ${l.mechanicId ? "" : "bg-[#fbfaf8]"}`}>
-                  <div className="flex flex-col justify-center gap-1 border-r border-border px-3.5 py-3">
-                    <span className="font-extrabold">{l.name}</span>
-                    <span className="text-xs text-muted">{[l.minutes ? `${fmtMinutes(l.minutes)} left today` : l.mechanicId ? "Nothing left today" : null, l.waiting ? `❚❚ ${l.waiting} on parts` : null].filter(Boolean).join(" · ")}</span>
-                  </div>
-                  <div className="relative">
-                    {l.blocks.map((b) => {
-                      const job = byId.get(b.jobId);
-                      const left = pct(b.start, plan);
-                      const width = Math.max(4, pct(b.end, plan) - left);
-                      return (
-                        <Link
-                          key={b.jobId}
-                          href={job && movable(job) ? jobPath(job.id) : (job?.href ?? "#")}
-                          data-job={b.jobId}
-                          data-lane={l.mechanicId ?? ""}
-                          data-assignable={b.assignable ? "1" : "0"}
-                          draggable={b.assignable}
-                          title={`${b.title} · ${formatTime(b.start, tz)}–${formatTime(b.end, tz)}${b.assignable ? " · drag to give it to someone" : ""}`}
-                          className={`absolute top-3 bottom-3 overflow-hidden rounded-lg border px-2 py-1.5 text-xs leading-tight ${STYLE[b.state]} ${b.late ? "border-2 border-red-600" : ""} ${l.mechanicId ? "" : "border-dashed"} ${b.assignable ? "cursor-grab active:cursor-grabbing" : ""}`}
-                          style={{ left: `${left}%`, width: `${Math.min(width, 100 - left)}%` }}
-                        >
-                          <span className="block truncate text-[13px] font-bold">{mark[b.state]}{b.title}</span>
-                          <span className={`block truncate ${b.late ? "font-bold text-red-700" : "text-muted"}`}>{b.late && job ? (job.readyBy < now ? `was due ${when(job.readyBy, tz, today)}` : `due ${when(job.readyBy, tz, today)} · will be late`) : b.sub}</span>
-                        </Link>
-                      );
-                    })}
-                  </div>
-                </div>
+    <DayDnd back={back} nowX={nowX}>
+      <section aria-label="Day plan" data-scroll className="overflow-x-auto rounded-xl border border-border bg-card">
+        <div className="relative" style={{ width: LANE_COL + trackW }}>
+          <div className="flex bg-[#f7f6f3]">
+            <div className={`${sticky} shrink-0 bg-[#f7f6f3] px-3.5 py-2.5 text-[11px] font-extrabold tracking-wider text-[#3d3f43] uppercase`} style={{ width: LANE_COL }}>Mechanic</div>
+            <div className="relative h-9" style={{ width: trackW }}>
+              {hourMarks.map((h) => (
+                <span key={h.getTime()} className="absolute top-0 h-full border-l border-border pt-2.5 pl-2 text-xs font-bold whitespace-nowrap text-muted" style={{ left: x(h) }}>{formatTime(h, tz).replace(":00", "")}</span>
               ))}
+              {closeX < trackW && <span className="absolute top-0 pt-2.5 pl-2 text-xs font-bold whitespace-nowrap text-[#9f1d1d]" style={{ left: closeX + 44 }}>closed</span>}
             </div>
           </div>
-        </section>
-      </DayDnd>
-    </div>
+          {nowX !== null && (
+            <div aria-hidden className="pointer-events-none absolute top-0 bottom-0 z-10 w-0.5 bg-[#ff6b1a]" style={{ left: LANE_COL + nowX }}>
+              <span className="absolute top-1 left-1.5 rounded bg-[#ff6b1a] px-1.5 py-0.5 text-[11px] font-extrabold whitespace-nowrap text-white">{formatTime(now, tz)}</span>
+            </div>
+          )}
+          {plan.lanes.map((l) => (
+            <div key={l.mechanicId ?? "none"} data-lane={l.mechanicId ?? ""} className={`flex min-h-[88px] border-t border-border transition-colors ${l.mechanicId ? "" : "bg-[#fbfaf8]"}`}>
+              <div className={`${sticky} flex shrink-0 flex-col justify-center gap-1 px-3.5 py-3 ${l.mechanicId ? "bg-card" : "bg-[#fbfaf8]"}`} style={{ width: LANE_COL }}>
+                <span className="font-extrabold">{l.name}</span>
+                <span className="text-xs text-muted">{[l.minutes ? `${fmtMinutes(l.minutes)} left today` : l.mechanicId ? "Nothing left today" : null, l.waiting ? `❚❚ ${l.waiting} on parts` : null].filter(Boolean).join(" · ")}</span>
+              </div>
+              <div className="relative" style={{ width: trackW }}>
+                {hourMarks.map((h) => <span key={h.getTime()} aria-hidden className="absolute top-0 bottom-0 border-l border-[#f0eeea]" style={{ left: x(h) }} />)}
+                {afterHours}
+                {l.blocks.map((b) => {
+                  const job = byId.get(b.jobId);
+                  const left = x(b.start);
+                  const width = Math.max(48, x(b.end) - left - 4);
+                  return (
+                    <Link
+                      key={b.jobId}
+                      href={job && movable(job) ? jobPath(job.id) : (job?.href ?? "#")}
+                      data-job={b.jobId}
+                      data-lane={l.mechanicId ?? ""}
+                      data-assignable={b.assignable ? "1" : "0"}
+                      draggable={b.assignable}
+                      title={`${b.title} · ${formatTime(b.start, tz)}–${formatTime(b.end, tz)}${b.assignable ? " · drag to give it to someone" : ""}`}
+                      className={`absolute top-3 bottom-3 overflow-hidden rounded-lg border px-2 py-1.5 text-xs leading-tight ${STYLE[b.state]} ${b.late ? "border-2 border-red-600" : ""} ${l.mechanicId ? "" : "border-dashed"} ${b.assignable ? "cursor-grab active:cursor-grabbing" : ""}`}
+                      style={{ left: left + 2, width }}
+                    >
+                      <span className="block truncate text-[13px] font-bold">{mark[b.state]}{b.title}</span>
+                      <span className="block truncate text-muted">{b.sub}</span>
+                      {b.late && job && <span className="block truncate font-bold text-red-700">{job.readyBy < now ? `was due ${when(job.readyBy, tz, today)}` : `due ${when(job.readyBy, tz, today)} · will be late`}</span>}
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+    </DayDnd>
   );
 }
 

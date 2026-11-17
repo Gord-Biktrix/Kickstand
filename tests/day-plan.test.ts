@@ -68,3 +68,15 @@ describe("the Workshop day plan", () => {
     expect(plan.lanes[1]).toMatchObject({ name: "Gray", blocks: [], waiting: 1, minutes: 0 });
   });
 });
+
+describe("work past close", () => {
+  it("is drawn after hours up to the limit, and the plan ends where the work does", () => {
+    const D = (hhmm: string) => new Date(`2027-11-16T${hhmm}:00Z`);
+    const j = (id: string, minutes: number): PlanJob => ({ id, kind: "repair", column: "todo", title: id, customer: null, minutes, startBy: D("09:00"), readyBy: D("18:00"), visitAt: D("09:00"), noDate: false, notHereYet: false, mechanicId: "1", mechanic: "Gray", assignable: true });
+    const plan = planDay({ jobs: [j("a", 120), j("b", 120), j("c", 600)], tracks: new Map(), start: D("09:00"), end: D("18:00"), now: D("16:00"), until: D("23:59") });
+    expect(plan.lanes[0].blocks.map((b) => [b.jobId, b.start.toISOString().slice(11, 16), b.late])).toEqual([["a", "16:00", false], ["b", "18:00", true], ["c", "20:00", true]]);
+    expect(plan.overflow).toBe(0);
+    expect(plan.last).toEqual(D("23:59")); // "c" starts at 20:00, runs past the limit and is cut there
+    expect(plan.lanes[0].minutes).toBe(120); // only what fits before close counts as today
+  });
+});
