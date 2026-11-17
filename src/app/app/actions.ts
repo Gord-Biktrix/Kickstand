@@ -671,7 +671,7 @@ export async function createTicketAction(formData: FormData) {
         service: ticketServices(formData), said: str(formData, "said"), employeeId: str(formData, "mech") || null,
         parts: ticketParts(formData), photos: ticketPhotoData(formData.getAll("photo").filter((v): v is string => typeof v === "string")),
       });
-      const lines = !r.workorderId ? " The Lightspeed work order isn't there yet, so its lines weren't added; open the booking to retry." : r.partsFailed.length ? ` ${r.partsFailed.length} line${r.partsFailed.length > 1 ? "s" : ""} couldn't be added (${r.partsFailed.join(", ")}).` : r.partsAdded ? ` ${r.partsAdded} line${r.partsAdded > 1 ? "s" : ""} on work order #${r.workorderId}.` : "";
+      const lines = !r.workorderId ? " The Lightspeed work order isn't there yet, so its lines weren't added; open the booking to retry." : r.partsFailed.length ? ` ${r.partsFailed.length} line${r.partsFailed.length > 1 ? "s" : ""} couldn't be added (${r.partsFailed.join(", ")})${r.partsError ? `: Lightspeed said ${r.partsError}` : ""}.` : r.partsAdded ? ` ${r.partsAdded} line${r.partsAdded > 1 ? "s" : ""} on work order #${r.workorderId}.` : "";
       target = withFlash(`/app/bookings/${r.bookingId}`, { ok: `Drop-off booked. The customer gets a confirmation.${lines}` });
     } else {
     const readyRaw = str(formData, "ready");
@@ -683,7 +683,7 @@ export async function createTicketAction(formData: FormData) {
       actor: user.id,
     });
     const id = r.workorderId;
-    const parts = r.partsFailed.length ? ` ${r.partsFailed.length} part${r.partsFailed.length > 1 ? "s" : ""} couldn't be added in Lightspeed (${r.partsFailed.join(", ")}); they're in the note.` : r.partsAdded ? ` ${r.partsAdded} part line${r.partsAdded > 1 ? "s" : ""} added.` : "";
+    const parts = r.partsFailed.length ? ` ${r.partsFailed.length} part${r.partsFailed.length > 1 ? "s" : ""} couldn't be added in Lightspeed (${r.partsFailed.join(", ")})${r.partsError ? `: ${r.partsError}` : ""}; they're in the note.` : r.partsAdded ? ` ${r.partsAdded} part line${r.partsAdded > 1 ? "s" : ""} added.` : "";
     target = withFlash(`${jobPath(`w:${id}`)}`, { ok: `Ticket created: Lightspeed work order #${id}.${parts}` });
     }
   } catch (err) {

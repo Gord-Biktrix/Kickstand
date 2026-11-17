@@ -163,7 +163,7 @@ describe("new tickets from the POS screen", () => {
     const ls = fakeCreate();
     setLightspeedFetch(ls.fetchImpl);
     const r = await createTicket(db, { showroom: van, ticket: { ...base, customer: { name: "Ahmed Ali", phone: "604 555 0187", email: "" } }, actor: "staff-1", now: new Date("2026-11-16T23:00:00Z") });
-    expect(r).toEqual({ workorderId: "10300", partsAdded: 0, partsFailed: [] });
+    expect(r).toEqual({ workorderId: "10300", partsAdded: 0, partsFailed: [], partsError: null });
     expect(ls.calls.find((c) => c.url.endsWith("Customer.json"))!.body).toMatchObject({ firstName: "Ahmed", lastName: "Ali" });
     expect(ls.calls.find((c) => c.url.endsWith("Workorder.json"))!.body).toMatchObject({ shopID: 3, customerID: 8801, employeeID: 31, workorderStatusID: 1, hookIn: "Tune-up", etaOut: "2026-11-17T01:30:00.000Z", timeIn: "2026-11-16T23:00:00.000Z" });
     const jobs = await workshopJobs(db, van, new Date("2026-11-16T23:05:00Z"));
@@ -222,12 +222,12 @@ describe("new tickets from the POS screen", () => {
       calls.push({ method: init?.method ?? "GET", url, body });
       const json = (status: number, data: unknown) => new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json" } });
       if (url.endsWith("Workorder.json")) return json(200, { Workorder: { workorderID: "10302" } });
-      if (url.endsWith("WorkorderItem.json")) return body.itemID === 66 ? json(400, { message: "no stock" }) : json(200, { WorkorderItem: { workorderItemID: "1" } });
+      if (/Workorder\/\d+\/WorkorderItem\.json$/.test(url)) return body.itemID === 66 ? json(400, { message: "no stock" }) : json(200, { WorkorderItem: { workorderItemID: "1" } });
       return json(404, {});
     });
     const r = await createTicket(db, { showroom: van, ticket: { ...base, customer: { lsCustomerId: "9020", name: "Alan" }, parts: [{ itemId: "55", name: "Crank arm", qty: 2 }, { itemId: "66", name: "Display", qty: 1 }] }, actor: "s" });
-    expect(r).toEqual({ workorderId: "10302", partsAdded: 1, partsFailed: ["Display"] });
-    expect(calls.filter((c) => c.url.endsWith("WorkorderItem.json")).map((c) => c.body)).toEqual([
+    expect(r).toEqual({ workorderId: "10302", partsAdded: 1, partsFailed: ["Display"], partsError: "POST Workorder/10302/WorkorderItem.json → 400: no stock" });
+    expect(calls.filter((c) => /Workorder\/\d+\/WorkorderItem\.json$/.test(c.url)).map((c) => c.body)).toEqual([
       expect.objectContaining({ workorderID: 10302, itemID: 55, unitQuantity: 2 }),
       expect.objectContaining({ workorderID: 10302, itemID: 66, unitQuantity: 1 }),
     ]);

@@ -247,13 +247,18 @@ export async function listTicketPhotos(db: Db, workorderId: string): Promise<{ i
   return db.select({ id: ticketPhotos.id, createdAt: ticketPhotos.createdAt }).from(ticketPhotos).where(eq(ticketPhotos.workorderId, workorderId)).orderBy(ticketPhotos.createdAt);
 }
 
-/** Services and parts become real lines on the work order (Lightspeed reserves stock). One that fails is reported. */
-export async function addWorkorderParts(client: LightspeedClient, workorderID: string, parts: { itemId: string; name: string; qty: number }[], employeeId: string | null): Promise<{ added: number; failed: string[] }> {
+/**
+ * Services and parts become real lines on the work order (Lightspeed reserves stock). One that fails is reported,
+ * with Lightspeed's reason. Lines are created under the work order (Workorder/{id}/WorkorderItem): the top-level
+ * WorkorderItem endpoint is read-only and answers 405.
+ */
+export async function addWorkorderParts(client: LightspeedClient, workorderID: string, parts: { itemId: string; name: string; qty: number }[], employeeId: string | null): Promise<{ added: number; failed: string[]; reason: string | null }> {
   let added = 0;
   const failed: string[] = [];
+  let reason: string | null = null;
   for (const p of parts) {
     try {
-      await client.request("POST", "WorkorderItem.json", {
+      await client.request("POST", `Workorder/${workorderID}/WorkorderItem.json`, {
         workorderID: Number(workorderID),
         itemID: Number(p.itemId),
         unitQuantity: p.qty,
@@ -264,10 +269,11 @@ export async function addWorkorderParts(client: LightspeedClient, workorderID: s
       added++;
     } catch (err) {
       failed.push(p.name);
+      reason ??= lightspeedReason(err);
       logger.warn({ err: lightspeedReason(err), workorderID, itemId: p.itemId }, "part not added to the work order");
     }
   }
-  return { added, failed };
+  return { added, failed, reason };
 }
 
 /** Photos stay in Kickstand; the work order's internal note points staff in Lightspeed to them. */
@@ -296,7 +302,7 @@ export async function scheduleTicket(
     bike: string; serial: string; serializedId: string | null; service: string; said: string; employeeId: string | null;
     parts: { itemId: string; name: string; qty: number }[]; photos: string[];
   },
-): Promise<{ bookingId: string; workorderId: string | null; partsAdded: number; partsFailed: string[] }> {
+): Promise<{ bookingId: string; workorderId: string | null; partsAdded: number; partsFailed: string[]; partsError?: string | null }> {
   if (!args.service.trim()) throw new TicketError("Tap what it needs.");
   const { booking } = await createTypeBooking(db, {
     showroom: args.showroom,
@@ -311,12 +317,12 @@ export async function scheduleTicket(
   });
   if (!booking.lsWorkorderId) return { bookingId: booking.id, workorderId: null, partsAdded: 0, partsFailed: args.parts.map((p) => p.name) };
   const client = args.client ?? new LightspeedClient(db);
-  const { added, failed } = await addWorkorderParts(client, booking.lsWorkorderId, args.parts, args.employeeId);
+  const { added, failed, reason } = await addWorkorderParts(client, booking.lsWorkorderId, args.parts, args.employeeId);
   await attachTicketPhotos(db, client, { showroomId: args.showroom.id, workorderId: booking.lsWorkorderId, images: args.photos, actor: args.actor });
-  return { bookingId: booking.id, workorderId: booking.lsWorkorderId, partsAdded: added, partsFailed: failed };
+  return { bookingId: booking.id, workorderId: booking.lsWorkorderId, partsAdded: added, partsFailed: failed, partsError: reason };
 }
 
-export type TicketResult = { workorderId: string; partsAdded: number; partsFailed: string[] };
+export type TicketResult = { workorderId: string; partsAdded: number; partsFailed: string[]; partsError?: string | null };
 
 export class TicketError extends Error {}
 
@@ -383,8 +389,8 @@ export async function createTicket(db: Db, args: { showroom: ShowroomCtx; ticket
     etaOut: ticket.readyBy,
     lsUpdatedAt: now,
   }).onConflictDoNothing();
-  const { added: partsAdded, failed: partsFailed } = await addWorkorderParts(client, workorderID, ticket.parts ?? [], ticket.employeeId);
+  const { added: partsAdded, failed: partsFailed, reason: partsError } = await addWorkorderParts(client, workorderID, ticket.parts ?? [], ticket.employeeId);
   const photos = await attachTicketPhotos(db, client, { showroomId: showroom.id, workorderId: workorderID, images: ticket.photos ?? [], actor: args.actor });
   await db.insert(events).values({ showroomId: showroom.id, type: "ticket_created", actor: args.actor, payload: { workorder_id: workorderID, customer_id: customerId, service: ticket.service, parts_added: partsAdded, parts_failed: partsFailed, photos } });
-  return { workorderId: workorderID, partsAdded, partsFailed };
+  return { workorderId: workorderID, partsAdded, partsFailed, partsError };
 }
