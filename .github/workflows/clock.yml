@@ -1,7 +1,8 @@
-# Hourly clock tick (SPEC §8). Vercel's Hobby plan only allows daily crons, so GitHub Actions
-# calls the endpoint instead. Secrets: APP_BASE_URL (e.g. https://kickstand.vercel.app) and
-# CRON_SECRET (same value as the Vercel env var). GitHub may start a schedule a few minutes late,
-# which is fine — the clock runs daily actions at or after 7 am local and dedupes every message.
+# Optional hourly clock tick (SPEC §8) on top of the two daily Vercel crons in vercel.json.
+# Secrets: APP_BASE_URL (e.g. https://kickstand-eight.vercel.app) and CRON_SECRET (same value as
+# the Vercel env var). Until both are set the job skips with a notice instead of failing, so the
+# schedule never spams "Run failed" mail. GitHub may start a schedule a few minutes late, which is
+# fine — the clock runs daily actions at or after 7 am local and dedupes every message.
 name: clock
 on:
   schedule:
@@ -15,11 +16,22 @@ on:
 jobs:
   tick:
     runs-on: ubuntu-latest
+    env:
+      APP_BASE_URL: ${{ secrets.APP_BASE_URL }}
+      CRON_SECRET: ${{ secrets.CRON_SECRET }}
+      FORCE: ${{ inputs.force }}
     steps:
       - name: Call /api/cron/clock
         run: |
-          url="${{ secrets.APP_BASE_URL }}/api/cron/clock"
-          if [ -n "${{ inputs.force }}" ]; then url="$url?force=${{ inputs.force }}"; fi
-          code=$(curl -sS -o /tmp/out.json -w "%{http_code}" -X POST -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" "$url")
-          cat /tmp/out.json; echo
-          [ "$code" = "200" ]
+          if [ -z "$APP_BASE_URL" ] || [ -z "$CRON_SECRET" ]; then
+            echo "::notice::Skipped — set the APP_BASE_URL and CRON_SECRET repository secrets to enable the hourly tick (daily Vercel crons still run)."
+            exit 0
+          fi
+          url="${APP_BASE_URL%/}/api/cron/clock"
+          if [ -n "$FORCE" ]; then url="$url?force=$FORCE"; fi
+          code=$(curl -sS --max-time 90 -o /tmp/out.json -w "%{http_code}" -X POST -H "Authorization: Bearer $CRON_SECRET" "$url" || echo "000")
+          cat /tmp/out.json 2>/dev/null; echo
+          if [ "$code" != "200" ]; then
+            echo "::error::Clock tick returned HTTP $code"
+            exit 1
+          fi
