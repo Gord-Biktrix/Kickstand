@@ -64,7 +64,6 @@ export default async function NewTicketPage({ searchParams }: { searchParams: Pr
   const [hours, jobs] = await Promise.all([ensureStoreHours(db, showroom), workshopJobs(db, showroom, now)]);
   const benches = showroom.settings.workshop_benches;
   const loads = benchLoads(jobs, benches, now);
-  const ready = v("ready") || (work ? formatInZone(estimateReady({ now, work, loads, hours, tz }), tz, "yyyy-MM-dd'T'HH:mm") : "");
 
   // After an error or while scheduling, the picked customer comes back in `c`.
   const picked = v("c");
@@ -78,6 +77,9 @@ export default async function NewTicketPage({ searchParams }: { searchParams: Pr
     .filter((d) => d.slots.length);
   // After an error the chosen time comes back in ?dropoff=.
   const initialDropoff = days.flatMap((d) => d.slots).some((sl) => sl.iso === v("dropoff")) ? v("dropoff") : "now";
+  // Ready-by isn't picked: it follows the work and when the bike arrives (the client recomputes as lines change).
+  const later = initialDropoff !== "now";
+  const ready = work ? formatInZone(estimateReady({ now: later ? new Date(initialDropoff) : now, work, loads: later ? [0] : loads, hours, tz }), tz, "yyyy-MM-dd'T'HH:mm") : "";
 
   return (
     <div>

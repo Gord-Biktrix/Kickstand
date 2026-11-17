@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { Picked } from "./customer-picker";
-import { ReadyPicker } from "./ready-picker";
+import { readyLabel } from "./ready-picker";
 import { Wheel } from "./booking-calendar-picker";
 import { TicketCustomerBike } from "./ticket-customer-bike";
 import { estimateReady, type WeeklyHours } from "@/lib/ready-estimate";
@@ -87,7 +87,6 @@ export function TicketPos(props: {
     return out;
   });
   const [ready, setReady] = useState(props.initial.ready);
-  const [readyTouched, setReadyTouched] = useState(!!props.initial.ready && props.initial.services.length === 0);
   const [tab, setTab] = useState<"services" | "labour" | "parts">("services");
   const [search, setSearch] = useState("");
   const [bike, setBike] = useState(props.initial.bike);
@@ -127,11 +126,11 @@ export function TicketPos(props: {
   function update(next: Line[]) {
     setLines(next);
     const w = next.reduce((s, l) => s + l.minutes * l.qty, 0);
-    if (!readyTouched) setReady(next.length ? readyAfter(w || props.defaultMinutes, props.loads, props.hours, tz, dropoff) : "");
+    setReady(next.length ? readyAfter(w || props.defaultMinutes, props.loads, props.hours, tz, dropoff) : "");
   }
   function chooseDropoff(d: string) {
     setDropoff(d);
-    if (!readyTouched && lines.length) setReady(readyAfter(work || props.defaultMinutes, props.loads, props.hours, tz, d));
+    if (lines.length) setReady(readyAfter(work || props.defaultMinutes, props.loads, props.hours, tz, d));
   }
   function add(l: Omit<Line, "qty">) {
     const found = lines.find((x) => x.key === l.key);
@@ -166,14 +165,16 @@ export function TicketPos(props: {
             <p className={label}>Ready by</p>
             <div className="mt-1.5 flex flex-wrap items-center gap-2">
               {lines.length > 0 && ready ? (
-                <ReadyPicker name="ready" value={ready} tz={tz} onChange={(v) => { setReady(v); setReadyTouched(true); }} />
+                <>
+                  <input type="hidden" name="ready" value={ready} />
+                  <span className="text-base font-bold">{readyLabel(ready)}</span>
+                </>
               ) : (
                 <span className="text-muted">Add the work first</span>
               )}
             </div>
             <p className="mt-1 text-xs text-muted">
               {dropoff === "now" ? `${props.benches} bench${props.benches === 1 ? "" : "es"} · ${queueText(props.loads)}` : `From ${dropLabel}, in open hours`}
-              {readyTouched ? " · set by hand" : ""}
             </p>
           </div>
         </div>
