@@ -6,7 +6,7 @@ import { removeGoogleConnection } from "@/lib/google-connection";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { db } from "@/db/client";
-import { appointments, capacityOverrides, capacityRules, lsWorkorderStatuses, orders, staffSessions, staffUsers, units } from "@/db/schema";
+import { appointments, capacityOverrides, capacityRules, lsEmployees, lsWorkorderStatuses, orders, staffSessions, staffUsers, units } from "@/db/schema";
 import { assignableRoles, canManage, clearPassword, deleteStaff, hasRole, inviteStaff, isRole, requireActor, roleLabel, SESSION_COOKIE, setPassword, setStaffActive, signOut, updateStaff } from "@/lib/auth";
 import { BOOKING_ERROR_TEXT, BookingError, bookGroup, cancelBooking, recordNoShow, rescheduleBooking } from "@/lib/booking";
 import { validateImport } from "@/lib/csv";
@@ -32,7 +32,7 @@ import { mailerKind } from "@/lib/mailer";
 import { syncSpecialOrders } from "@/lib/special-orders";
 import { deleteView, saveView, syncWorkorders } from "@/lib/workorders";
 import type { BoardColumn } from "@/lib/workshop-columns";
-import { markJobReady, moveJob, resolveJob } from "@/lib/workshop-moves";
+import { assignMechanic, markJobReady, moveJob, resolveJob } from "@/lib/workshop-moves";
 import { logJob } from "@/lib/job-log";
 import { createTicket, scheduleTicket, ticketPhotoData } from "@/lib/tickets";
 import { jobPath } from "@/lib/workshop";
@@ -760,6 +760,17 @@ export async function jobReadyAction(jobId: string, back: string, formData: Form
     }
     const told = r.told === "sent" ? " The customer has been told." : r.told === "failed" ? " The message to the customer didn't go out; call them." : r.told === "no_contact" ? " There's no phone or email to tell the customer." : "";
     return `Ready. Lightspeed says ${r.status}.${told}`;
+  });
+}
+
+/** Workshop Day view: a block dropped on a mechanic's lane gives them the job (Lightspeed employee on the work order). */
+export async function assignMechanicAction(jobId: string, employeeId: string, back: string) {
+  return run(safeReturn(back, "/app/workshop?view=day"), async () => {
+    const user = await requireActor("staff");
+    const showroom = await currentShowroom(user);
+    await assignMechanic(db, { showroom, jobId, employeeId: employeeId || null, actor: user.id });
+    const [emp] = employeeId ? await db.select({ name: lsEmployees.name }).from(lsEmployees).where(eq(lsEmployees.id, employeeId)) : [];
+    return employeeId ? `Given to ${emp?.name ?? "the mechanic"}.` : "Unassigned.";
   });
 }
 

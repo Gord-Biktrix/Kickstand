@@ -2,11 +2,14 @@ import Link from "next/link";
 import { formatInZone } from "@/lib/time";
 import { db } from "@/db/client";
 import { BoardDnd } from "@/components/board-dnd";
+import { DayDnd } from "@/components/day-dnd";
+import { ensureStoreHours } from "@/lib/booking-types";
+import { pct, planDay, type DayPlan, type PlanTrack } from "@/lib/day-plan";
 import { Empty, Flash, PageHeader } from "@/components/ui";
 import { requireUser } from "@/lib/auth";
 import { currentShowroom } from "@/lib/current-showroom";
 import { sp, type SearchParams } from "@/lib/flash";
-import { addLocalDays, formatTime, toLocalDate } from "@/lib/time";
+import { addLocalDays, formatTime, localToUtc, toLocalDate } from "@/lib/time";
 import { jobPath, workshopJobs, type JobColumn, type WorkshopJob } from "@/lib/workshop";
 import { loadJobLogs } from "@/lib/job-log";
 import { currentStep, deriveTrack, fmtMinutes, STEP_LABEL, type Track } from "@/lib/job-track";
@@ -77,6 +80,31 @@ export default async function WorkshopPage({ searchParams }: { searchParams: Pro
   // The job tracker: each repair's step, tasks done and clock (lib/job-track.ts).
   const logs = await loadJobLogs(db, jobs.filter((j) => movable(j) && j.workorderId).map((j) => j.workorderId!));
   const tracks = new Map([...logs].map(([wo, entries]) => [wo, deriveTrack(entries, now)]));
+  const view = sp(q.view) === "day" ? "day" : "board";
+  const viewHref = (v: "board" | "day") => `/app/workshop${[v === "day" ? "view=day" : "", mech ? `mech=${encodeURIComponent(mech)}` : ""].filter(Boolean).join("&").replace(/^/, "?").replace(/^\?$/, "")}`;
+  let plan: DayPlan | null = null;
+  if (view === "day") {
+    // Today's open hours (Settings › Availability), else 9 to 6.
+    const hours = await ensureStoreHours(db, showroom);
+    const spans = hours[String(new Date(`${today}T12:00:00Z`).getUTCDay())] ?? [];
+    const open = spans.length ? spans[0][0] : "09:00";
+    const close = spans.length ? spans[spans.length - 1][1] : "18:00";
+    const planTracks = new Map<string, PlanTrack>();
+    for (const j of jobs) {
+      const t = j.workorderId && movable(j) ? tracks.get(j.workorderId) : undefined;
+      if (!t) continue;
+      const step = currentStep(t, j.column);
+      const done = [...t.tasks.values()].filter((x) => x.status === "done").length;
+      planTracks.set(j.id, { running: t.running, handsOn: t.handsOn, startedAt: t.stepAt.inspection ?? t.stepAt.repair ?? null, readyAt: t.stepAt.pickup ?? null, pausedAt: t.pausedAt, label: [STEP_LABEL[step], step === "repair" && t.taskTotal ? `${done} of ${t.taskTotal}` : null].filter(Boolean).join(" ") });
+    }
+    plan = planDay({
+      jobs: jobs.map((j) => ({ ...j, assignable: movable(j) })),
+      tracks: planTracks,
+      start: localToUtc(today, open, tz),
+      end: localToUtc(today, close, tz),
+      now,
+    });
+  }
 
   return (
     <div>
@@ -91,9 +119,14 @@ export default async function WorkshopPage({ searchParams }: { searchParams: Pro
         }
         action={
           <div className="flex flex-wrap items-center gap-3">
+          <div role="tablist" aria-label="View" className="inline-flex rounded-lg bg-[#e4e1dc] p-0.5">
+            <Link href={viewHref("board")} role="tab" aria-selected={view === "board"} className={`inline-flex min-h-10 items-center rounded-md px-4 text-sm font-bold ${view === "board" ? "bg-[#015d47] text-white" : "text-[#3d3f43]"}`}>Board</Link>
+            <Link href={viewHref("day")} role="tab" aria-selected={view === "day"} className={`inline-flex min-h-10 items-center rounded-md px-4 text-sm font-bold ${view === "day" ? "bg-[#015d47] text-white" : "text-[#3d3f43]"}`}>Day</Link>
+          </div>
           <Link href="/app/workshop/new" className="btn btn-primary">+ New ticket</Link>
           {mechanics.length > 0 && (
             <form className="flex items-center gap-2" action="/app/workshop">
+              {view === "day" && <input type="hidden" name="view" value="day" />}
               <label htmlFor="mech" className="text-sm text-muted">Mechanic</label>
               <select id="mech" name="mech" defaultValue={mech} className="input h-10 w-auto">
                 <option value="">Everyone</option>
@@ -107,6 +140,10 @@ export default async function WorkshopPage({ searchParams }: { searchParams: Pro
         }
       />
       {readying && <ReadyPanel job={readying} back={back} />}
+      {plan ? (
+        <DayView plan={plan} jobs={jobs} tz={tz} now={now} back={viewHref("day")} />
+      ) : (
+      <>
       <BoardDnd back={back}>
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         {COLUMNS.map((c) => {
@@ -127,6 +164,8 @@ export default async function WorkshopPage({ searchParams }: { searchParams: Pro
         Builds take {hours(showroom.settings.build_minutes)} and Lightspeed repairs {hours(showroom.settings.repair_minutes)} before they&apos;re due (change both in Settings › Program); booked repairs run while the customer&apos;s appointment does.
         {ls ? " Lightspeed work orders refresh every hour; which status goes in which column is set in Settings › Views." : ""} Drag a card to another column to move it, or use its buttons. Jobs leave the board when the visit is completed or the work order is paid.
       </p>
+      </>
+      )}
     </div>
   );
 }
@@ -201,6 +240,88 @@ function JobCard({ job, tz, today, back, track }: { job: WorkshopJob; tz: string
         <Mechanic name={job.mechanic} assigned={!!job.mechanicId} />
       </div>
     </article>
+  );
+}
+
+/**
+ * The Day view: one lane per mechanic across today's open hours (lib/day-plan.ts). Blocks link to the job; a
+ * Lightspeed work order can be dragged onto another lane to give it to that mechanic.
+ */
+function DayView({ plan, jobs, tz, now, back }: { plan: DayPlan; jobs: WorkshopJob[]; tz: string; now: Date; back: string }) {
+  const byId = new Map(jobs.map((j) => [j.id, j]));
+  const hourMarks: Date[] = [];
+  for (let t = new Date(Math.ceil(plan.start.getTime() / 3_600_000) * 3_600_000); t < plan.end; t = new Date(t.getTime() + 3_600_000)) hourMarks.push(t);
+  const nowPct = now >= plan.start && now <= plan.end ? pct(now, plan) : null;
+  const STYLE = {
+    done: "border-border bg-[#f3f1ee] text-[#5b5f66]",
+    running: "border-2 border-[#17181a] bg-white",
+    waiting: "border-border bg-[repeating-linear-gradient(135deg,#f7f6f3_0_8px,#ece9e4_8px_16px)]",
+    planned: "border-border bg-white",
+  } as const;
+  const mark = { done: "✓ ", running: "● ", waiting: "❚❚ ", planned: "" } as const;
+  const chip = "rounded-lg border px-3 py-2 text-sm";
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-wrap gap-2">
+        {plan.unassigned > 0 && <span className={`${chip} border-border bg-card`}><b>{plan.unassigned} unassigned</b> · drag onto a mechanic</span>}
+        {plan.late > 0 && <span className={`${chip} border-[#f3b4b4] bg-[#fdecec] text-[#9f1d1d]`}><b>{plan.late} will be late</b></span>}
+        {plan.waiting > 0 && <span className={`${chip} border-border bg-card`}>{plan.waiting} waiting on parts</span>}
+        {plan.overflow > 0 && <span className={`${chip} border-border bg-card`}>{plan.overflow} more than fit today</span>}
+      </div>
+      <DayDnd back={back}>
+        <section aria-label="Day plan" className="overflow-x-auto rounded-xl border border-border bg-card">
+          <div className="min-w-[900px]">
+            <div className="grid grid-cols-[180px_minmax(0,1fr)] bg-[#f7f6f3]">
+              <div className="border-r border-border px-3.5 py-2.5 text-[11px] font-extrabold tracking-wider text-[#3d3f43] uppercase">Mechanic</div>
+              <div className="relative h-9">
+                {hourMarks.map((h) => (
+                  <span key={h.getTime()} className="absolute top-0 h-full border-l border-border pt-2.5 pl-2 text-xs font-bold text-muted" style={{ left: `${pct(h, plan)}%` }}>{formatTime(h, tz).replace(":00", "")}</span>
+                ))}
+              </div>
+            </div>
+            <div className="relative">
+              {nowPct !== null && (
+                <div aria-hidden className="pointer-events-none absolute top-0 bottom-0 z-10 w-0.5 bg-[#ff6b1a]" style={{ left: `calc(180px + (100% - 180px) * ${nowPct / 100})` }}>
+                  <span className="absolute -top-0.5 left-1 text-[11px] font-extrabold whitespace-nowrap text-[#c2410c]">now {formatTime(now, tz)}</span>
+                </div>
+              )}
+              {plan.lanes.map((l) => (
+                <div key={l.mechanicId ?? "none"} data-lane={l.mechanicId ?? ""} className={`grid min-h-[88px] grid-cols-[180px_minmax(0,1fr)] border-t border-border transition-colors ${l.mechanicId ? "" : "bg-[#fbfaf8]"}`}>
+                  <div className="flex flex-col justify-center gap-1 border-r border-border px-3.5 py-3">
+                    <span className="font-extrabold">{l.name}</span>
+                    <span className="text-xs text-muted">{l.mechanicId ? `${fmtMinutes(l.minutes)} planned` : "drag onto a mechanic"}</span>
+                  </div>
+                  <div className="relative">
+                    {l.blocks.map((b) => {
+                      const job = byId.get(b.jobId);
+                      const left = pct(b.start, plan);
+                      const width = Math.max(4, pct(b.end, plan) - left);
+                      return (
+                        <Link
+                          key={b.jobId}
+                          href={job && movable(job) ? jobPath(job.id) : (job?.href ?? "#")}
+                          data-job={b.jobId}
+                          data-lane={l.mechanicId ?? ""}
+                          data-assignable={b.assignable ? "1" : "0"}
+                          draggable={b.assignable}
+                          title={`${b.title} · ${formatTime(b.start, tz)}–${formatTime(b.end, tz)}${b.assignable ? " · drag to give it to someone" : ""}`}
+                          className={`absolute top-3 bottom-3 overflow-hidden rounded-lg border px-2 py-1.5 text-xs leading-tight ${STYLE[b.state]} ${b.late ? "border-2 border-red-600" : ""} ${l.mechanicId ? "" : "border-dashed"} ${b.assignable ? "cursor-grab active:cursor-grabbing" : ""}`}
+                          style={{ left: `${left}%`, width: `${Math.min(width, 100 - left)}%` }}
+                        >
+                          <span className="block truncate text-[13px] font-bold">{mark[b.state]}{b.title}</span>
+                          <span className={`block truncate ${b.late ? "font-bold text-red-700" : "text-muted"}`}>{b.late && job ? `ready by ${formatTime(job.readyBy, tz)} · late` : b.sub}</span>
+                        </Link>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+      </DayDnd>
+      <p className="text-sm text-muted">Blocks are placed from each job&apos;s start-by time and length; drag one onto another lane to give it to that mechanic (it changes the work order&apos;s employee in Lightspeed). ● running · ❚❚ waiting on parts · ✓ done today · red = will miss its ready-by. Lanes are the mechanics on today&apos;s work orders.</p>
+    </div>
   );
 }
 

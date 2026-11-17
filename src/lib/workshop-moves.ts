@@ -90,6 +90,22 @@ export async function moveJob(db: Db, args: { showroom: ShowroomCtx; jobId: stri
   return { status: target.name, ...job };
 }
 
+/** Day view: give a job to a mechanic (or nobody) by setting the Lightspeed work order's employee. */
+export async function assignMechanic(db: Db, args: { showroom: ShowroomCtx; jobId: string; employeeId: string | null; actor: string; client?: LightspeedClient }): Promise<{ workorderId: string }> {
+  const { showroom } = args;
+  if (!lightspeedEnabled(showroom)) throw new WorkshopMoveError("Lightspeed isn't switched on for this store, so mechanics can't be assigned here.");
+  const job = await resolveJob(db, showroom, args.jobId);
+  try {
+    await (args.client ?? new LightspeedClient(db)).updateWorkorder(job.workorderId, { employeeID: args.employeeId ? Number(args.employeeId) : 0 });
+  } catch (err) {
+    logger.warn({ err: err instanceof Error ? err.message : String(err), workorderId: job.workorderId }, "mechanic not saved in Lightspeed");
+    throw new WorkshopMoveError("Lightspeed didn't save the mechanic, so the job stays where it was. Try again in a minute.");
+  }
+  await db.update(lsWorkorders).set({ employeeId: args.employeeId, lsUpdatedAt: new Date() }).where(eq(lsWorkorders.id, job.workorderId));
+  await db.insert(events).values({ showroomId: showroom.id, type: "workorder_assigned", actor: args.actor, payload: { workorder_id: job.workorderId, booking_id: job.booking?.id ?? null, employee_id: args.employeeId } });
+  return { workorderId: job.workorderId };
+}
+
 export type ReadyResult = { status: string; told: "sent" | "failed" | "skipped" | "no_contact" };
 
 /**
