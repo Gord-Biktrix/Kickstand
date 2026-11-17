@@ -164,7 +164,7 @@ function JobCard({ job, tz, today, back, track }: { job: WorkshopJob; tz: string
     : job.column === "parts"
       ? `Due ${when(job.readyBy, tz, today)}`
       : job.column === "todo"
-      ? `${job.kind === "build" ? "Start by" : "Starts"} ${when(job.startBy, tz, today)}`
+      ? `${job.notHereYet ? "Starts" : "Start by"} ${when(job.startBy, tz, today)}`
       : job.column === "doing"
         ? `Ready by ${when(job.readyBy, tz, today)}`
         : job.source === "lightspeed"
