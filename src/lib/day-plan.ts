@@ -5,10 +5,10 @@
  * Placement:
  * - Done today: from when the job started to when it was marked ready (job tracker stamps).
  * - Running: started `handsOn` minutes ago, ends at the later of now and start + booked length.
- * - Waiting on parts: the work done so far, parked where it stopped.
- * - Still to do: packed one after another in the mechanic's lane, each no earlier than its start-by (or the
- *   customer's drop-off for a booking that isn't here yet) and no earlier than now. A block that ends after its
- *   ready-by is late. Jobs that don't fit before close are counted, not drawn.
+ * - Waiting on parts: drawn where it stopped only if it stopped today; older ones are just counted on the lane.
+ * - Still to do: packed one after another in the mechanic's lane from now (a bike that's here can be worked on
+ *   now; a booking that isn't here yet waits for its drop-off), customer work before floor bikes, then by start-by.
+ *   A block that ends after its ready-by is late. Jobs that don't fit before close are counted, not drawn.
  * Lanes are the Lightspeed mechanics on the board's work orders, then Unassigned.
  */
 export type PlanJob = {
@@ -32,7 +32,8 @@ export type PlanJob = {
 export type PlanTrack = { running: boolean; handsOn: number; startedAt: Date | null; readyAt: Date | null; pausedAt: Date | null; label: string | null };
 
 export type Block = { jobId: string; title: string; sub: string; start: Date; end: Date; state: "done" | "running" | "waiting" | "planned"; late: boolean; assignable: boolean };
-export type Lane = { mechanicId: string | null; name: string; blocks: Block[]; minutes: number };
+/** minutes = running and planned work still ahead of now, before close; waiting = jobs on parts not drawn. */
+export type Lane = { mechanicId: string | null; name: string; blocks: Block[]; minutes: number; waiting: number };
 export type DayPlan = { start: Date; end: Date; lanes: Lane[]; late: number; waiting: number; unassigned: number; overflow: number };
 
 const MIN = 60_000;
@@ -44,7 +45,7 @@ export function planDay(args: { jobs: PlanJob[]; tracks: Map<string, PlanTrack>;
   const lane = (id: string | null, name: string) => {
     const key = id ?? "";
     let l = laneOf.get(key);
-    if (!l) laneOf.set(key, (l = { mechanicId: id, name, blocks: [], minutes: 0 }));
+    if (!l) laneOf.set(key, (l = { mechanicId: id, name, blocks: [], minutes: 0, waiting: 0 }));
     return l;
   };
   for (const j of args.jobs) if (j.mechanicId) lane(j.mechanicId, j.mechanic ?? `Employee ${j.mechanicId}`);
@@ -68,7 +69,11 @@ export function planDay(args: { jobs: PlanJob[]; tracks: Map<string, PlanTrack>;
     }
     if (j.column === "parts") {
       waiting++;
-      const stop = t?.pausedAt && t.pausedAt >= start && t.pausedAt <= end ? t.pausedAt : start;
+      const stop = t?.pausedAt && t.pausedAt >= start && t.pausedAt <= end ? t.pausedAt : null;
+      if (!stop) {
+        l.waiting++;
+        continue;
+      }
       const s = new Date(stop.getTime() - Math.max(30, t?.handsOn ?? 0) * MIN);
       l.blocks.push({ jobId: j.id, title: j.title, sub: "Waiting on parts", start: later(s, start), end: later(stop, new Date(start.getTime() + 30 * MIN)), state: "waiting", late: false, assignable: j.assignable });
       continue;
@@ -85,12 +90,11 @@ export function planDay(args: { jobs: PlanJob[]; tracks: Map<string, PlanTrack>;
   }
 
   // Still to do: packed per lane after whatever is already there, in start-by order.
-  todo.sort((a, b) => a.startBy.getTime() - b.startBy.getTime());
+  todo.sort((a, b) => Number(a.kind === "floor") - Number(b.kind === "floor") || a.startBy.getTime() - b.startBy.getTime());
   for (const j of todo) {
     const l = lane(j.mechanicId, j.mechanic ?? "");
     const busyUntil = l.blocks.filter((b) => b.state === "running" || b.state === "planned").reduce((m, b) => later(m, b.end), later(start, now));
-    let s = later(busyUntil, j.noDate ? start : j.startBy);
-    if (j.notHereYet) s = later(s, j.visitAt);
+    const s = j.notHereYet ? later(busyUntil, j.visitAt) : busyUntil;
     const e = new Date(s.getTime() + Math.max(15, j.minutes) * MIN);
     if (s >= end) {
       overflow++;
@@ -102,8 +106,12 @@ export function planDay(args: { jobs: PlanJob[]; tracks: Map<string, PlanTrack>;
   }
 
   const lanes = [...laneOf.values()]
-    .map((l) => ({ ...l, blocks: l.blocks.sort((a, b) => a.start.getTime() - b.start.getTime()), minutes: Math.round(l.blocks.reduce((m, b) => m + (Math.min(b.end.getTime(), end.getTime()) - b.start.getTime()) / MIN, 0)) }))
-    .filter((l) => l.mechanicId === null || l.blocks.length > 0)
+    .map((l) => ({
+      ...l,
+      blocks: l.blocks.sort((a, b) => a.start.getTime() - b.start.getTime()),
+      minutes: Math.round(l.blocks.filter((b) => b.state === "running" || b.state === "planned").reduce((m, b) => m + Math.max(0, Math.min(b.end.getTime(), end.getTime()) - Math.max(b.start.getTime(), now.getTime())) / MIN, 0)),
+    }))
+    .filter((l) => l.mechanicId === null || l.blocks.length > 0 || l.waiting > 0)
     .sort((a, b) => (a.mechanicId === null ? 1 : b.mechanicId === null ? -1 : a.name.localeCompare(b.name)));
   const unassigned = lanes.find((l) => l.mechanicId === null)?.blocks.filter((b) => b.state === "planned").length ?? 0;
   return { start, end, lanes, late, waiting, unassigned, overflow };

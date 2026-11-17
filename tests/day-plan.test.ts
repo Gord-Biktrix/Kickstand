@@ -35,7 +35,9 @@ describe("the Workshop day plan", () => {
       ["next", "planned", "14:30", "15:30"],
     ]);
     expect(plan.lanes[1].blocks[0]).toMatchObject({ state: "waiting", start: D("10:20"), end: D("11:00") });
-    expect(plan.lanes[2].blocks[0]).toMatchObject({ jobId: "free", start: D("15:00"), end: D("15:30") });
+    // A bike that's here is planned from now, not from its latest start.
+    expect(plan.lanes[2].blocks[0]).toMatchObject({ jobId: "free", start: D("14:00"), end: D("14:30") });
+    expect(plan.lanes[0].minutes).toBe(90); // 30 min left on the running job + the next hour
     expect(plan).toMatchObject({ waiting: 1, unassigned: 1, late: 0, overflow: 0 });
   });
 
@@ -43,12 +45,26 @@ describe("the Workshop day plan", () => {
     const jobs = [
       job({ id: "late", mechanicId: "3", mechanic: "Priya", startBy: D("13:00"), readyBy: D("15:00"), minutes: 120 }),
       job({ id: "dropoff", notHereYet: true, visitAt: D("16:00"), startBy: D("10:00") }),
-      job({ id: "tomorrow", startBy: D("19:00") }),
+      job({ id: "tomorrow", notHereYet: true, visitAt: D("19:00") }),
     ];
     const plan = planDay({ jobs, tracks: new Map(), start, end, now });
     expect(plan.lanes[0].blocks[0]).toMatchObject({ jobId: "late", late: true, start: D("14:00"), end: D("16:00") });
     expect(plan.lanes[1].blocks[0]).toMatchObject({ jobId: "dropoff", start: D("16:00") });
     expect(plan).toMatchObject({ late: 1, overflow: 1 });
     expect(pct(D("13:30"), plan)).toBe(50);
+  });
+
+  it("puts customer work before floor bikes and only counts parts jobs that stopped before today", () => {
+    const jobs = [
+      job({ id: "floor", kind: "floor", mechanicId: "1", mechanic: "Carter", startBy: D("08:00"), readyBy: D("08:00") }),
+      job({ id: "walkin", mechanicId: "1", mechanic: "Carter", startBy: D("16:00") }),
+      job({ id: "old-parts", column: "parts", mechanicId: "2", mechanic: "Gray" }),
+    ];
+    const plan = planDay({ jobs, tracks: new Map(), start, end, now });
+    expect(plan.lanes[0].blocks.map((b) => [b.jobId, b.start.toISOString().slice(11, 16), b.late])).toEqual([
+      ["walkin", "14:00", false],
+      ["floor", "15:00", true],
+    ]);
+    expect(plan.lanes[1]).toMatchObject({ name: "Gray", blocks: [], waiting: 1, minutes: 0 });
   });
 });

@@ -236,6 +236,7 @@ function JobCard({ job, tz, today, back, track }: { job: WorkshopJob; tz: string
  */
 function DayView({ plan, jobs, tz, now, back }: { plan: DayPlan; jobs: WorkshopJob[]; tz: string; now: Date; back: string }) {
   const byId = new Map(jobs.map((j) => [j.id, j]));
+  const today = toLocalDate(now, tz);
   const hourMarks: Date[] = [];
   for (let t = new Date(Math.ceil(plan.start.getTime() / 3_600_000) * 3_600_000); t < plan.end; t = new Date(t.getTime() + 3_600_000)) hourMarks.push(t);
   const nowPct = now >= plan.start && now <= plan.end ? pct(now, plan) : null;
@@ -255,7 +256,7 @@ function DayView({ plan, jobs, tz, now, back }: { plan: DayPlan; jobs: WorkshopJ
               <div className="border-r border-border px-3.5 py-2.5 text-[11px] font-extrabold tracking-wider text-[#3d3f43] uppercase">Mechanic</div>
               <div className="relative h-9">
                 {hourMarks.map((h) => (
-                  <span key={h.getTime()} className="absolute top-0 h-full border-l border-border pt-2.5 pl-2 text-xs font-bold text-muted" style={{ left: `${pct(h, plan)}%` }}>{formatTime(h, tz).replace(":00", "")}</span>
+                  <span key={h.getTime()} className="absolute top-0 h-full border-l border-border pt-2.5 pl-2 text-xs font-bold whitespace-nowrap text-muted" style={{ left: `${pct(h, plan)}%` }}>{formatTime(h, tz).replace(":00", "")}</span>
                 ))}
               </div>
             </div>
@@ -269,7 +270,7 @@ function DayView({ plan, jobs, tz, now, back }: { plan: DayPlan; jobs: WorkshopJ
                 <div key={l.mechanicId ?? "none"} data-lane={l.mechanicId ?? ""} className={`grid min-h-[88px] grid-cols-[180px_minmax(0,1fr)] border-t border-border transition-colors ${l.mechanicId ? "" : "bg-[#fbfaf8]"}`}>
                   <div className="flex flex-col justify-center gap-1 border-r border-border px-3.5 py-3">
                     <span className="font-extrabold">{l.name}</span>
-                    <span className="text-xs text-muted">{l.mechanicId ? `${fmtMinutes(l.minutes)} planned` : "drag onto a mechanic"}</span>
+                    <span className="text-xs text-muted">{[l.minutes ? `${fmtMinutes(l.minutes)} left today` : l.mechanicId ? "Nothing left today" : null, l.waiting ? `❚❚ ${l.waiting} on parts` : null].filter(Boolean).join(" · ")}</span>
                   </div>
                   <div className="relative">
                     {l.blocks.map((b) => {
@@ -289,7 +290,7 @@ function DayView({ plan, jobs, tz, now, back }: { plan: DayPlan; jobs: WorkshopJ
                           style={{ left: `${left}%`, width: `${Math.min(width, 100 - left)}%` }}
                         >
                           <span className="block truncate text-[13px] font-bold">{mark[b.state]}{b.title}</span>
-                          <span className={`block truncate ${b.late ? "font-bold text-red-700" : "text-muted"}`}>{b.late && job ? `ready by ${formatTime(job.readyBy, tz)} · late` : b.sub}</span>
+                          <span className={`block truncate ${b.late ? "font-bold text-red-700" : "text-muted"}`}>{b.late && job ? (job.readyBy < now ? `was due ${when(job.readyBy, tz, today)}` : `due ${when(job.readyBy, tz, today)} · will be late`) : b.sub}</span>
                         </Link>
                       );
                     })}
