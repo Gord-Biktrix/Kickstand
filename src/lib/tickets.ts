@@ -221,7 +221,7 @@ export type NewTicket = {
   /** A Lightspeed Serialized (the customer's registered bike) to attach to the work order. */
   serializedId?: string | null;
   /** Parts picked from the Parts tab: added to the work order as Lightspeed lines (and listed in the note). */
-  parts?: { itemId: string; name: string; qty: number }[];
+  parts?: { itemId: string; name: string; qty: number; price?: number | null; minutes?: number | null }[];
   /** Photos (base64 JPEG) taken at the counter; kept in Kickstand and shown on the job screen. */
   photos?: string[];
 };
@@ -252,20 +252,36 @@ export async function listTicketPhotos(db: Db, workorderId: string): Promise<{ i
  * with Lightspeed's reason. Lines are created under the work order (Workorder/{id}/WorkorderItem): the top-level
  * WorkorderItem endpoint is read-only and answers 405.
  */
-export async function addWorkorderParts(client: LightspeedClient, workorderID: string, parts: { itemId: string; name: string; qty: number }[], employeeId: string | null): Promise<{ added: number; failed: string[]; reason: string | null }> {
+export async function addWorkorderParts(client: LightspeedClient, workorderID: string, parts: { itemId: string; name: string; qty: number; price?: number | null; minutes?: number | null }[], employeeId: string | null): Promise<{ added: number; failed: string[]; reason: string | null }> {
   let added = 0;
   const failed: string[] = [];
   let reason: string | null = null;
   for (const p of parts) {
     try {
-      await client.request("POST", `Workorder/${workorderID}/WorkorderItem.json`, {
-        workorderID: Number(workorderID),
-        itemID: Number(p.itemId),
-        unitQuantity: p.qty,
-        warranty: false,
-        isSpecialOrder: false,
-        ...(employeeId ? { employeeID: Number(employeeId) } : {}),
-      });
+      try {
+        await client.request("POST", `Workorder/${workorderID}/WorkorderItem.json`, {
+          workorderID: Number(workorderID),
+          itemID: Number(p.itemId),
+          unitQuantity: p.qty,
+          warranty: false,
+          isSpecialOrder: false,
+          ...(employeeId ? { employeeID: Number(employeeId) } : {}),
+        });
+      } catch (err) {
+        // Services set up as Labor items (non-inventory, tax class Labor) go on as labour lines instead.
+        if (!/labor item cannot be added/i.test(lightspeedReason(err))) throw err;
+        const m = Math.max(0, Math.round(p.minutes ?? 0));
+        await client.request("POST", `Workorder/${workorderID}/WorkorderLine.json`, {
+          workorderID: Number(workorderID),
+          itemID: Number(p.itemId),
+          note: p.name,
+          unitQuantity: p.qty,
+          hours: Math.floor(m / 60),
+          minutes: m % 60,
+          ...(p.price != null ? { unitPriceOverride: p.price } : {}),
+          ...(employeeId ? { employeeID: Number(employeeId) } : {}),
+        });
+      }
       added++;
     } catch (err) {
       failed.push(p.name);
@@ -300,7 +316,7 @@ export async function scheduleTicket(
     showroom: ShowroomCtx; type: BookingType; startsAt: Date; smsConsent: boolean; actor: string; client?: LightspeedClient; now?: Date;
     customer: { lsCustomerId: string | null; name: string; phone: string; email: string };
     bike: string; serial: string; serializedId: string | null; service: string; said: string; employeeId: string | null;
-    parts: { itemId: string; name: string; qty: number }[]; photos: string[];
+    parts: { itemId: string; name: string; qty: number; price?: number | null; minutes?: number | null }[]; photos: string[];
   },
 ): Promise<{ bookingId: string; workorderId: string | null; partsAdded: number; partsFailed: string[]; partsError?: string | null }> {
   if (!args.service.trim()) throw new TicketError("Tap what it needs.");

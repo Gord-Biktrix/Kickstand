@@ -82,9 +82,9 @@ export function TicketPos(props: {
     }
     for (const m of props.initial.labour) bump({ key: `l:${m}`, kind: "labour", name: `Labour ${mins(Number(m) || 15)}`, minutes: Number(m) || 15 });
     for (const p of props.initial.parts) {
-      const [itemId, qty, ...name] = p.split("|");
+      const [itemId, qty, price, , ...name] = p.split("|");
       // Service items come back as parts too; they're already a service line.
-      if (itemId && !out.some((l) => l.itemId === itemId)) out.push({ key: `p:${itemId}`, kind: "part", name: name.join("|"), minutes: 0, qty: Number(qty) || 1, itemId, price: null });
+      if (itemId && !out.some((l) => l.itemId === itemId)) out.push({ key: `p:${itemId}`, kind: "part", name: name.join("|"), minutes: 0, qty: Number(qty) || 1, itemId, price: price ? Number(price) : null });
     }
     return out;
   });
@@ -246,7 +246,7 @@ export function TicketPos(props: {
                     <input key={i} type="hidden" name={l.kind} value={l.kind === "service" ? l.name : String(l.minutes)} />
                   ))}
                   {/* A Lightspeed item (part or service) goes on the work order as a line. */}
-                  {l.itemId && <input type="hidden" name="part" value={`${l.itemId}|${l.qty}|${l.name}`} />}
+                  {l.itemId && <input type="hidden" name="part" value={`${l.itemId}|${l.qty}|${l.price ?? ""}|${l.kind === "part" ? "" : l.minutes}|${l.name}`} />}
                   <div className="min-w-0 flex-1">
                     <p className="font-semibold">{l.name}</p>
                     <p className="text-sm text-muted">

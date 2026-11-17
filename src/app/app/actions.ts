@@ -628,13 +628,14 @@ function ticketServices(formData: FormData): string {
   return [...counts.entries()].map(([s, n]) => (n > 1 ? `${s} ×${n}` : s)).join(" + ");
 }
 
-/** Parts lines from New ticket: "itemId|qty|name". */
-function ticketParts(formData: FormData): { itemId: string; name: string; qty: number }[] {
+/** Lightspeed lines from New ticket: "itemId|qty|price|minutes|name" (price and minutes may be blank). */
+function ticketParts(formData: FormData): { itemId: string; name: string; qty: number; price: number | null; minutes: number | null }[] {
   return formData.getAll("part").flatMap((v) => {
     if (typeof v !== "string") return [];
-    const [itemId, qty, ...name] = v.split("|");
+    const [itemId, qty, price, minutes, ...name] = v.split("|");
     const n = Math.max(1, Math.min(99, Number(qty) || 1));
-    return itemId ? [{ itemId, qty: n, name: name.join("|") || `Item ${itemId}` }] : [];
+    const num = (x: string | undefined) => (x !== undefined && x.trim() !== "" && Number.isFinite(Number(x)) ? Number(x) : null);
+    return itemId ? [{ itemId, qty: n, price: num(price), minutes: num(minutes), name: name.join("|") || `Item ${itemId}` }] : [];
   });
 }
 

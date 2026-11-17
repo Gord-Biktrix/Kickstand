@@ -234,6 +234,24 @@ describe("new tickets from the POS screen", () => {
     expect(String(calls.find((c) => c.url.endsWith("Workorder.json"))!.body!.note)).toContain("Items: Crank arm ×2, Display");
   });
 
+  it("a service that is a Labor item goes on as a labour line, with its time and price", async () => {
+    const { createTicket } = await import("@/lib/tickets");
+    const calls: Call[] = [];
+    setLightspeedFetch(async (input, init) => {
+      const url = String(input);
+      const body = init?.body ? JSON.parse(String(init.body)) : null;
+      calls.push({ method: init?.method ?? "GET", url, body });
+      const json = (status: number, data: unknown) => new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json" } });
+      if (url.endsWith("Workorder.json")) return json(200, { Workorder: { workorderID: "10303" } });
+      if (/Workorder\/\d+\/WorkorderItem\.json$/.test(url)) return body.itemID === 77 ? json(422, { message: "Labor Item cannot be added as a WorkorderItem." }) : json(200, { WorkorderItem: { workorderItemID: "1" } });
+      if (/Workorder\/\d+\/WorkorderLine\.json$/.test(url)) return json(200, { WorkorderLine: { workorderLineID: "9" } });
+      return json(404, {});
+    });
+    const r = await createTicket(db, { showroom: van, ticket: { ...base, customer: { lsCustomerId: "9020", name: "Alan" }, parts: [{ itemId: "77", name: "Tune Up", qty: 1, price: 120, minutes: 75 }, { itemId: "55", name: "Crank arm", qty: 1 }] }, actor: "s" });
+    expect(r).toEqual({ workorderId: "10303", partsAdded: 2, partsFailed: [], partsError: null });
+    expect(calls.find((c) => /WorkorderLine\.json$/.test(c.url))!.body).toMatchObject({ workorderID: 10303, itemID: 77, note: "Tune Up", unitQuantity: 1, hours: 1, minutes: 15, unitPriceOverride: 120 });
+  });
+
   it("parts search uses the bike's model, skips the bikes themselves, and reads the default price", async () => {
     const { searchParts, bikeModel } = await import("@/lib/tickets");
     const { LightspeedClient } = await import("@/lib/lightspeed");
