@@ -11,8 +11,8 @@ import { cancelTypeBooking, createTypeBooking, rescheduleTypeBooking, setBooking
 import { makeOrder, resetDb, testDb, withSettings } from "./helpers";
 
 const TZ = "America/Vancouver";
-const NOW = localToUtc("2026-11-16", "07:00", TZ);
-const slot = (t: string) => localToUtc("2026-11-17", t, TZ);
+const NOW = localToUtc("2027-11-15", "07:00", TZ);
+const slot = (t: string) => localToUtc("2027-11-16", t, TZ);
 type Call = { method: string; url: string; body: Record<string, unknown> | null };
 
 function fakeLightspeed(opts: { fail?: boolean } = {}) {
@@ -103,7 +103,7 @@ describe("service bookings and Lightspeed work orders", () => {
     setLightspeedFetch(ls.fetchImpl);
     const { booking } = await createTypeBooking(db, { showroom: van, type: service, startsAt: slot("10:00"), details, createdBy: "customer", now: NOW });
     expect(ls.calls.find((c) => c.method === "POST" && c.url.endsWith("Workorder.json"))!.body).toMatchObject({ workorderStatusID: 27 });
-    const at = localToUtc("2026-11-17", "09:55", TZ);
+    const at = localToUtc("2027-11-16", "09:55", TZ);
     await setBookingOutcome(db, { showroomId: van.id, bookingId: booking.id, outcome: "completed", actor: "staff-1", now: at });
     const checkIn = ls.calls.filter((c) => c.method === "PUT").at(-1)!;
     expect(checkIn.body).toEqual({ workorderStatusID: 1, timeIn: at.toISOString() });
@@ -124,7 +124,7 @@ describe("service bookings and Lightspeed work orders", () => {
     const ls = fakeLightspeed();
     setLightspeedFetch(ls.fetchImpl);
     const r = await scheduleTicket(db, {
-      showroom: van, type: service, startsAt: slot("10:00"), smsConsent: false, actor: "staff-1",
+      showroom: van, type: service, startsAt: slot("10:00"), smsConsent: false, actor: "staff-1", now: NOW,
       customer: { lsCustomerId: "9020", name: "Alan Uyeno", phone: "604-916-8336", email: "alan@example.com" },
       bike: "Kutty X 2 Yellow", serial: "S022YP01561", serializedId: "503", service: "Tune Up", said: "Squeaks", employeeId: null,
       parts: [{ itemId: "77", name: "Tune Up", qty: 1 }, { itemId: "55", name: "Brake pads", qty: 2 }], photos: [],

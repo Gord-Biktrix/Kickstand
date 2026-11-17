@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { formatInZone } from "@/lib/time";
 import { db } from "@/db/client";
+import { BoardDnd } from "@/components/board-dnd";
 import { Empty, Flash, PageHeader } from "@/components/ui";
 import { requireUser } from "@/lib/auth";
 import { currentShowroom } from "@/lib/current-showroom";
@@ -15,6 +16,16 @@ const RETURN = "/app/workshop";
 
 /** Repairs move through Lightspeed: a work order written there, or the one Kickstand made for a service booking. */
 const movable = (j: WorkshopJob) => j.workorderId !== null && (j.source === "lightspeed" || j.kind === "repair");
+
+/**
+ * Where a card can be dragged. Repairs: any other column (Ready opens the confirm panel); a booking that hasn't
+ * been checked in has to be checked in first. Bikes for pickup: Build, then Ready, as their buttons do.
+ */
+function movesFor(j: WorkshopJob): JobColumn[] {
+  if (movable(j)) return j.notHereYet && j.bookingId ? [] : (["todo", "doing", "parts", "ready"] as const).filter((c) => c !== j.column);
+  if (j.unitId) return j.column === "todo" ? ["doing"] : j.column === "doing" ? ["ready"] : [];
+  return [];
+}
 
 const COLUMNS: { key: JobColumn; label: string; empty: string }[] = [
   { key: "todo", label: "To do", empty: "Nothing waiting to start." },
@@ -91,11 +102,12 @@ export default async function WorkshopPage({ searchParams }: { searchParams: Pro
         }
       />
       {readying && <ReadyPanel job={readying} back={back} />}
+      <BoardDnd back={back}>
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         {COLUMNS.map((c) => {
           const list = jobs.filter((j) => j.column === c.key);
           return (
-            <section key={c.key} aria-label={c.label} className="flex min-w-0 flex-col gap-2.5 rounded-lg bg-[#e4e1dc] p-3">
+            <section key={c.key} data-col={c.key} aria-label={c.label} className="flex min-w-0 flex-col gap-2.5 rounded-lg bg-[#e4e1dc] p-3 transition-colors">
               <h2 className="flex items-center justify-between px-1 text-sm font-bold text-[#3d3f43]">
                 {c.label}
                 <span className="text-muted">{list.length}</span>
@@ -105,9 +117,10 @@ export default async function WorkshopPage({ searchParams }: { searchParams: Pro
           );
         })}
       </div>
+      </BoardDnd>
       <p className="mt-4 text-sm text-muted">
         Builds take {hours(showroom.settings.build_minutes)} and Lightspeed repairs {hours(showroom.settings.repair_minutes)} before they&apos;re due (change both in Settings › Program); booked repairs run while the customer&apos;s appointment does.
-        {ls ? " Lightspeed work orders refresh every hour; which status goes in which column is set in Settings › Views." : ""} Jobs leave the board when the visit is completed or the work order is paid.
+        {ls ? " Lightspeed work orders refresh every hour; which status goes in which column is set in Settings › Views." : ""} Drag a card to another column to move it, or use its buttons. Jobs leave the board when the visit is completed or the work order is paid.
       </p>
     </div>
   );
@@ -131,8 +144,15 @@ function JobCard({ job, tz, today, back }: { job: WorkshopJob; tz: string; today
     : job.kind === "build"
       ? [`${hours(job.minutes)} build`, job.column !== "ready" && `ready by ${when(job.readyBy, tz, today)}`, job.customer && `${job.customer} picks up ${when(job.visitAt, tz, today)}`]
       : [hours(job.minutes), job.customer && (job.notHereYet ? `${job.customer} · not here yet, drops off ${when(job.visitAt, tz, today)}` : `${job.customer} · checked in`)];
+  const moves = movesFor(job);
   return (
-    <article className={`rounded-lg border bg-card p-3 ${job.kind === "floor" ? "opacity-75" : ""} ${job.notHereYet ? "border-dashed" : ""} ${job.late ? "border-red-600 shadow-[0_0_0_1px_#dc2626]" : "border-border"}`}>
+    <article
+      data-job={job.id}
+      data-unit={job.unitId ?? undefined}
+      data-moves={moves.join(",")}
+      draggable={moves.length > 0}
+      title={moves.length ? "Drag to another column to move it" : undefined}
+      className={`rounded-lg border bg-card p-3 ${moves.length ? "cursor-grab active:cursor-grabbing" : ""} ${job.kind === "floor" ? "opacity-75" : ""} ${job.notHereYet ? "border-dashed" : ""} ${job.late ? "border-red-600 shadow-[0_0_0_1px_#dc2626]" : "border-border"}`}>
       <p className="flex flex-wrap items-center justify-between gap-2 text-[11px] font-extrabold tracking-wider uppercase">
         <span className="inline-flex items-center gap-1.5">
           <i aria-hidden className="inline-block h-2.5 w-2.5 rounded-[2px]" style={{ background: k.color }} />

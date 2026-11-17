@@ -103,6 +103,19 @@ export function TicketPos(props: {
   const [calOpen, setCalOpen] = useState(false);
   // Phones: the tiles live in a sheet over the ticket, opened from "Add service, labour or part" (always shown on lg).
   const [addOpen, setAddOpen] = useState(false);
+  // Laptops: the ticket is as tall as the room left on screen below it, so the button is always in view.
+  const ticket = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const el = ticket.current;
+    if (!el) return;
+    const wide = window.matchMedia("(min-width: 1024px)");
+    const fit = () => { el.style.maxHeight = wide.matches ? `${window.innerHeight - Math.max(16, el.getBoundingClientRect().top) - 16}px` : ""; };
+    fit();
+    window.addEventListener("scroll", fit, { passive: true });
+    window.addEventListener("resize", fit);
+    wide.addEventListener("change", fit);
+    return () => { window.removeEventListener("scroll", fit); window.removeEventListener("resize", fit); wide.removeEventListener("change", fit); };
+  }, []);
   useEffect(() => {
     if (!addOpen) return;
     const esc = (e: KeyboardEvent) => e.key === "Escape" && setAddOpen(false);
@@ -161,7 +174,9 @@ export function TicketPos(props: {
   return (
     <>
       {/* The ticket, like a POS cart. */}
-      <section aria-label="New ticket" className="flex flex-col rounded-xl border border-border bg-card">
+      {/* Laptops: the ticket stays in view at window height and scrolls on its own; the button stays at its foot. */}
+      <section ref={ticket} aria-label="New ticket" className="flex flex-col rounded-xl border border-border bg-card lg:sticky lg:top-4 lg:max-h-[calc(100dvh-2rem)] lg:self-start">
+        <div className="flex flex-1 flex-col lg:min-h-0 lg:overflow-y-auto lg:overscroll-contain">
         <div className="flex flex-col gap-4 border-b border-border p-4">
           <TicketCustomerBike initial={props.initial.pick} initialNew={props.initial.newCustomer} bike={props.initial.bike} serial={props.initial.serial} sid={props.initial.sid} onBike={setBike} />
         </div>
@@ -243,6 +258,7 @@ export function TicketPos(props: {
             </label>
           </div>
         </div>
+        </div>
 
         {/* Phones: the total, Ready by and the button stay at the bottom of the screen. */}
         <div className="sticky bottom-0 z-30 rounded-b-xl border-t border-border bg-card p-4 max-lg:px-3 max-lg:py-2.5 max-lg:shadow-[0_-4px_12px_rgba(0,0,0,0.06)] lg:static">
@@ -270,6 +286,8 @@ export function TicketPos(props: {
         <div className="flex items-center justify-between lg:hidden">
           <span aria-hidden className="mx-auto h-1 w-10 rounded-full bg-[#cfcbc4]" />
         </div>
+        {/* Laptops: search and tabs stay at the top while the tiles scroll. */}
+        <div className="flex flex-col gap-3 lg:sticky lg:top-0 lg:z-10 lg:-mt-4 lg:bg-background lg:pt-4 lg:pb-1">
         <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder={tab === "parts" ? `Search parts${model ? ` (showing ${model})` : ""}…` : "Search services…"} aria-label="Search" className="input h-12 text-base" />
         <div role="tablist" aria-label="What to add" className="flex flex-wrap gap-2">
           {([["services", "Services"], ["labour", "Labour"], ["parts", model ? `Parts for ${model}` : "Parts"]] as const).map(([t, text]) => (
@@ -277,6 +295,7 @@ export function TicketPos(props: {
               {text}
             </button>
           ))}
+        </div>
         </div>
 
         <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 xl:grid-cols-4">

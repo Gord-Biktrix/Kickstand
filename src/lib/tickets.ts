@@ -291,7 +291,7 @@ async function attachTicketPhotos(db: Db, client: LightspeedClient, args: { show
 export async function scheduleTicket(
   db: Db,
   args: {
-    showroom: ShowroomCtx; type: BookingType; startsAt: Date; smsConsent: boolean; actor: string; client?: LightspeedClient;
+    showroom: ShowroomCtx; type: BookingType; startsAt: Date; smsConsent: boolean; actor: string; client?: LightspeedClient; now?: Date;
     customer: { lsCustomerId: string | null; name: string; phone: string; email: string };
     bike: string; serial: string; serializedId: string | null; service: string; said: string; employeeId: string | null;
     parts: { itemId: string; name: string; qty: number }[]; photos: string[];
@@ -307,6 +307,7 @@ export async function scheduleTicket(
     answers: (field) => (field === "q_bike" ? args.bike : field === "q_serial" ? args.serial : ""),
     lsCustomerId: args.customer.lsCustomerId,
     lsSerializedId: args.serializedId,
+    now: args.now,
   });
   if (!booking.lsWorkorderId) return { bookingId: booking.id, workorderId: null, partsAdded: 0, partsFailed: args.parts.map((p) => p.name) };
   const client = args.client ?? new LightspeedClient(db);
