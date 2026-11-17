@@ -13,9 +13,9 @@ import { fetchWorkorderLines, forgetWorkorder, linesSubtotal, type WorkorderLine
 import { lightspeedWorkorderUrl } from "@/lib/workorders";
 import { listTicketPhotos } from "@/lib/tickets";
 import { loadJobLog, recordTaskTotal } from "@/lib/job-log";
-import { currentStep, deriveTrack, fmtMinutes, jobTasks, openTasks, STEP_LABEL, STEP_ORDER, type JobStep, type Task, type Track } from "@/lib/job-track";
+import { currentStep, deriveTrack, fmtMinutes, INSPECTION_TASKS, jobTasks, openTasks, repairDone, STEP_LABEL, STEP_ORDER, type JobStep, type Task, type Track } from "@/lib/job-track";
 import { ConfirmButton } from "@/components/confirm-button";
-import { jobReadyAction, jobResumeAction, jobStepAction, jobTaskAction, moveJobAction, setBookingStatusAction, staffCancelTypeBookingAction } from "../../actions";
+import { jobReadyAction, jobResumeAction, jobStepAction, jobStepBackAction, jobTaskAction, moveJobAction, setBookingStatusAction, staffCancelTypeBookingAction } from "../../actions";
 
 export const metadata = { title: "Job" };
 
@@ -113,8 +113,16 @@ export default async function JobPage({ params, searchParams }: { params: Promis
             <p className="text-sm text-red-700">Lightspeed didn&apos;t send the work order&apos;s lines{failReason ? ` (${failReason})` : ""}. Open it in Lightspeed or try again.</p>
           ) : step === "pickup" ? (
             <Done tasks={tasks} track={track} names={names} />
+          ) : step === "repair" ? (
+            <>
+              <TaskList title="Repair · the work order's lines" tasks={tasks} track={track} names={names} jobId={job.id} self={self} canTick />
+              <InspectionSummary track={track} />
+            </>
           ) : (
-            <TaskList tasks={tasks} track={track} names={names} jobId={job.id} self={self} canTick={step === "inspection" || step === "repair"} />
+            <>
+              <TaskList title="Inspection checklist" tasks={[...INSPECTION_TASKS]} track={track} names={names} jobId={job.id} self={self} canTick={step === "inspection"} />
+              <TaskList title="Repair, next · the work order's lines" tasks={tasks} track={track} names={names} jobId={job.id} self={self} canTick={false} muted />
+            </>
           )}
 
           {photos.length > 0 && (
@@ -164,6 +172,11 @@ export default async function JobPage({ params, searchParams }: { params: Promis
           <section className="mt-auto flex flex-col gap-2 rounded-xl border border-border bg-card p-4">
             <p className={label}>Next step</p>
             <NextStep job={job} step={step} track={track} open={open} self={self} first={first} lsUrl={lsUrl} />
+            {job.workorderId && job.column !== "parts" && (step === "inspection" || step === "repair" || step === "pickup") && (
+              <form action={jobStepBackAction.bind(null, job.id, self)}>
+                <button type="submit" className="mt-2 text-sm text-muted underline">← Back to {STEP_LABEL[STEP_ORDER[STEP_ORDER.indexOf(step) - 1]]}</button>
+              </form>
+            )}
           </section>
         </aside>
       </div>
@@ -177,9 +190,12 @@ function Steps({ job, step, track, tz }: { job: WorkshopJob; step: JobStep | nul
   const idx = step ? STEP_ORDER.indexOf(step) : -1;
   const sub = (s: JobStep): string => {
     if (s === "checked_in") return job.notHereYet ? "not here yet" : track.stepAt.checked_in ? formatTime(track.stepAt.checked_in, tz) : "checked in";
-    if (s === "inspection") return track.stepMinutes.inspection ? fmtMinutes(track.stepMinutes.inspection) : "";
+    if (s === "inspection") {
+      const checked = INSPECTION_TASKS.filter((t) => track.tasks.get(t.key)?.status === "done").length;
+      return [checked ? `${checked} of ${INSPECTION_TASKS.length} checked` : "", track.stepMinutes.inspection ? fmtMinutes(track.stepMinutes.inspection) : ""].filter(Boolean).join(" · ");
+    }
     if (s === "repair") {
-      const done = [...track.tasks.values()].filter((t) => t.status === "done").length;
+      const done = repairDone(track);
       return [track.taskTotal ? `${done} of ${track.taskTotal} tasks` : "", track.stepMinutes.repair ? fmtMinutes(track.stepMinutes.repair) : ""].filter(Boolean).join(" · ");
     }
     return track.stepAt.pickup ? `ready ${formatTime(track.stepAt.pickup, tz)}` : "";
@@ -207,22 +223,21 @@ function Steps({ job, step, track, tz }: { job: WorkshopJob; step: JobStep | nul
           <p className={`${label} mb-1`}>Time</p>
           <div className="flex justify-between"><span>Inspection</span><span>{fmtMinutes(track.stepMinutes.inspection)}</span></div>
           <div className="flex justify-between"><span>Repair</span><span>{fmtMinutes(track.stepMinutes.repair)}</span></div>
-          <p className="mt-1 text-xs text-muted">{track.running ? "Clock running." : "Clock stopped."} Waiting on parts or starting another bike stops it.</p>
         </div>
       )}
     </nav>
   );
 }
 
-function TaskList({ tasks, track, names, jobId, self, canTick }: { tasks: Task[]; track: Track; names: Map<string, string>; jobId: string; self: string; canTick: boolean }) {
+function TaskList({ title, tasks, track, names, jobId, self, canTick, muted }: { title: string; tasks: Task[]; track: Track; names: Map<string, string>; jobId: string; self: string; canTick: boolean; muted?: boolean }) {
   const current = tasks.find((t) => !track.tasks.has(t.key));
   return (
-    <div>
-      <p className={label}>Tasks · the work order&apos;s lines</p>
+    <div className={muted ? "opacity-60" : ""}>
+      <p className={label}>{title}</p>
       <ul className="mt-1">
         {tasks.map((t) => {
           const s = track.tasks.get(t.key);
-          const isNow = canTick && track.step === "repair" && current?.key === t.key;
+          const isNow = canTick && track.running && current?.key === t.key;
           const row = (
             <>
               <span aria-hidden className={`flex h-[30px] w-[30px] items-center justify-center rounded-lg border-2 font-bold ${s?.status === "done" ? "border-[#015d47] bg-[#015d47] text-white" : s?.status === "skipped" ? "border-[#cfcbc4] bg-[#f7f6f3] text-muted" : isNow ? "border-[#ff6b1a] bg-white" : "border-[#cfcbc4] bg-white"}`}>
@@ -257,13 +272,14 @@ function TaskList({ tasks, track, names, jobId, self, canTick }: { tasks: Task[]
           );
         })}
       </ul>
-      {canTick ? (
-        <p className="mt-1 text-xs text-muted">Tap a task when it&apos;s done. Its time is the gap since the last tap.</p>
-      ) : (
-        <p className="mt-1 text-xs text-muted">Tasks can be ticked once the inspection starts.</p>
-      )}
     </div>
   );
+}
+
+/** In Repair, the inspection folds to one line. */
+function InspectionSummary({ track }: { track: Track }) {
+  const checked = INSPECTION_TASKS.filter((t) => track.tasks.get(t.key)?.status === "done").length;
+  return <p className="text-sm text-muted">Inspection: {checked} of {INSPECTION_TASKS.length} checks ticked{track.stepMinutes.inspection ? ` · ${fmtMinutes(track.stepMinutes.inspection)}` : ""}.</p>;
 }
 
 function Done({ tasks, track, names }: { tasks: Task[]; track: Track; names: Map<string, string> }) {
@@ -339,7 +355,7 @@ function NextStep({ job, step, track, open, self, first, lsUrl }: { job: Worksho
       <>
         {resume}
         <form action={jobStepAction.bind(null, job.id, "repair", self)}>
-          <button type="submit" className={big}>{title("Inspection done · start repair →", "Step 3 of 4")}</button>
+          <button type="submit" className={big}>{title("Start repair →", "Inspection done · step 3 of 4")}</button>
         </form>
         {parts}
       </>
@@ -363,14 +379,12 @@ function NextStep({ job, step, track, open, self, first, lsUrl }: { job: Worksho
           </form>
         )}
         {parts}
-        <p className="text-xs text-muted">Mark ready moves the card to Ready{canTell ? ` and can tell ${first} through Klaviyo` : ""}.</p>
       </>
     );
   }
   return lsUrl ? (
     <>
       <a href={lsUrl} target="_blank" rel="noreferrer" className={big}>{title("Take payment →", "Opens the work order at the register")}</a>
-      <p className="text-xs text-muted">Once it&apos;s paid in Lightspeed, the job leaves the board on its own.</p>
     </>
   ) : null;
 }

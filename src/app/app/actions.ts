@@ -33,7 +33,8 @@ import { syncSpecialOrders } from "@/lib/special-orders";
 import { deleteView, saveView, syncWorkorders } from "@/lib/workorders";
 import type { BoardColumn } from "@/lib/workshop-columns";
 import { assignMechanic, markJobReady, moveJob, resolveJob } from "@/lib/workshop-moves";
-import { logJob } from "@/lib/job-log";
+import { loadJobLog, logJob } from "@/lib/job-log";
+import { deriveTrack, isInspectionTask } from "@/lib/job-track";
 import { createTicket, scheduleTicket, ticketPhotoData } from "@/lib/tickets";
 import { jobPath } from "@/lib/workshop";
 
@@ -721,12 +722,39 @@ export async function jobStepAction(jobId: string, step: "inspection" | "repair"
   });
 }
 
+/**
+ * Job tracker: undo a step pressed by mistake. Repair → Inspection only changes the log; Inspection → Check in
+ * puts the work order back in To do's status; Pickup → Repair puts it back in In progress (moveJob logs that).
+ */
+export async function jobStepBackAction(jobId: string, back: string) {
+  return run(safeReturn(back, "/app/workshop"), async () => {
+    const user = await requireActor("staff");
+    const showroom = await currentShowroom(user);
+    const job = await resolveJob(db, showroom, jobId);
+    const step = deriveTrack(job.workorderId ? await loadJobLog(db, job.workorderId) : [], new Date()).step;
+    if (step === "pickup") {
+      await moveJob(db, { showroom, jobId, column: "doing", actor: user.id });
+    } else if (step === "repair") {
+      await logJob(db, { showroomId: showroom.id, workorderId: job.workorderId, actor: user.id, entry: { kind: "step", step: "inspection" } });
+    } else if (step === "inspection") {
+      await moveJob(db, { showroom, jobId, column: "todo", actor: user.id });
+      await logJob(db, { showroomId: showroom.id, workorderId: job.workorderId, actor: user.id, entry: { kind: "step", step: "checked_in" } });
+    } else {
+      throw new Error("There's no step to go back to.");
+    }
+  });
+}
+
 /** Job tracker: tick a task done (or untick it). Its time is the running time since the last tick. */
 export async function jobTaskAction(jobId: string, taskKey: string, taskLabel: string, done: boolean, back: string) {
   return run(safeReturn(back, "/app/workshop"), async () => {
     const user = await requireActor("staff");
     const showroom = await currentShowroom(user);
     const job = await resolveJob(db, showroom, jobId);
+    // Inspection checks are ticked in Inspection, the work order's lines in Repair.
+    // (A job with nothing logged yet follows its board column on the page, so it isn't blocked here.)
+    const step = deriveTrack(job.workorderId ? await loadJobLog(db, job.workorderId) : [], new Date()).step;
+    if (step && (isInspectionTask(taskKey) ? step !== "inspection" : step !== "repair")) throw new Error(isInspectionTask(taskKey) ? "The inspection is finished; this check can't change now." : "Start the repair first.");
     await logJob(db, { showroomId: showroom.id, workorderId: job.workorderId, actor: user.id, entry: { kind: done ? "task_done" : "task_undone", taskKey, taskLabel } });
   });
 }

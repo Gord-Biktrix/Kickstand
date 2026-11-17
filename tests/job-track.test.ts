@@ -119,3 +119,22 @@ describe("job tracker storage", () => {
     expect(deriveTrack(log, at(50))).toMatchObject({ step: "pickup", running: false, handsOn: 15, taskTotal: 3 });
   });
 });
+
+describe("inspection checks", () => {
+  it("are timed in Inspection, kept apart from repair tasks, and the repair clock starts fresh", async () => {
+    const { repairDone } = await import("@/lib/job-track");
+    const log: LogEntry[] = [
+      { kind: "step", step: "inspection", at: at(0), actor: JORDAN },
+      { kind: "task_done", taskKey: "insp:brakes", taskLabel: "Brakes", at: at(5), actor: JORDAN },
+      { kind: "task_done", taskKey: "insp:wheels", taskLabel: "Wheels", at: at(9), actor: JORDAN },
+      { kind: "step", step: "repair", at: at(12), actor: JORDAN },
+      { kind: "task_done", taskKey: "line1", taskLabel: "Tune Up", at: at(52), actor: JORDAN },
+    ];
+    const t = deriveTrack(log, at(60));
+    expect(t.tasks.get("insp:brakes")?.minutes).toBe(5);
+    expect(t.tasks.get("insp:wheels")?.minutes).toBe(4);
+    expect(t.tasks.get("line1")?.minutes).toBe(40);
+    expect(repairDone(t)).toBe(1);
+    expect(t.stepMinutes).toEqual({ inspection: 12, repair: 48 });
+  });
+});

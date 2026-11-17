@@ -48,6 +48,25 @@ export type Track = {
 /** The quality check is always the last task on a repair. */
 export const QC_TASK = { key: "qc", label: "Quality check: test ride" } as const;
 
+/**
+ * What every bike gets checked for in Inspection (one list for now; per-service checklists come later). Keys start
+ * with "insp:" so they never mix with the Repair tasks (the work order's lines).
+ */
+export const INSPECTION_TASKS: readonly { key: string; label: string; minutes: null }[] = [
+  { key: "insp:brakes", label: "Brakes: pads, rotors, levers", minutes: null },
+  { key: "insp:drivetrain", label: "Drivetrain: chain, cassette, derailleur", minutes: null },
+  { key: "insp:wheels", label: "Tires and wheels: wear, pressure, spokes", minutes: null },
+  { key: "insp:electrical", label: "Battery, motor and display: charge, error codes", minutes: null },
+  { key: "insp:bolts", label: "Bolts, headset and suspension", minutes: null },
+  { key: "insp:lights", label: "Lights and accessories", minutes: null },
+];
+export const isInspectionTask = (key: string) => key.startsWith("insp:");
+
+/** Repair tasks ticked done (inspection checks don't count). */
+export function repairDone(track: Track): number {
+  return [...track.tasks.values()].filter((x) => x.status === "done" && !isInspectionTask(x.key)).length;
+}
+
 const minutesBetween = (a: Date, b: Date) => Math.max(0, (b.getTime() - a.getTime()) / 60_000);
 const isStep = (s: unknown): s is JobStep => typeof s === "string" && (STEP_ORDER as string[]).includes(s);
 const RUNS = new Set(["inspection", "repair"]);
@@ -63,12 +82,12 @@ export function deriveTrack(entries: LogEntry[], now: Date, booked: Record<strin
   const t: Track = { step: null, stepAt: {}, running: false, pausedAt: null, pauseReason: null, stepMinutes: { inspection: 0, repair: 0 }, handsOn: 0, tasks: new Map(), taskTotal: null, activeActor: null, sinceTick: 0 };
   let paused = false;
   let last: Date | null = null;
-  let sinceTick = 0; // running minutes in Repair since the last tick
+  let sinceTick = 0; // running minutes in this step since the last tick
   const advance = (to: Date) => {
     if (last && t.step && RUNS.has(t.step) && !paused) {
       const m = minutesBetween(last, to);
       t.stepMinutes[t.step as "inspection" | "repair"] += m;
-      if (t.step === "repair") sinceTick += m;
+      sinceTick += m;
     }
     last = to;
   };
@@ -85,7 +104,7 @@ export function deriveTrack(entries: LogEntry[], now: Date, booked: Record<strin
         if (!isStep(e.step)) break;
         t.step = e.step;
         t.stepAt[e.step] ??= e.at;
-        if (e.step === "repair") sinceTick = 0;
+        sinceTick = 0;
         if (RUNS.has(e.step)) restart(e);
         break;
       case "pause":
@@ -100,7 +119,7 @@ export function deriveTrack(entries: LogEntry[], now: Date, booked: Record<strin
         break;
       case "task_done": {
         if (!e.taskKey) break;
-        const minutes = t.step === "repair" ? Math.round(sinceTick) : null;
+        const minutes = t.step && RUNS.has(t.step) ? Math.round(sinceTick) : null;
         t.tasks.set(e.taskKey, { key: e.taskKey, label: e.taskLabel ?? e.taskKey, status: "done", at: e.at, actor: e.actor ?? null, minutes, reason: null, outlier: minutes !== null && isOutlier(minutes, booked[e.taskKey]) });
         sinceTick = 0;
         if (t.step && RUNS.has(t.step)) restart(e);

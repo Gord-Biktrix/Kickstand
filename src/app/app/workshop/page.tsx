@@ -13,7 +13,7 @@ import { sp, type SearchParams } from "@/lib/flash";
 import { addLocalDays, formatTime, localToUtc, toLocalDate } from "@/lib/time";
 import { jobPath, workshopJobs, type JobColumn, type WorkshopJob } from "@/lib/workshop";
 import { loadJobLogs } from "@/lib/job-log";
-import { currentStep, deriveTrack, fmtMinutes, STEP_LABEL, type Track } from "@/lib/job-track";
+import { currentStep, deriveTrack, fmtMinutes, repairDone, STEP_LABEL, type Track } from "@/lib/job-track";
 import { markReadyAction, moveJobAction, readyJobAction, setBookingStatusAction, startBuildAction } from "../actions";
 
 export const metadata = { title: "Workshop" };
@@ -93,7 +93,7 @@ export default async function WorkshopPage({ searchParams }: { searchParams: Pro
       const t = j.workorderId && movable(j) ? tracks.get(j.workorderId) : undefined;
       if (!t) continue;
       const step = currentStep(t, j.column);
-      const done = [...t.tasks.values()].filter((x) => x.status === "done").length;
+      const done = repairDone(t);
       planTracks.set(j.id, { running: t.running, handsOn: t.handsOn, startedAt: t.stepAt.inspection ?? t.stepAt.repair ?? null, readyAt: t.stepAt.pickup ?? null, pausedAt: t.pausedAt, label: [STEP_LABEL[step], step === "repair" && t.taskTotal ? `${done} of ${t.taskTotal}` : null].filter(Boolean).join(" ") });
     }
     plan = planDay({
@@ -321,7 +321,7 @@ function DayView({ plan, jobs, tz, now, back }: { plan: DayPlan; jobs: WorkshopJ
 /** "Repair · 2 of 4 · ● 1 h 05 min" or "❚❚ paused at 22 min": where the job is in the tracker, and its clock. */
 function TrackLine({ job, track }: { job: WorkshopJob; track: Track }) {
   const step = currentStep(track, job.column);
-  const done = [...track.tasks.values()].filter((t) => t.status === "done").length;
+  const done = repairDone(track);
   const progress = step === "repair" && track.taskTotal ? `${done} of ${track.taskTotal}` : null;
   return (
     <div className="mt-2">
