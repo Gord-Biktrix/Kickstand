@@ -99,22 +99,30 @@ export function TicketPos(props: {
   const [dropoff, setDropoff] = useState<string>(props.initialDropoff);
   const earliest = props.days[0]?.slots[0] ?? null;
   const dropLabel = props.days.flatMap((d) => d.slots).find((sl) => sl.iso === dropoff)?.label ?? "";
+  // The picked day and time, for the date button: same two-line shape as Now and Earliest, so the row doesn't reflow.
+  const pickedDayRow = props.days.find((d) => d.slots.some((sl) => sl.iso === dropoff));
+  const pickedTime = pickedDayRow?.slots.find((sl) => sl.iso === dropoff)?.time ?? "";
   // The date field opens the calendar in a modal; picking a time (or Esc, or a click outside) closes it.
   const [calOpen, setCalOpen] = useState(false);
   // Phones: the tiles live in a sheet over the ticket, opened from "Add service, labour or part" (always shown on lg).
   const [addOpen, setAddOpen] = useState(false);
-  // Laptops: the ticket is as tall as the room left on screen below it, so the button is always in view.
+  // Laptops, like a POS: the ticket and the tiles fill the room left on screen and each scrolls on its own, so the
+  // page itself stays put and the button is always in view. Sized from where the form starts, on load and resize.
   const ticket = useRef<HTMLElement>(null);
   useEffect(() => {
-    const el = ticket.current;
-    if (!el) return;
+    const form = ticket.current?.parentElement;
+    if (!form) return;
     const wide = window.matchMedia("(min-width: 1024px)");
-    const fit = () => { el.style.maxHeight = wide.matches ? `${window.innerHeight - Math.max(16, el.getBoundingClientRect().top) - 16}px` : ""; };
+    const fit = () => {
+      if (!wide.matches) { form.style.height = ""; form.style.gridTemplateRows = ""; return; }
+      const top = form.getBoundingClientRect().top + window.scrollY;
+      form.style.height = `${Math.max(480, window.innerHeight - top - 24)}px`;
+      form.style.gridTemplateRows = "minmax(0, 1fr)";
+    };
     fit();
-    window.addEventListener("scroll", fit, { passive: true });
     window.addEventListener("resize", fit);
     wide.addEventListener("change", fit);
-    return () => { window.removeEventListener("scroll", fit); window.removeEventListener("resize", fit); wide.removeEventListener("change", fit); };
+    return () => { window.removeEventListener("resize", fit); wide.removeEventListener("change", fit); form.style.height = ""; form.style.gridTemplateRows = ""; };
   }, []);
   useEffect(() => {
     if (!addOpen) return;
@@ -187,8 +195,8 @@ export function TicketPos(props: {
     <>
       {/* The ticket, like a POS cart. */}
       {/* Laptops: the ticket stays in view at window height and scrolls on its own; the button stays at its foot. */}
-      <section ref={ticket} aria-label="New ticket" className="flex flex-col rounded-xl border border-border bg-card lg:sticky lg:top-4 lg:max-h-[calc(100dvh-2rem)] lg:self-start">
-        <div className="flex flex-1 flex-col lg:min-h-0 lg:overflow-y-auto lg:overscroll-contain">
+      <section ref={ticket} aria-label="New ticket" className="flex flex-col rounded-xl border border-border bg-card lg:h-full lg:min-h-0">
+        <div className="relative flex flex-1 flex-col lg:min-h-0 lg:overflow-y-auto lg:overscroll-contain">
         <div className="flex flex-col gap-4 border-b border-border p-4">
           <TicketCustomerBike initial={props.initial.pick} initialNew={props.initial.newCustomer} bike={props.initial.bike} serial={props.initial.serial} sid={props.initial.sid} onBike={setBike} />
         </div>
@@ -197,13 +205,13 @@ export function TicketPos(props: {
           <input type="hidden" name="dropoff" value={dropoff} />
           <div>
             <p className={label}>Schedule service</p>
-            <div className="mt-1.5 grid grid-cols-3 gap-2 lg:flex lg:flex-wrap" role="radiogroup" aria-label="Schedule service">
+            <div className="mt-1.5 grid grid-cols-[auto_minmax(0,1fr)_minmax(0,1fr)] gap-2" role="radiogroup" aria-label="Schedule service">
               <DropButton on={dropoff === "now"} onClick={() => chooseDropoff("now")} title="Now" sub="walk-in" />
               {earliest && <DropButton on={dropoff === earliest.iso} onClick={() => chooseDropoff(earliest.iso)} title={<><span className="lg:hidden">Earliest</span><span className="hidden lg:inline">Earliest available</span></>} sub={earliest.label} />}
               {earliest && (
-                <button type="button" role="radio" aria-checked={pickedDay} onClick={() => setCalOpen(true)} className={`flex min-h-12 min-w-0 flex-col items-start justify-center gap-0.5 rounded-lg border px-2.5 py-1.5 text-left lg:flex-row lg:items-center lg:gap-2 lg:px-3 ${pickedDay ? "border-[#015d47] bg-[#015d47] text-white" : "border-border bg-card"}`}>
-                  <CalendarIcon />
-                  <span className="text-xs font-bold lg:text-sm">{pickedDay ? dropLabel : props.todayLabel}</span>
+                <button type="button" role="radio" aria-checked={pickedDay} onClick={() => setCalOpen(true)} className={`min-h-12 min-w-0 rounded-lg border px-2.5 py-1.5 text-left lg:px-3 ${pickedDay ? "border-[#015d47] bg-[#015d47] text-white" : "border-border bg-card"}`}>
+                  <span className="flex items-center gap-1.5 text-sm font-bold"><CalendarIcon /><span className="truncate">{pickedDay && pickedDayRow ? pickedDayRow.label : props.todayLabel}</span></span>
+                  <span className={`block truncate text-xs ${pickedDay ? "text-white/75" : "text-muted"}`}>{pickedDay ? pickedTime : "Pick a day"}</span>
                 </button>
               )}
             </div>
@@ -222,7 +230,7 @@ export function TicketPos(props: {
               )}
             </div>
             <p className="mt-1 text-xs text-muted">
-              {dropoff === "now" ? `${props.benches} bench${props.benches === 1 ? "" : "es"} · ${queueText(props.loads)}` : `From ${dropLabel}, in open hours`}
+              {dropoff === "now" ? `${props.benches} bench${props.benches === 1 ? "" : "es"} · ${queueText(props.loads)}` : "From drop-off, in open hours"}
             </p>
           </div>
         </div>
@@ -294,12 +302,12 @@ export function TicketPos(props: {
 
       {/* What you can add, like POS tiles. */}
       {addOpen && <div className="fixed inset-0 z-40 bg-black/40 lg:hidden" onClick={() => setAddOpen(false)} aria-hidden />}
-      <section aria-label="Add to the ticket" className={`min-w-0 flex-col gap-3 lg:static lg:z-auto lg:flex lg:overflow-visible lg:rounded-none lg:bg-transparent lg:p-0 lg:shadow-none ${addOpen ? "fixed inset-x-0 top-12 bottom-0 z-50 flex overflow-y-auto rounded-t-2xl bg-card p-4 shadow-2xl" : "hidden"}`}>
+      <section aria-label="Add to the ticket" className={`min-w-0 flex-col gap-3 lg:static lg:z-auto lg:flex lg:h-full lg:min-h-0 lg:overflow-y-auto lg:overscroll-contain lg:rounded-none lg:bg-transparent lg:px-2 lg:pt-0 lg:pb-4 lg:shadow-none ${addOpen ? "fixed inset-x-0 top-12 bottom-0 z-50 flex overflow-y-auto rounded-t-2xl bg-card p-4 shadow-2xl" : "hidden"}`}>
         <div className="flex items-center justify-between lg:hidden">
           <span aria-hidden className="mx-auto h-1 w-10 rounded-full bg-[#cfcbc4]" />
         </div>
         {/* Laptops: search and tabs stay at the top while the tiles scroll. */}
-        <div className="flex flex-col gap-3 lg:sticky lg:top-0 lg:z-10 lg:-mt-4 lg:bg-background lg:pt-4 lg:pb-1">
+        <div className="flex flex-col gap-3 lg:sticky lg:top-0 lg:z-10 lg:bg-background lg:pt-1 lg:pb-2">
         <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder={tab === "parts" && model ? `Search items (showing parts for ${model})…` : "Search items…"} aria-label="Search" className="input h-12 text-base" />
         <div role="tablist" aria-label="What to add" className="flex flex-wrap gap-2">
           {([["all", "All"], ["services", "Services"], ["labour", "Labour"], ["parts", model ? `Parts for ${model}` : "Parts"]] as const).map(([t, text]) => (
@@ -557,7 +565,7 @@ function CalendarModal({ onClose, children }: { onClose: () => void; children: R
 
 function CalendarIcon() {
   return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+    <svg className="shrink-0" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
       <rect x="3" y="5" width="18" height="16" rx="2" /><path d="M3 10h18M8 3v4M16 3v4" />
     </svg>
   );
