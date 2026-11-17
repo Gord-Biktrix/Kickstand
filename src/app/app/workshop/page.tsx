@@ -6,6 +6,7 @@ import { DayDnd } from "@/components/day-dnd";
 import { ensureStoreHours } from "@/lib/booking-types";
 import { pct, planDay, type DayPlan, type PlanTrack } from "@/lib/day-plan";
 import { Empty, Flash, PageHeader } from "@/components/ui";
+import { AutoSubmitSelect } from "@/components/auto-submit-select";
 import { requireUser } from "@/lib/auth";
 import { currentShowroom } from "@/lib/current-showroom";
 import { sp, type SearchParams } from "@/lib/flash";
@@ -73,8 +74,6 @@ export default async function WorkshopPage({ searchParams }: { searchParams: Pro
   const mechanics = [...new Map(all.filter((j) => j.mechanicId).map((j) => [j.mechanicId!, j.mechanic ?? `Employee ${j.mechanicId}`])).entries()].sort((a, b) => a[1].localeCompare(b[1]));
   const mech = sp(q.mech) ?? "";
   const jobs = mech === "none" ? all.filter((j) => !j.mechanicId) : mech ? all.filter((j) => j.mechanicId === mech) : all;
-  const late = jobs.filter((j) => j.late).length;
-  const ls = showroom.settings.lightspeed.shop_id !== null;
   const back = mech ? `/app/workshop?mech=${encodeURIComponent(mech)}` : RETURN;
   const readying = all.find((j) => j.id === sp(q.ready) && movable(j));
   // The job tracker: each repair's step, tasks done and clock (lib/job-track.ts).
@@ -111,31 +110,23 @@ export default async function WorkshopPage({ searchParams }: { searchParams: Pro
       <Flash ok={sp(q.ok)} error={sp(q.error)} />
       <PageHeader
         title="Workshop"
-        subtitle={
-          <>
-            Each job shows when to start: when the customer needs it, minus how long the work takes.
-            {late > 0 && <span className="ml-1 font-semibold text-red-700">{late} late.</span>}
-          </>
-        }
         action={
-          <div className="flex flex-wrap items-center gap-3">
-          <div role="tablist" aria-label="View" className="inline-flex rounded-lg bg-[#e4e1dc] p-0.5">
-            <Link href={viewHref("board")} role="tab" aria-selected={view === "board"} className={`inline-flex min-h-10 items-center rounded-md px-4 text-sm font-bold ${view === "board" ? "bg-[#015d47] text-white" : "text-[#3d3f43]"}`}>Board</Link>
-            <Link href={viewHref("day")} role="tab" aria-selected={view === "day"} className={`inline-flex min-h-10 items-center rounded-md px-4 text-sm font-bold ${view === "day" ? "bg-[#015d47] text-white" : "text-[#3d3f43]"}`}>Day</Link>
-          </div>
-          <Link href="/app/workshop/new" className="btn btn-primary">+ New ticket</Link>
-          {mechanics.length > 0 && (
-            <form className="flex items-center gap-2" action="/app/workshop">
-              {view === "day" && <input type="hidden" name="view" value="day" />}
-              <label htmlFor="mech" className="text-sm text-muted">Mechanic</label>
-              <select id="mech" name="mech" defaultValue={mech} className="input h-10 w-auto">
-                <option value="">Everyone</option>
-                {mechanics.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
-                <option value="none">Not assigned</option>
-              </select>
-              <button type="submit" className="btn btn-sm">Show</button>
-            </form>
-          )}
+          <div className="flex flex-wrap items-center gap-2">
+            <div role="tablist" aria-label="View" className="inline-flex rounded-lg bg-[#e4e1dc] p-0.5">
+              <Link href={viewHref("board")} role="tab" aria-selected={view === "board"} className={`inline-flex min-h-10 items-center rounded-md px-4 text-sm font-bold ${view === "board" ? "bg-[#015d47] text-white" : "text-[#3d3f43]"}`}>Board</Link>
+              <Link href={viewHref("day")} role="tab" aria-selected={view === "day"} className={`inline-flex min-h-10 items-center rounded-md px-4 text-sm font-bold ${view === "day" ? "bg-[#015d47] text-white" : "text-[#3d3f43]"}`}>Day</Link>
+            </div>
+            {mechanics.length > 0 && (
+              <form action="/app/workshop">
+                {view === "day" && <input type="hidden" name="view" value="day" />}
+                <AutoSubmitSelect name="mech" defaultValue={mech} ariaLabel="Mechanic" className="input h-11 w-auto">
+                  <option value="">All mechanics</option>
+                  {mechanics.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+                  <option value="none">Not assigned</option>
+                </AutoSubmitSelect>
+              </form>
+            )}
+            <Link href="/app/workshop/new" className="btn btn-primary">+ New ticket</Link>
           </div>
         }
       />
@@ -160,10 +151,6 @@ export default async function WorkshopPage({ searchParams }: { searchParams: Pro
         })}
       </div>
       </BoardDnd>
-      <p className="mt-4 text-sm text-muted">
-        Builds take {hours(showroom.settings.build_minutes)} and Lightspeed repairs {hours(showroom.settings.repair_minutes)} before they&apos;re due (change both in Settings › Program); booked repairs run while the customer&apos;s appointment does.
-        {ls ? " Lightspeed work orders refresh every hour; which status goes in which column is set in Settings › Views." : ""} Drag a card to another column to move it, or use its buttons. Jobs leave the board when the visit is completed or the work order is paid.
-      </p>
       </>
       )}
     </div>
@@ -313,7 +300,6 @@ function DayView({ plan, jobs, tz, now, back }: { plan: DayPlan; jobs: WorkshopJ
           </div>
         </section>
       </DayDnd>
-      <p className="text-sm text-muted">Blocks are placed from each job&apos;s start-by time and length; drag one onto another lane to give it to that mechanic (it changes the work order&apos;s employee in Lightspeed). ● running · ❚❚ waiting on parts · ✓ done today · red = will miss its ready-by. Lanes are the mechanics on today&apos;s work orders.</p>
     </div>
   );
 }
