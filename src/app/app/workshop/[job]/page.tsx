@@ -541,7 +541,7 @@ function Findings({ jf, jobId, self, first, tz }: { jf: JobFindings; jobId: stri
                 </form>
               ) : !f.decision ? (
                 <div className="flex gap-2">
-                  <form action={staffAnswerFindingAction.bind(null, f.id, "approved", self)}><button type="submit" className="btn btn-sm">{first} said yes</button></form>
+                  <form action={staffAnswerFindingAction.bind(null, f.id, "approved", self)}><button type="submit" className="btn btn-sm">Yes</button></form>
                   <form action={staffAnswerFindingAction.bind(null, f.id, "declined", self)}><button type="submit" className="btn btn-sm">No</button></form>
                 </div>
               ) : null}
