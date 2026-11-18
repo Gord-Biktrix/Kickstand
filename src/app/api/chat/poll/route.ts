@@ -7,6 +7,7 @@ import { currentShowroom } from "@/lib/current-showroom";
 
 /** The Messages screen polls this every few seconds: the thread list, the open thread, the unread count. */
 export async function GET(request: NextRequest) {
+  if (process.env.KICKSTAND_CHAT !== "on") return new Response("Not found", { status: 404 });
   const user = await getCurrentUser();
   if (!user) return Response.json({ error: "Sign in required" }, { status: 401 });
   const showroom = await currentShowroom(user);

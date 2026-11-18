@@ -1,3 +1,4 @@
+import { notFound } from "next/navigation";
 import { db } from "@/db/client";
 import { requireUser } from "@/lib/auth";
 import { listThreads, loadThread, type ThreadFilter } from "@/lib/chat-view";
@@ -18,6 +19,8 @@ function closesToday(hours: Record<string, [string, string][]>, tz: string): str
 }
 
 export default async function MessagesPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
+  // Kickstand Chat is v3: off until KICKSTAND_CHAT=on (Twilio isn't live).
+  if (process.env.KICKSTAND_CHAT !== "on") notFound();
   const q = await searchParams;
   const user = await requireUser("staff");
   const showroom = await currentShowroom(user);

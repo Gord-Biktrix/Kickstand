@@ -12,7 +12,6 @@ import { listShowrooms } from "@/lib/showroom";
 import { hasRole, PASSWORD_NUDGE_COOKIE, requireUser, roleLabel } from "@/lib/auth";
 import { HeaderMenu } from "@/components/header-menu";
 import { colorOf, ensureDefaultBookingTypes, listBookingTypes, LOCATION_LABEL, type BookingLocation } from "@/lib/booking-types";
-import { unreadCount } from "@/lib/chat";
 import { signOutAction } from "./actions";
 
 // Three places, one question each (redesign 2026-11): who's coming in (Schedule), what's on the bench (Workshop),
@@ -23,7 +22,6 @@ const NAV = [
   { href: "/app", label: "Schedule", exact: true, also: ["/app/schedule", "/app/bookings"] },
   { href: "/app/workshop", label: "Workshop", store: true, also: ["/app/workshop", "/app/bikes", "/app/parts", "/app/workorders", "/app/units", "/app/orders", "/app/arrivals", "/app/build", "/app/watchlist", "/app/book"] },
   { href: "/app/search", label: "Customers", also: ["/app/search", "/app/customers"] },
-  { href: "/app/messages", label: "Messages", also: ["/app/messages"] },
 ] as const;
 
 export const metadata = { title: { default: "Kickstand", template: "%s · Kickstand" } };
@@ -40,7 +38,6 @@ export default async function StaffLayout({ children }: { children: React.ReactN
   await ensureDefaultBookingTypes(db, showroom);
   const visitTypes = (await listBookingTypes(db, showroom.id)).filter((t) => t.kind === "standard" && t.active);
   const manager = hasRole(user.role, "manager");
-  const unreadTexts = await unreadCount(db, showroom.id);
   const nudgePassword = !user.passwordHash && !(await cookies()).get(PASSWORD_NUDGE_COOKIE);
   return (
     <div className="flex flex-1 flex-col">
@@ -61,7 +58,6 @@ export default async function StaffLayout({ children }: { children: React.ReactN
                 label: n.label,
                 exact: "exact" in n && n.exact,
                 also: [...n.also],
-                badge: n.href === "/app/messages" ? unreadTexts : undefined,
               }))}
             />
           </nav>
