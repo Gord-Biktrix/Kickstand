@@ -2,7 +2,9 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { eq, inArray } from "drizzle-orm";
 import { db } from "@/db/client";
-import { bookings, lsWorkorders, staffUsers } from "@/db/schema";
+import { bookings, jobTrackers, lsWorkorders, staffUsers } from "@/db/schema";
+import { trackerUrl } from "@/lib/tracker";
+import { decryptToken } from "@/lib/tokens";
 import { Flash } from "@/components/ui";
 import { requireUser } from "@/lib/auth";
 import { currentShowroom } from "@/lib/current-showroom";
@@ -22,7 +24,7 @@ import { findingPrice, findingTitle, isLevel, loadJobFindings, type JobFindings 
 import { LightspeedClient, lightspeedEnabled } from "@/lib/lightspeed";
 import { loadServiceItems, pickTiles } from "@/lib/service-items";
 import { listShowrooms, type ShowroomCtx } from "@/lib/showroom";
-import { jobReadyAction, jobResumeAction, jobStepAction, jobStepBackAction, jobTaskAction, jobCheckAction, cancelTicketAction, addFindingAction, deleteFindingAction, sendFindingsAction, staffAnswerFindingAction, moveJobAction, setBookingStatusAction, staffCancelTypeBookingAction } from "../../actions";
+import { jobReadyAction, jobResumeAction, jobStepAction, jobStepBackAction, jobTaskAction, jobCheckAction, sendTrackerAction, cancelTicketAction, addFindingAction, deleteFindingAction, sendFindingsAction, staffAnswerFindingAction, moveJobAction, setBookingStatusAction, staffCancelTypeBookingAction } from "../../actions";
 
 export const metadata = { title: "Job" };
 
@@ -79,6 +81,9 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   const first = job.customer?.split(/\s+/)[0] ?? "the customer";
   const said = booking?.customerNote || wo?.note || "";
   const photos = job.workorderId ? await listTicketPhotos(db, job.workorderId) : [];
+  const [trackerRow] = job.workorderId ? await db.select({ tokenEnc: jobTrackers.tokenEnc, toldStatus: jobTrackers.toldStatus }).from(jobTrackers).where(eq(jobTrackers.workorderId, job.workorderId)) : [];
+  const trackerLink = trackerRow ? trackerUrl(decryptToken(trackerRow.tokenEnc)) : null;
+  const trackerTold = trackerRow?.toldStatus ?? null;
   const lsUrl = job.workorderId ? lightspeedWorkorderUrl(job.workorderId) : null;
   const open = openTasks(tasks, track);
   const booked = tasks.reduce((s, t) => s + (t.minutes ?? 0), 0);
@@ -179,6 +184,16 @@ export default async function JobPage({ params, searchParams }: { params: Promis
                 <ConfirmButton className="btn btn-danger btn-sm w-full" message={`Cancel this ticket? Work order #${job.workorderId} is archived in Lightspeed and leaves the board. Nobody is texted.`}>Cancel ticket</ConfirmButton>
               </form>
             ) : null}
+            {job.workorderId && job.customer && !job.notHereYet && (
+              <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-[#f1efeb] pt-3">
+                <span className="mr-auto text-sm">{trackerLink ? `Tracker ${trackerTold === "sent" ? "sent" : "made"}` : "Tracker"}</span>
+                {trackerLink && <CopyButton text={trackerLink} label="Copy" />}
+                <form action={sendTrackerAction.bind(null, job.id, self)}>
+                  <button type="submit" className="btn btn-sm">{trackerTold === "sent" ? "Text again" : "Text it"}</button>
+                </form>
+                {trackerLink && <a href={trackerLink} target="_blank" rel="noreferrer" className="text-sm underline">View</a>}
+              </div>
+            )}
           </section>
 
           {lines && lines.length > 0 && (

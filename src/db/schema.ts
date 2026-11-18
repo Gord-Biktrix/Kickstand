@@ -581,6 +581,29 @@ export const findings = pgTable(
   ],
 );
 
+/**
+ * The customer's repair tracker (/t/<token>): one link per work order, made when the bike is checked in (or when
+ * staff send it), texted through Klaviyo ("Workshop: Checked in"). The token is kept encrypted so it can be re-sent.
+ */
+export const jobTrackers = pgTable(
+  "job_trackers",
+  {
+    id: id(),
+    showroomId: uuid("showroom_id")
+      .notNull()
+      .references(() => showrooms.id),
+    workorderId: text("workorder_id").notNull(),
+    tokenHash: text("token_hash").notNull(),
+    tokenEnc: text("token_enc").notNull(),
+    customerName: text("customer_name").notNull().default(""),
+    toldStatus: text("told_status"),
+    toldAt: timestamp("told_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("job_trackers_token_idx").on(t.tokenHash), uniqueIndex("job_trackers_workorder_idx").on(t.workorderId)],
+);
+
+export type JobTracker = typeof jobTrackers.$inferSelect;
 export type FindingRequest = typeof findingRequests.$inferSelect;
 export type Finding = typeof findings.$inferSelect;
 export type JobLogRow = typeof jobLog.$inferSelect;

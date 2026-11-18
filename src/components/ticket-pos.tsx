@@ -290,9 +290,7 @@ export function TicketPos(props: {
               <p className="text-xl font-extrabold">{work ? mins(work) : "—"}{partsTotal ? ` · ${money(partsTotal)}` : ""}</p>
             </div>
           </div>
-          {dropoff !== "now" && (
-            <label className="mb-2 flex min-h-11 items-center gap-2 text-sm"><input type="checkbox" name="sms_consent" defaultChecked className="h-5 w-5" /> Customer agrees to texts about this booking</label>
-          )}
+          <label className="mb-2 flex min-h-11 items-center gap-2 text-sm"><input type="checkbox" name="sms_consent" defaultChecked className="h-5 w-5" /> {dropoff === "now" ? "Text them a link to follow the repair" : "Customer agrees to texts about this booking"}</label>
           <button type="submit" disabled={!props.enabled} className="flex min-h-14 w-full items-center justify-center rounded-xl lg:min-h-16 bg-[#ff6b1a] px-4 text-center text-lg font-extrabold text-[#17181a] disabled:opacity-50">
             {dropoff === "now" ? "Check in · create ticket" : `Book service · ${dropLabel}`}
           </button>

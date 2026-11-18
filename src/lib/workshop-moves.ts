@@ -162,6 +162,8 @@ export async function markJobReady(db: Db, args: { showroom: ShowroomCtx; jobId:
     showroom: showroom.name,
     showroom_address: showroom.addressLine,
     showroom_phone: showroom.phone ?? "",
+    // The customer's tracker, when they have one (a Klaviyo flow can link "see the details").
+    url: (await (await import("./tracker")).trackerUrlFor(db, moved.workorderId)) ?? "",
   };
   let told: ReadyResult["told"] = "sent";
   try {

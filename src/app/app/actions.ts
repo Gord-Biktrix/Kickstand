@@ -26,7 +26,7 @@ import { currentShowroom } from "@/lib/current-showroom";
 import { createShowroom, importShowroomsFromLightspeed, isProfileKind, setLightspeedLink, updateShowroomDetails } from "@/lib/showroom-admin";
 import { cancelTypeBooking, createTypeBooking, getBookingDetail, rescheduleTypeBooking, resendBookingConfirmation, setBookingOutcome, syncBookingWorkorder } from "@/lib/type-bookings";
 import { createBookingType, getBookingType, hoursFromForm, NEW_TYPE_DEFAULTS, setBookingTypeActive, setStoreHours, updateBookingType, updatePickupType, validateBookingType, type BookingTypeInput, listBookingTypes } from "@/lib/booking-types";
-import { LightspeedClient } from "@/lib/lightspeed";
+import { LightspeedClient, lightspeedEnabled } from "@/lib/lightspeed";
 import { googleEnabled } from "@/lib/google-auth";
 import { mailerKind } from "@/lib/mailer";
 import { syncSpecialOrders } from "@/lib/special-orders";
@@ -34,6 +34,7 @@ import { deleteView, saveView, syncWorkorders } from "@/lib/workorders";
 import type { BoardColumn } from "@/lib/workshop-columns";
 import { assignMechanic, cancelTicket, markJobReady, moveJob, resolveJob } from "@/lib/workshop-moves";
 import { loadJobLog, logJob } from "@/lib/job-log";
+import { sendTracker } from "@/lib/tracker";
 import { addFinding, answerFindings, closeUnanswered, deleteDraft, sendFindings } from "@/lib/findings";
 import { deriveTrack, isCheckResult, isInspectionTask, parseChecklist, type CheckResult } from "@/lib/job-track";
 import { createTicket, scheduleTicket, ticketPhotoData } from "@/lib/tickets";
@@ -686,8 +687,18 @@ export async function createTicketAction(formData: FormData) {
       actor: user.id,
     });
     const id = r.workorderId;
+    // Walk-in: the customer's tracker link, when they agreed to texts (the box is ticked; they're at the counter).
+    let tracked = "";
+    if (formData.get("sms_consent") === "on") {
+      try {
+        const t = await sendTracker(db, { showroom, jobId: `w:${id}`, actor: user.id, smsConsent: true });
+        tracked = t.told === "sent" ? " Tracker link sent." : "";
+      } catch {
+        /* the ticket is made; the link can be sent from the job page */
+      }
+    }
     const parts = r.partsFailed.length ? ` ${r.partsFailed.length} part${r.partsFailed.length > 1 ? "s" : ""} couldn't be added in Lightspeed (${r.partsFailed.join(", ")})${r.partsError ? `: ${r.partsError}` : ""}; they're in the note.` : r.partsAdded ? ` ${r.partsAdded} part line${r.partsAdded > 1 ? "s" : ""} added.` : "";
-    target = withFlash(`${jobPath(`w:${id}`)}`, { ok: `Ticket created: Lightspeed work order #${id}.${parts}` });
+    target = withFlash(`${jobPath(`w:${id}`)}`, { ok: `Ticket created: Lightspeed work order #${id}.${parts}${tracked}` });
     }
   } catch (err) {
     keep.set("error", errorMessage(err));
@@ -1485,10 +1496,20 @@ async function staffBooking(id: string) {
 export async function setBookingStatusAction(id: string, status: "booked" | "completed" | "no_show", back = "") {
   return run(safeReturn(back, `/app/bookings/${id}`), async () => {
     const { user, showroom, detail } = await staffBooking(id);
-    await setBookingOutcome(db, { showroomId: showroom.id, bookingId: id, outcome: status, actor: user.id });
+    const row = await setBookingOutcome(db, { showroomId: showroom.id, bookingId: id, outcome: status, actor: user.id });
     if (status === "no_show") return "Marked as a no-show.";
     if (status === "booked") return "Back to booked.";
-    return detail.type.location === "in_person" ? "Checked in." : "Marked as done.";
+    if (detail.type.location !== "in_person") return "Marked as done.";
+    // A repair with a work order: text the customer their tracker link.
+    if (row.lsWorkorderId && detail.type.createsWorkOrder && lightspeedEnabled(showroom)) {
+      try {
+        const t = await sendTracker(db, { showroom, jobId: `b:${id}`, actor: user.id, smsConsent: false });
+        if (t.told === "sent") return "Checked in. They've been sent a link to follow the repair.";
+      } catch {
+        /* checked in either way; the link can be sent from the job page */
+      }
+    }
+    return "Checked in.";
   });
 }
 
@@ -1616,5 +1637,15 @@ export async function staffAnswerFindingAction(findingId: string, decision: "app
     const r = await answerFindings(db, { requestId: f.requestId, decisions: { [f.id]: decision }, by: user.id, employeeId: wo?.employeeId ?? null });
     if (r.lsFailed) return "Saved as yes, but Lightspeed didn't take every line. Add it on the work order.";
     return decision === "approved" ? "Saved as yes. It's on the work order now." : "Saved as no.";
+  });
+}
+
+/** Job page: text the customer their tracker link (made if needed). */
+export async function sendTrackerAction(jobId: string, back: string) {
+  return run(safeReturn(back, "/app/workshop"), async () => {
+    const user = await requireActor("staff");
+    const showroom = await currentShowroom(user);
+    const r = await sendTracker(db, { showroom, jobId, actor: user.id, smsConsent: true });
+    return r.told === "sent" ? "Tracker link sent." : r.told === "failed" ? "The message didn't go out. Copy the link and send it." : "There's no phone or email for this customer. Copy the link instead.";
   });
 }
