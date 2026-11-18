@@ -72,7 +72,7 @@ export default async function TrackerPage({ params, searchParams }: { params: Pr
   const { findings, requests } = await loadJobFindings(db, tracker.workorderId);
   const sent = findings.filter((f) => f.requestId);
   const pending = sent.filter((f) => !f.decision);
-  const declined = sent.filter((f) => f.decision === "declined");
+  const answered = sent.filter((f) => f.decision === "approved" || f.decision === "declined");
   void requests;
   const mechanic = job.mechanic?.split(/\s+/)[0] ?? null;
   const total = lines.reduce((s, l) => s + (l.unitPrice ?? 0) * l.qty, 0);
@@ -97,7 +97,7 @@ export default async function TrackerPage({ params, searchParams }: { params: Pr
     { key: "checked_in", title: "Checked in", sub: track.stepAt.checked_in ? when(track.stepAt.checked_in) : wo.timeIn && step ? when(wo.timeIn) : "" },
     { key: "inspection", title: "Inspection", sub: pending.length && at >= 1 && at < 3 ? "Needs your OK" : track.stepAt.inspection ? when(track.stepAt.inspection) : "" },
     { key: "repair", title: "Repair", sub: parts ? "Waiting on a part" : step === "repair" && track.taskTotal ? `${done} of ${track.taskTotal} done` : track.stepAt.repair ? when(track.stepAt.repair) : "" },
-    { key: "pickup", title: "Ready for pickup", sub: track.stepAt.pickup ? `Ready since ${when(track.stepAt.pickup)}` : job.noDate ? "" : `About ${when(job.readyBy)}` },
+    { key: "pickup", title: "Ready for pickup", sub: step === "pickup" && track.stepAt.pickup ? `Ready since ${when(track.stepAt.pickup)}` : job.noDate ? "" : `About ${when(job.readyBy)}` },
   ];
 
   const stepsCard = (
@@ -148,7 +148,16 @@ export default async function TrackerPage({ params, searchParams }: { params: Pr
             <p id="found" className="scroll-mt-4 rounded-2xl bg-[#015d47] p-4 font-bold text-white">Thanks, we&apos;ve got your answer. We&apos;ll let you know when it&apos;s ready.</p>
           )}
 
-          {(lines.length > 0 || declined.length > 0) && (
+          {answered.length > 0 && (
+            <section aria-label="Your answers" className="rounded-2xl bg-white p-4">
+              <p className={label}>What we found · your answers</p>
+              <div className="mt-2 flex flex-col gap-2.5">
+                {answered.map((f) => <FindingCard key={f.id} f={f} token={token} />)}
+              </div>
+            </section>
+          )}
+
+          {lines.length > 0 && (
             <section aria-label="What we're doing" className="rounded-2xl bg-white p-4">
               <p className={label}>What we&apos;re doing</p>
               <ul className="mt-2">
@@ -156,12 +165,6 @@ export default async function TrackerPage({ params, searchParams }: { params: Pr
                   <li key={l.id} className="flex justify-between gap-3 py-1.5">
                     <span className="min-w-0">{l.description}{l.qty !== 1 ? ` × ${l.qty}` : ""}</span>
                     <span className="tabular-nums">{l.unitPrice !== null ? money(l.unitPrice * l.qty) : ""}</span>
-                  </li>
-                ))}
-                {declined.map((f) => (
-                  <li key={f.id} className="flex justify-between gap-3 py-1.5 text-muted">
-                    <span className="min-w-0">{findingTitle(f.items)} · you said not this time</span>
-                    <span className="tabular-nums line-through">{money(findingPrice(f.items))}</span>
                   </li>
                 ))}
               </ul>
@@ -195,10 +198,10 @@ export default async function TrackerPage({ params, searchParams }: { params: Pr
 function FindingCard({ f, token }: { f: Finding; token: string }) {
   const title = findingTitle(f.items);
   return (
-    <article className="flex flex-col gap-2.5 rounded-xl bg-white p-3.5">
+    <article className={`flex flex-col gap-2.5 rounded-xl p-3.5 ${f.decision ? "border border-[#e4e1dc] bg-[#fbfaf8]" : "bg-white"}`}>
       <div className="flex items-start justify-between gap-3">
         {isLevel(f.level) ? <LevelMeter level={f.level} size="sm" /> : <span />}
-        <span className="text-lg font-extrabold tabular-nums">{money(findingPrice(f.items))}</span>
+        <span className={`text-lg font-extrabold tabular-nums ${f.decision === "declined" ? "text-[#8a8f96] line-through" : ""}`}>{money(findingPrice(f.items))}</span>
       </div>
       <h3 className="text-[17px] leading-snug font-extrabold">{title}</h3>
       <details className="group">
@@ -217,6 +220,11 @@ function FindingCard({ f, token }: { f: Finding; token: string }) {
           )}
         </div>
       </details>
+      {f.decision ? (
+        <p className={`rounded-lg px-3 py-2 text-center font-bold ${f.decision === "approved" ? "bg-[#015d47] text-white" : "bg-[#f3f0ea] text-[#17181a]"}`}>
+          {f.decision === "approved" ? "✓ You said yes · added to your repair" : "You said not this time"}
+        </p>
+      ) : (
       <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label={`${title}: yes or no`}>
         <label className="cursor-pointer">
           <input type="radio" name={`d:${f.id}`} value="yes" className="peer sr-only" />
@@ -227,6 +235,7 @@ function FindingCard({ f, token }: { f: Finding; token: string }) {
           <span className="flex min-h-12 items-center justify-center rounded-xl border border-[#cfcbc4] font-bold peer-checked:border-2 peer-checked:border-[#17181a] peer-checked:bg-[#f3f0ea] peer-focus-visible:ring-2 peer-focus-visible:ring-[#17181a]">Not this time</span>
         </label>
       </div>
+      )}
     </article>
   );
 }
