@@ -603,6 +603,96 @@ export const jobTrackers = pgTable(
   (t) => [uniqueIndex("job_trackers_token_idx").on(t.tokenHash), uniqueIndex("job_trackers_workorder_idx").on(t.workorderId)],
 );
 
+/**
+ * Kickstand Chat (docs/kickstand-chat.md): two-way texting on Twilio. One line per store: its texting number and
+ * whether Kickstand may text customers from it. `enabled` is off until a manager turns the store on; inbound texts
+ * are recorded either way.
+ */
+export const chatLines = pgTable(
+  "chat_lines",
+  {
+    showroomId: uuid("showroom_id")
+      .primaryKey()
+      .references(() => showrooms.id),
+    number: text("number"),
+    enabled: boolean("enabled").notNull().default(false),
+    numberState: text("number_state").notNull().default("not_started"),
+    ...timestamps,
+  },
+  (t) => [
+    uniqueIndex("chat_lines_number_idx").on(t.number),
+    check("chat_lines_state_check", sql`${t.numberState} in ('not_started','porting','hosted','live')`),
+  ],
+);
+
+/** One thread per store + customer phone (E.164). `read_at` is shared by everyone at the store. */
+export const chatConversations = pgTable(
+  "chat_conversations",
+  {
+    id: id(),
+    showroomId: uuid("showroom_id")
+      .notNull()
+      .references(() => showrooms.id),
+    phone: text("phone").notNull(),
+    name: text("name"),
+    lastMessageAt: timestamp("last_message_at", { withTimezone: true }).notNull().defaultNow(),
+    lastPreview: text("last_preview").notNull().default(""),
+    lastInboundAt: timestamp("last_inbound_at", { withTimezone: true }),
+    readAt: timestamp("read_at", { withTimezone: true }),
+    optedOutAt: timestamp("opted_out_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique("chat_conversations_showroom_phone").on(t.showroomId, t.phone),
+    index("chat_conversations_recent_idx").on(t.showroomId, t.lastMessageAt),
+  ],
+);
+
+export type ChatMedia = { url: string; contentType: string };
+
+export const chatMessages = pgTable(
+  "chat_messages",
+  {
+    id: id(),
+    conversationId: uuid("conversation_id")
+      .notNull()
+      .references(() => chatConversations.id, { onDelete: "cascade" }),
+    showroomId: uuid("showroom_id").notNull(),
+    direction: text("direction").notNull(),
+    kind: text("kind").notNull().default("manual"),
+    autoTag: text("auto_tag"),
+    body: text("body").notNull().default(""),
+    media: jsonb("media").$type<ChatMedia[]>().notNull().default([]),
+    twilioSid: text("twilio_sid"),
+    status: text("status").notNull(),
+    errorCode: text("error_code"),
+    error: text("error"),
+    staffUserId: uuid("staff_user_id"),
+    staffName: text("staff_name"),
+    segments: integer("segments"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("chat_messages_sid_idx").on(t.twilioSid),
+    index("chat_messages_conversation_idx").on(t.conversationId, t.createdAt),
+    check("chat_messages_direction_check", sql`${t.direction} in ('in','out')`),
+    check("chat_messages_kind_check", sql`${t.kind} in ('manual','auto')`),
+  ],
+);
+
+/** Photos staff send. Twilio fetches them from /chat-photo/<token> (unguessable), so they need no sign-in. */
+export const chatPhotos = pgTable("chat_photos", {
+  id: id(),
+  showroomId: uuid("showroom_id").notNull(),
+  token: text("token").notNull().unique(),
+  contentType: text("content_type").notNull().default("image/jpeg"),
+  image: text("image").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export type ChatLine = typeof chatLines.$inferSelect;
+export type ChatConversation = typeof chatConversations.$inferSelect;
+export type ChatMessage = typeof chatMessages.$inferSelect;
 export type JobTracker = typeof jobTrackers.$inferSelect;
 export type FindingRequest = typeof findingRequests.$inferSelect;
 export type Finding = typeof findings.$inferSelect;
