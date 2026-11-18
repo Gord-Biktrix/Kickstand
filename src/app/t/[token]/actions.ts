@@ -4,7 +4,9 @@ import { and, eq, isNotNull, isNull } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { db } from "@/db/client";
 import { findings, lsWorkorders } from "@/db/schema";
-import { answerFindings } from "@/lib/findings";
+import { answerFindings, changeToYes } from "@/lib/findings";
+import { loadJobLog } from "@/lib/job-log";
+import { deriveTrack } from "@/lib/job-track";
 import { trackerByToken } from "@/lib/tracker";
 
 /**
@@ -27,5 +29,16 @@ export async function answerOnTrackerAction(token: string, formData: FormData) {
   if (!byRequest.size) redirect(`${back}?error=pick#found`);
   const [wo] = await db.select({ employeeId: lsWorkorders.employeeId }).from(lsWorkorders).where(eq(lsWorkorders.id, tracker.workorderId));
   for (const [requestId, decisions] of byRequest) await answerFindings(db, { requestId, decisions, by: "customer", employeeId: wo?.employeeId ?? null });
+  redirect(`${back}?answered=1#found`);
+}
+
+/** "Changed your mind? Fix it": a finding they said no to becomes a yes, while the bike isn't ready yet. */
+export async function changeMindAction(token: string, findingId: string) {
+  const back = `/t/${encodeURIComponent(token)}`;
+  const tracker = await trackerByToken(db, token);
+  if (!tracker) redirect(back);
+  if (deriveTrack(await loadJobLog(db, tracker.workorderId), new Date()).step === "pickup") redirect(`${back}?error=ready#found`);
+  const [wo] = await db.select({ employeeId: lsWorkorders.employeeId }).from(lsWorkorders).where(eq(lsWorkorders.id, tracker.workorderId));
+  await changeToYes(db, { findingId, workorderId: tracker.workorderId, by: "customer", employeeId: wo?.employeeId ?? null });
   redirect(`${back}?answered=1#found`);
 }

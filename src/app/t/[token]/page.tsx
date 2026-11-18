@@ -6,7 +6,7 @@ import { findingPrice, findingTitle, isLevel, loadJobFindings } from "@/lib/find
 import { LevelMeter } from "@/components/level-meter";
 import type { Finding } from "@/db/schema";
 import { sp, type SearchParams } from "@/lib/flash";
-import { answerOnTrackerAction } from "./actions";
+import { answerOnTrackerAction, changeMindAction } from "./actions";
 import { loadJobLog } from "@/lib/job-log";
 import { currentStep, deriveTrack, repairDone, type JobStep } from "@/lib/job-track";
 import { getShowroomById } from "@/lib/showroom";
@@ -151,8 +151,9 @@ export default async function TrackerPage({ params, searchParams }: { params: Pr
           {answered.length > 0 && (
             <section aria-label="Your answers" className="rounded-2xl bg-white p-4">
               <p className={label}>What we found · your answers</p>
+              {sp(q.error) === "ready" && <p className="mt-2 rounded-lg bg-[#fdecec] px-3 py-2 text-sm text-[#9f1d1d]">Your bike is already ready, so we can&apos;t add it now. Call the shop and we&apos;ll sort it out.</p>}
               <div className="mt-2 flex flex-col gap-2.5">
-                {answered.map((f) => <FindingCard key={f.id} f={f} token={token} />)}
+                {answered.map((f) => <FindingCard key={f.id} f={f} token={token} canChange={step !== "pickup"} />)}
               </div>
             </section>
           )}
@@ -195,7 +196,7 @@ export default async function TrackerPage({ params, searchParams }: { params: Pr
 }
 
 /** One thing that was found: level, what, price and the start of why; View more opens the photos, full reason and lines. */
-function FindingCard({ f, token }: { f: Finding; token: string }) {
+function FindingCard({ f, token, canChange = false }: { f: Finding; token: string; canChange?: boolean }) {
   const title = findingTitle(f.items);
   return (
     <article className={`flex flex-col gap-2.5 rounded-xl p-3.5 ${f.decision ? "border border-[#e4e1dc] bg-[#fbfaf8]" : "bg-white"}`}>
@@ -224,7 +225,13 @@ function FindingCard({ f, token }: { f: Finding; token: string }) {
         <p className={`rounded-lg px-3 py-2 text-center font-bold ${f.decision === "approved" ? "bg-[#015d47] text-white" : "bg-[#f3f0ea] text-[#17181a]"}`}>
           {f.decision === "approved" ? "✓ You said yes · added to your repair" : "You said not this time"}
         </p>
-      ) : (
+      ) : null}
+      {f.decision === "declined" && canChange ? (
+        <form action={changeMindAction.bind(null, token, f.id)}>
+          <button type="submit" className="min-h-11 w-full rounded-xl border border-[#015d47] font-bold text-[#015d47]">Changed your mind? Fix it</button>
+        </form>
+      ) : null}
+      {!f.decision && (
       <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label={`${title}: yes or no`}>
         <label className="cursor-pointer">
           <input type="radio" name={`d:${f.id}`} value="yes" className="peer sr-only" />

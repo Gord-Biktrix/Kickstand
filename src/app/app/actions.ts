@@ -37,7 +37,7 @@ import { loadJobLog, logJob } from "@/lib/job-log";
 import { ensureTracker, sendTracker } from "@/lib/tracker";
 import { conversationFor, markRead, savePhoto, sendText } from "@/lib/chat";
 import { jobForConversation } from "@/lib/chat-view";
-import { addFinding, answerFindings, closeUnanswered, deleteDraft, sendFindings } from "@/lib/findings";
+import { addFinding, answerFindings, changeToYes, closeUnanswered, deleteDraft, sendFindings } from "@/lib/findings";
 import { deriveTrack, isCheckResult, isInspectionTask, parseChecklist, type CheckResult } from "@/lib/job-track";
 import { createTicket, scheduleTicket, ticketPhotoData } from "@/lib/tickets";
 import { jobPath } from "@/lib/workshop";
@@ -1636,6 +1636,11 @@ export async function staffAnswerFindingAction(findingId: string, decision: "app
     const [f] = await db.select().from(findingsTable).where(eq(findingsTable.id, findingId));
     if (!f || f.showroomId !== showroom.id || !f.requestId) throw new Error("That finding couldn't be found.");
     const [wo] = await db.select({ employeeId: lsWorkorders.employeeId }).from(lsWorkorders).where(eq(lsWorkorders.id, f.workorderId));
+    if (f.decision === "declined" && decision === "approved") {
+      // They changed their mind (phone, counter).
+      const c = await changeToYes(db, { findingId: f.id, workorderId: f.workorderId, by: user.id, employeeId: wo?.employeeId ?? null });
+      return c.lsFailed ? "Changed to yes, but Lightspeed didn't take every line. Add it on the work order." : "Changed to yes. It's on the work order now.";
+    }
     const r = await answerFindings(db, { requestId: f.requestId, decisions: { [f.id]: decision }, by: user.id, employeeId: wo?.employeeId ?? null });
     if (r.lsFailed) return "Saved as yes, but Lightspeed didn't take every line. Add it on the work order.";
     return decision === "approved" ? "Saved as yes. It's on the work order now." : "Saved as no.";

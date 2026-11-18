@@ -157,15 +157,7 @@ export async function answerFindings(
     }
     approved++;
     client ??= new LightspeedClient(db);
-    try {
-      const r = await addWorkorderParts(client, f.workorderId, f.items.map((i) => ({ itemId: i.itemId, name: i.name, qty: i.qty, price: i.price, minutes: i.minutes })), args.employeeId ?? null);
-      const ok = r.failed.length === 0;
-      if (!ok) lsFailed++;
-      await db.update(findings).set({ lsAdded: r.added > 0, lsError: ok ? null : `${r.failed.join(", ")}${r.reason ? `: ${r.reason}` : ""}` }).where(eq(findings.id, f.id));
-    } catch (err) {
-      lsFailed++;
-      await db.update(findings).set({ lsError: err instanceof Error ? err.message : String(err) }).where(eq(findings.id, f.id));
-    }
+    if (!(await addToWorkorder(db, client, f, args.employeeId ?? null))) lsFailed++;
   }
   const left = (await db.select({ id: findings.id }).from(findings).where(and(eq(findings.requestId, request.id), isNull(findings.decision)))).length;
   if (!left && !request.answeredAt) await db.update(findingRequests).set({ answeredAt: now }).where(eq(findingRequests.id, request.id));
@@ -173,6 +165,38 @@ export async function answerFindings(
     await db.insert(events).values({ showroomId: request.showroomId, type: "findings_answered", actor: args.by, payload: { workorder_id: request.workorderId, request_id: request.id, approved, declined, ls_failed: lsFailed } });
   }
   return { approved, declined, lsFailed };
+}
+
+/** Put an approved finding's items on its Lightspeed work order; false (and the reason kept) when Lightspeed refuses. */
+async function addToWorkorder(db: Db, client: LightspeedClient, f: Finding, employeeId: string | null): Promise<boolean> {
+  try {
+    const r = await addWorkorderParts(client, f.workorderId, f.items.map((i) => ({ itemId: i.itemId, name: i.name, qty: i.qty, price: i.price, minutes: i.minutes })), employeeId);
+    const ok = r.failed.length === 0;
+    await db.update(findings).set({ lsAdded: r.added > 0, lsError: ok ? null : `${r.failed.join(", ")}${r.reason ? `: ${r.reason}` : ""}` }).where(eq(findings.id, f.id));
+    return ok;
+  } catch (err) {
+    await db.update(findings).set({ lsError: err instanceof Error ? err.message : String(err) }).where(eq(findings.id, f.id));
+    return false;
+  }
+}
+
+/**
+ * "Changed your mind": a finding the customer said no to becomes a yes (from their tracker, or staff on their behalf),
+ * and its items go on the work order. Only while the job isn't ready; a finding that isn't a no is left alone.
+ */
+export async function changeToYes(
+  db: Db,
+  args: { findingId: string; workorderId: string; by: string; employeeId?: string | null; client?: LightspeedClient; now?: Date },
+): Promise<{ changed: boolean; lsFailed: boolean }> {
+  const [f] = await db
+    .update(findings)
+    .set({ decision: "approved", decidedAt: args.now ?? new Date(), decidedBy: args.by })
+    .where(and(eq(findings.id, args.findingId), eq(findings.workorderId, args.workorderId), eq(findings.decision, "declined")))
+    .returning();
+  if (!f) return { changed: false, lsFailed: false };
+  const ok = await addToWorkorder(db, args.client ?? new LightspeedClient(db), f, args.employeeId ?? null);
+  await db.insert(events).values({ showroomId: f.showroomId, type: "finding_changed_to_yes", actor: args.by, payload: { workorder_id: f.workorderId, finding_id: f.id, ls_failed: !ok } });
+  return { changed: true, lsFailed: !ok };
 }
 
 /** At Mark ready: anything still unanswered is handed over without it. */

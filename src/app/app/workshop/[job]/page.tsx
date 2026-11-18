@@ -144,7 +144,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
             </>
           )}
 
-          {jf && jf.findings.length > 0 && <Findings jf={jf} jobId={job.id} self={self} first={first} tz={tz} />}
+          {jf && jf.findings.length > 0 && <Findings jf={jf} jobId={job.id} self={self} first={first} tz={tz} canChangeFindings={step !== "pickup"} />}
 
           {photos.length > 0 && (
             <div className="mt-auto">
@@ -516,7 +516,7 @@ async function findingTiles(showroom: ShowroomCtx): Promise<{ itemId: string; na
 }
 
 /** What was found on this job: drafts (not sent), waiting for an answer, and answered. A branch; never blocks the job. */
-function Findings({ jf, jobId, self, first, tz }: { jf: JobFindings; jobId: string; self: string; first: string; tz: string }) {
+function Findings({ jf, jobId, self, first, tz, canChangeFindings }: { jf: JobFindings; jobId: string; self: string; first: string; tz: string; canChangeFindings: boolean }) {
   const latest = jf.requests.at(-1);
   const drafts = jf.findings.filter((f) => !f.requestId);
   return (
@@ -544,6 +544,8 @@ function Findings({ jf, jobId, self, first, tz }: { jf: JobFindings; jobId: stri
                   <form action={staffAnswerFindingAction.bind(null, f.id, "approved", self)}><button type="submit" className="btn btn-sm">Yes</button></form>
                   <form action={staffAnswerFindingAction.bind(null, f.id, "declined", self)}><button type="submit" className="btn btn-sm">No</button></form>
                 </div>
+              ) : f.decision === "declined" && canChangeFindings ? (
+                <form action={staffAnswerFindingAction.bind(null, f.id, "approved", self)}><button type="submit" className="btn btn-sm">Change to yes</button></form>
               ) : null}
             </li>
           );

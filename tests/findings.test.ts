@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { Db } from "@/db/client";
 import { findingRequests, findings, lsWorkorders } from "@/db/schema";
-import { addFinding, answerFindings, closeUnanswered, deleteDraft, FindingError, loadJobFindings, NEEDS_OK_METRIC, requestByToken, sendFindings } from "@/lib/findings";
+import { addFinding, answerFindings, changeToYes, closeUnanswered, deleteDraft, FindingError, loadJobFindings, NEEDS_OK_METRIC, requestByToken, sendFindings } from "@/lib/findings";
 import { saveConnection, setLightspeedFetch } from "@/lib/lightspeed";
 import { MemoryNotifier, setNotifier } from "@/lib/notifier";
 import type { ShowroomCtx } from "@/lib/showroom";
@@ -98,6 +98,22 @@ describe("findings: extra work the customer approves", () => {
     expect((await db.select().from(findings).where(eq(findings.id, rotor.id)))[0].lsError).toMatch(/Rear rotor/);
     expect(await closeUnanswered(db, { workorderId: "10237", by: STAFF })).toBe(1);
     expect((await db.select().from(findings).where(eq(findings.id, chain.id)))[0].decision).toBe("not_asked");
+  });
+
+  it("a no can change to a yes once: the items go on the work order then; a yes or unanswered one isn't touched", async () => {
+    const calls = fakeLightspeed();
+    const rotor = await addFinding(db, { showroomId: van.id, workorderId: "10237", level: 3, why: "Rotor worn.", items: [ROTOR], photos: [], actor: STAFF });
+    const chain = await addFinding(db, { showroomId: van.id, workorderId: "10237", level: 1, why: "Chain.", items: [CHAIN], photos: [], actor: STAFF });
+    const sent = await sendFindings(db, { showroom: van, jobId: "w:10237", actor: STAFF, smsConsent: false });
+    const req = await requestByToken(db, sent.url.split("/ok/")[1]);
+    await answerFindings(db, { requestId: req!.request.id, decisions: { [rotor.id]: "declined" }, by: "customer" });
+    expect(calls.filter((c) => c.method === "POST")).toHaveLength(0);
+    expect(await changeToYes(db, { findingId: chain.id, workorderId: "10237", by: "customer" })).toEqual({ changed: false, lsFailed: false });
+    expect(await changeToYes(db, { findingId: rotor.id, workorderId: "other", by: "customer" })).toEqual({ changed: false, lsFailed: false });
+    expect(await changeToYes(db, { findingId: rotor.id, workorderId: "10237", by: "customer", employeeId: "57" })).toEqual({ changed: true, lsFailed: false });
+    expect(await changeToYes(db, { findingId: rotor.id, workorderId: "10237", by: "customer" })).toEqual({ changed: false, lsFailed: false });
+    expect(calls.filter((c) => c.method === "POST")).toEqual([expect.objectContaining({ body: expect.objectContaining({ itemID: 77 }) })]);
+    expect((await db.select().from(findings).where(eq(findings.id, rotor.id)))[0]).toMatchObject({ decision: "approved", lsAdded: true });
   });
 
   it("with no phone or email the link is still made, to copy and send by hand", async () => {
