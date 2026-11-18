@@ -49,17 +49,55 @@ export type Track = {
 export const QC_TASK = { key: "qc", label: "Quality check: test ride" } as const;
 
 /**
- * What every bike gets checked for in Inspection (one list for now; per-service checklists come later). Keys start
- * with "insp:" so they never mix with the Repair tasks (the work order's lines).
+ * Inspection checks (per service, from Settings › Services; see jobChecklist) have keys starting "insp:" so they
+ * never mix with the Repair tasks (the work order's lines). Each is answered OK, Worn or Replace (the log row's reason).
  */
-export const INSPECTION_TASKS: readonly { key: string; label: string; minutes: null }[] = [
-  { key: "insp:brakes", label: "Brakes: pads, rotors, levers", minutes: null },
-  { key: "insp:drivetrain", label: "Drivetrain: chain, cassette, derailleur", minutes: null },
-  { key: "insp:wheels", label: "Tires and wheels: wear, pressure, spokes", minutes: null },
-  { key: "insp:electrical", label: "Battery, motor and display: charge, error codes", minutes: null },
-  { key: "insp:bolts", label: "Bolts, headset and suspension", minutes: null },
-  { key: "insp:lights", label: "Lights and accessories", minutes: null },
+export const DEFAULT_CHECKS: readonly string[] = [
+  "Brakes: pads, rotors, levers",
+  "Drivetrain: chain, cassette, derailleur",
+  "Tires and wheels: wear, pressure, spokes",
+  "Battery, motor and display: charge, error codes",
+  "Bolts, headset and suspension",
+  "Lights and accessories",
 ];
+export const CHECK_RESULTS = { ok: "OK", worn: "Worn", replace: "Replace" } as const;
+export type CheckResult = keyof typeof CHECK_RESULTS;
+export const isCheckResult = (s: unknown): s is CheckResult => s === "ok" || s === "worn" || s === "replace";
+
+/** "Brakes: pads, rotors" → "insp:brakes-pads-rotors". */
+export function checkKey(label: string): string {
+  return `insp:${label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60)}`;
+}
+
+/** One check per line, trimmed, no repeats, at most 25 of 120 characters. */
+export function parseChecklist(text: string): string[] {
+  const seen = new Set<string>();
+  return text
+    .split(/\r?\n/)
+    .map((l) => l.replace(/^[-•*\s]+/, "").trim().slice(0, 120))
+    .filter((l) => l && !seen.has(checkKey(l)) && seen.add(checkKey(l)))
+    .slice(0, 25);
+}
+
+/**
+ * A job's inspection: the checks of every service on its work order (in line order, repeats once), or the store's
+ * default list when none of its services has a checklist.
+ */
+export function jobChecklist(lines: { itemId?: string | null }[], lists: Record<string, string[]>, fallback: readonly string[] | null): Task[] {
+  const labels: string[] = [];
+  for (const l of lines) if (l.itemId && lists[l.itemId]) labels.push(...lists[l.itemId]);
+  const seen = new Set<string>();
+  return (labels.length ? labels : fallback ?? DEFAULT_CHECKS)
+    .filter((l) => !seen.has(checkKey(l)) && seen.add(checkKey(l)))
+    .map((label) => ({ key: checkKey(label), label, minutes: null }));
+}
+
+/** How each check came out (done checks only). */
+export function checkResult(track: Track, key: string): CheckResult | null {
+  const s = track.tasks.get(key);
+  return s?.status === "done" ? (isCheckResult(s.reason) ? s.reason : "ok") : null;
+}
+
 export const isInspectionTask = (key: string) => key.startsWith("insp:");
 
 /** Repair tasks ticked done (inspection checks don't count). */
@@ -120,7 +158,7 @@ export function deriveTrack(entries: LogEntry[], now: Date, booked: Record<strin
       case "task_done": {
         if (!e.taskKey) break;
         const minutes = t.step && RUNS.has(t.step) ? Math.round(sinceTick) : null;
-        t.tasks.set(e.taskKey, { key: e.taskKey, label: e.taskLabel ?? e.taskKey, status: "done", at: e.at, actor: e.actor ?? null, minutes, reason: null, outlier: minutes !== null && isOutlier(minutes, booked[e.taskKey]) });
+        t.tasks.set(e.taskKey, { key: e.taskKey, label: e.taskLabel ?? e.taskKey, status: "done", at: e.at, actor: e.actor ?? null, minutes, reason: e.reason ?? null, outlier: minutes !== null && isOutlier(minutes, booked[e.taskKey]) });
         sinceTick = 0;
         if (t.step && RUNS.has(t.step)) restart(e);
         break;

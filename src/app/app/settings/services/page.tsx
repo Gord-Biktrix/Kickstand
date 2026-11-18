@@ -7,7 +7,8 @@ import { LightspeedClient, lightspeedEnabled } from "@/lib/lightspeed";
 import { loadServiceItems, pickTiles, type ServiceItem } from "@/lib/service-items";
 import { listShowrooms } from "@/lib/showroom";
 import { lightspeedReason } from "@/lib/workorder-lines";
-import { saveServiceTilesAction } from "../../actions";
+import { DEFAULT_CHECKS } from "@/lib/job-track";
+import { saveChecklistsAction, saveServiceTilesAction } from "../../actions";
 
 export const metadata = { title: "Services" };
 
@@ -31,6 +32,7 @@ export default async function ServicesSettingsPage({ searchParams }: { searchPar
   const chosen = showroom.settings.workshop_service_items;
   const suggested = new Set(pickTiles(all, { selected: null, store: `${showroom.name} ${showroom.slug}`, otherStores: others }).map((i) => i.itemId));
   const ticked = new Set(chosen ?? [...suggested]);
+  const lists = showroom.settings.inspection_checklists;
 
   return (
     <div>
@@ -59,6 +61,25 @@ export default async function ServicesSettingsPage({ searchParams }: { searchPar
               ))}
             </ul>
             <button type="submit" className="btn btn-primary">Save services</button>
+          </form>
+        </Card>
+      )}
+      {!error && (
+        <Card title="Inspection checklists">
+          <form action={saveChecklistsAction} className="space-y-4">
+            <ul className="grid gap-4 md:grid-cols-2">
+              {all.filter((i) => ticked.has(i.itemId)).map((i) => (
+                <li key={i.itemId}>
+                  <label htmlFor={`cl-${i.itemId}`} className="text-sm font-bold">{i.name}</label>
+                  <textarea id={`cl-${i.itemId}`} name={`cl:${i.itemId}`} rows={5} defaultValue={(lists[i.itemId] ?? []).join("\n")} placeholder="One check per line" className="input mt-1 w-full" />
+                </li>
+              ))}
+              <li>
+                <label htmlFor="cl-default" className="text-sm font-bold">Any other job</label>
+                <textarea id="cl-default" name="cl:default" rows={5} defaultValue={(showroom.settings.inspection_default ?? DEFAULT_CHECKS).join("\n")} className="input mt-1 w-full" />
+              </li>
+            </ul>
+            <button type="submit" className="btn btn-primary">Save checklists</button>
           </form>
         </Card>
       )}

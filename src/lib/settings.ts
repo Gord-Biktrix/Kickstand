@@ -8,6 +8,13 @@ export const settingsSchema = z.object({
   repair_minutes: z.number().int().min(15).max(600).default(60),
   /** New ticket: the Lightspeed items (itemIDs) staff ticked in Settings › Services to show as tiles. Null = Kickstand picks. */
   workshop_service_items: z.array(z.string()).nullable().default(null),
+  /**
+   * Job page Inspection: what to check, per service (Lightspeed itemID → checks, in order). A job gets the checks of
+   * every service on its work order; a job with none of these services gets inspection_default.
+   */
+  inspection_checklists: z.record(z.string(), z.array(z.string())).default({}),
+  /** The inspection for jobs whose services have no checklist of their own. Null = Kickstand's starter list. */
+  inspection_default: z.array(z.string()).nullable().default(null),
   /** Workshop: how many bikes can be worked on at once. New tickets' ready-by shares the queue across these. */
   workshop_benches: z.number().int().min(1).max(20).default(2),
   /**

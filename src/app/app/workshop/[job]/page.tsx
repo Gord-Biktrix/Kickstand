@@ -13,7 +13,7 @@ import { fetchWorkorderLines, forgetWorkorder, linesSubtotal, type WorkorderLine
 import { lightspeedWorkorderUrl } from "@/lib/workorders";
 import { listTicketPhotos } from "@/lib/tickets";
 import { loadJobLog, recordTaskTotal } from "@/lib/job-log";
-import { currentStep, deriveTrack, fmtMinutes, INSPECTION_TASKS, jobTasks, openTasks, repairDone, STEP_LABEL, STEP_ORDER, type JobStep, type Task, type Track } from "@/lib/job-track";
+import { CHECK_RESULTS, checkResult, currentStep, deriveTrack, fmtMinutes, jobChecklist, jobTasks, openTasks, repairDone, STEP_LABEL, STEP_ORDER, type JobStep, type Task, type Track } from "@/lib/job-track";
 import { ConfirmButton } from "@/components/confirm-button";
 import { CopyButton } from "@/components/copy-button";
 import { FindingSheet } from "@/components/finding-sheet";
@@ -22,7 +22,7 @@ import { findingPrice, findingTitle, isLevel, loadJobFindings, type JobFindings 
 import { LightspeedClient, lightspeedEnabled } from "@/lib/lightspeed";
 import { loadServiceItems, pickTiles } from "@/lib/service-items";
 import { listShowrooms, type ShowroomCtx } from "@/lib/showroom";
-import { jobReadyAction, jobResumeAction, jobStepAction, jobStepBackAction, jobTaskAction, cancelTicketAction, addFindingAction, deleteFindingAction, sendFindingsAction, staffAnswerFindingAction, moveJobAction, setBookingStatusAction, staffCancelTypeBookingAction } from "../../actions";
+import { jobReadyAction, jobResumeAction, jobStepAction, jobStepBackAction, jobTaskAction, jobCheckAction, cancelTicketAction, addFindingAction, deleteFindingAction, sendFindingsAction, staffAnswerFindingAction, moveJobAction, setBookingStatusAction, staffCancelTypeBookingAction } from "../../actions";
 
 export const metadata = { title: "Job" };
 
@@ -67,6 +67,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   const lines = read.status === "ok" ? read.lines : null;
   const failReason = read.status === "failed" ? read.reason : null;
   const tasks = lines ? jobTasks(lines) : [];
+  const checks = jobChecklist(lines ?? [], showroom.settings.inspection_checklists, showroom.settings.inspection_default);
   if (lines && job.workorderId) await recordTaskTotal(db, { showroomId: showroom.id, workorderId: job.workorderId, total: tasks.length });
   const log = job.workorderId ? await loadJobLog(db, job.workorderId) : [];
   const track = deriveTrack(log, now, Object.fromEntries(tasks.map((t) => [t.key, t.minutes])));
@@ -105,7 +106,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
       </div>
 
       <div className="grid gap-3 lg:grid-cols-[220px_minmax(0,1fr)_300px]">
-        <Steps job={job} step={step} track={track} tz={tz} />
+        <Steps job={job} step={step} track={track} tz={tz} checks={checks} />
 
         <section aria-label={step ? STEP_LABEL[step] : "Booked"} className="flex min-w-0 flex-col gap-4 rounded-xl border border-border bg-card p-4">
           <div className="flex items-baseline justify-between gap-2">
@@ -129,11 +130,11 @@ export default async function JobPage({ params, searchParams }: { params: Promis
           ) : step === "repair" ? (
             <>
               <TaskList title="Repair · the work order's lines" tasks={tasks} track={track} names={names} jobId={job.id} self={self} canTick />
-              <InspectionSummary track={track} />
+              <InspectionSummary checks={checks} track={track} />
             </>
           ) : (
             <>
-              <TaskList title="Inspection checklist" tasks={[...INSPECTION_TASKS]} track={track} names={names} jobId={job.id} self={self} canTick={step === "inspection"} />
+              <CheckList checks={checks} track={track} jobId={job.id} self={self} canAnswer={step === "inspection"} canFind={canFind} />
               <TaskList title="Repair, next · the work order's lines" tasks={tasks} track={track} names={names} jobId={job.id} self={self} canTick={false} muted />
             </>
           )}
@@ -205,19 +206,19 @@ export default async function JobPage({ params, searchParams }: { params: Promis
         </aside>
       </div>
 
-      {adding && <FindingSheet action={addFindingAction.bind(null, job.id, self)} close={self} first={first} tiles={tiles} drafts={drafts} />}
+      {adding && <FindingSheet action={addFindingAction.bind(null, job.id, self)} close={self} first={first} tiles={tiles} drafts={drafts} about={sp(q.about) ?? ""} />}
       {readying && open.length > 0 && <ReadyPanel jobId={job.id} self={self} open={open} first={first} canTell={job.kind !== "floor" && !!job.customer} />}
     </div>
   );
 }
 
-function Steps({ job, step, track, tz }: { job: WorkshopJob; step: JobStep | null; track: Track; tz: string }) {
+function Steps({ job, step, track, tz, checks }: { job: WorkshopJob; step: JobStep | null; track: Track; tz: string; checks: Task[] }) {
   const idx = step ? STEP_ORDER.indexOf(step) : -1;
   const sub = (s: JobStep): string => {
     if (s === "checked_in") return job.notHereYet ? "not here yet" : track.stepAt.checked_in ? formatTime(track.stepAt.checked_in, tz) : "checked in";
     if (s === "inspection") {
-      const checked = INSPECTION_TASKS.filter((t) => track.tasks.get(t.key)?.status === "done").length;
-      return [checked ? `${checked} of ${INSPECTION_TASKS.length} checked` : "", track.stepMinutes.inspection ? fmtMinutes(track.stepMinutes.inspection) : ""].filter(Boolean).join(" · ");
+      const checked = checks.filter((t) => checkResult(track, t.key)).length;
+      return [checked ? `${checked} of ${checks.length} checked` : "", track.stepMinutes.inspection ? fmtMinutes(track.stepMinutes.inspection) : ""].filter(Boolean).join(" · ");
     }
     if (s === "repair") {
       const done = repairDone(track);
@@ -301,10 +302,51 @@ function TaskList({ title, tasks, track, names, jobId, self, canTick, muted }: {
   );
 }
 
-/** In Repair, the inspection folds to one line. */
-function InspectionSummary({ track }: { track: Track }) {
-  const checked = INSPECTION_TASKS.filter((t) => track.tasks.get(t.key)?.status === "done").length;
-  return <p className="text-sm text-muted">Inspection: {checked} of {INSPECTION_TASKS.length} checks ticked{track.stepMinutes.inspection ? ` · ${fmtMinutes(track.stepMinutes.inspection)}` : ""}.</p>;
+const RESULT_ON = { ok: "border-[#015d47] bg-[#015d47] text-white", worn: "border-[#b45309] bg-[#b45309] text-white", replace: "border-[#9f1d1d] bg-[#9f1d1d] text-white" } as const;
+
+/** Inspection: each check answered OK, Worn or Replace (tap the chosen one again to clear it). Worn/Replace offer +. */
+function CheckList({ checks, track, jobId, self, canAnswer, canFind }: { checks: Task[]; track: Track; jobId: string; self: string; canAnswer: boolean; canFind: boolean }) {
+  return (
+    <div>
+      <p className={label}>Inspection</p>
+      <ul className="mt-1">
+        {checks.map((c) => {
+          const r = checkResult(track, c.key);
+          return (
+            <li key={c.key} className="grid min-h-14 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 border-t border-[#f1efeb] py-2 text-[15px] first:border-t-0">
+              <span className="min-w-0">
+                {c.label}
+                {canFind && (r === "worn" || r === "replace") && (
+                  <Link href={`${self}?add=1&about=${encodeURIComponent(`${c.label}: ${CHECK_RESULTS[r].toLowerCase()}.`)}`} className="ml-2 text-sm font-bold whitespace-nowrap text-[#015d47] underline">+ Add finding</Link>
+                )}
+              </span>
+              <span className="flex gap-1">
+                {(Object.keys(CHECK_RESULTS) as (keyof typeof CHECK_RESULTS)[]).map((k) =>
+                  canAnswer ? (
+                    <form key={k} action={jobCheckAction.bind(null, jobId, c.key, c.label, r === k ? null : k, self)}>
+                      <button type="submit" aria-pressed={r === k} className={`min-h-11 min-w-[76px] rounded-lg border px-3 text-sm font-bold ${r === k ? RESULT_ON[k] : "border-[#cfcbc4] bg-white text-[#3d3f43]"}`}>{CHECK_RESULTS[k]}</button>
+                    </form>
+                  ) : (
+                    <span key={k} className={`inline-flex min-h-9 min-w-[64px] items-center justify-center rounded-lg border px-2 text-xs font-bold ${r === k ? RESULT_ON[k] : "border-[#e4e1dc] text-[#a8a29e]"}`}>{CHECK_RESULTS[k]}</span>
+                  ),
+                )}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+/** In Repair, the inspection folds to one line: what wasn't OK. */
+function InspectionSummary({ checks, track }: { checks: Task[]; track: Track }) {
+  const flagged = checks.flatMap((c) => {
+    const r = checkResult(track, c.key);
+    return r && r !== "ok" ? [`${c.label.split(":")[0]} (${CHECK_RESULTS[r].toLowerCase()})`] : [];
+  });
+  const ok = checks.filter((c) => checkResult(track, c.key) === "ok").length;
+  return <p className="text-sm text-muted">Inspection: {ok} OK{flagged.length ? ` · ${flagged.join(", ")}` : ""}{track.stepMinutes.inspection ? ` · ${fmtMinutes(track.stepMinutes.inspection)}` : ""}.</p>;
 }
 
 function Done({ tasks, track, names }: { tasks: Task[]; track: Track; names: Map<string, string> }) {

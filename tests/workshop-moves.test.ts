@@ -135,6 +135,7 @@ describe("work order lines for the POS screen", () => {
       ["labour", "Tune-up", 1, 89, 90],
     ]);
     expect(linesSubtotal(lines)).toBe(34 + 25 + 89);
+    expect(lines.map((l) => l.itemId)).toEqual(["55", "77", null]); // the item behind each line (for its checklist)
     expect(parseWorkorderLines({}, new Map())).toEqual([]);
   });
 });

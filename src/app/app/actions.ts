@@ -35,7 +35,7 @@ import type { BoardColumn } from "@/lib/workshop-columns";
 import { assignMechanic, cancelTicket, markJobReady, moveJob, resolveJob } from "@/lib/workshop-moves";
 import { loadJobLog, logJob } from "@/lib/job-log";
 import { addFinding, answerFindings, closeUnanswered, deleteDraft, sendFindings } from "@/lib/findings";
-import { deriveTrack, isInspectionTask } from "@/lib/job-track";
+import { deriveTrack, isCheckResult, isInspectionTask, parseChecklist, type CheckResult } from "@/lib/job-track";
 import { createTicket, scheduleTicket, ticketPhotoData } from "@/lib/tickets";
 import { jobPath } from "@/lib/workshop";
 
@@ -760,6 +760,19 @@ export async function jobTaskAction(jobId: string, taskKey: string, taskLabel: s
   });
 }
 
+/** Job tracker: answer an inspection check OK / Worn / Replace (null clears it). Only during Inspection. */
+export async function jobCheckAction(jobId: string, key: string, label: string, result: CheckResult | null, back: string) {
+  return run(safeReturn(back, "/app/workshop"), async () => {
+    const user = await requireActor("staff");
+    const showroom = await currentShowroom(user);
+    if (!isInspectionTask(key) || (result !== null && !isCheckResult(result))) throw new Error("That check couldn't be saved.");
+    const job = await resolveJob(db, showroom, jobId);
+    const step = deriveTrack(job.workorderId ? await loadJobLog(db, job.workorderId) : [], new Date()).step;
+    if (step !== "inspection") throw new Error("Checks are answered during the inspection.");
+    await logJob(db, { showroomId: showroom.id, workorderId: job.workorderId, actor: user.id, entry: result ? { kind: "task_done", taskKey: key, taskLabel: label, reason: result } : { kind: "task_undone", taskKey: key, taskLabel: label } });
+  });
+}
+
 /** Job tracker: restart the clock after it was paused (another bike was started). */
 export async function jobResumeAction(jobId: string, back: string) {
   return run(safeReturn(back, "/app/workshop"), async () => {
@@ -827,6 +840,28 @@ export async function readyJobAction(jobId: string, back: string, formData: Form
 }
 
 /** Settings › Services: the Lightspeed items shown as New ticket tiles. `reset` goes back to Kickstand's suggestions. */
+/**
+ * Settings › Services: each service's inspection checklist ("cl:<itemID>", one check per line; empty = none) and the
+ * list for jobs without one ("cl:default"; empty = Kickstand's starter list).
+ */
+export async function saveChecklistsAction(formData: FormData) {
+  return run("/app/settings/services", async () => {
+    const user = await requireActor("manager");
+    const showroom = await currentShowroom(user);
+    const lists: Record<string, string[]> = {};
+    for (const [k, v] of formData.entries()) {
+      const m = /^cl:(\d+)$/.exec(k);
+      if (!m || typeof v !== "string") continue;
+      const checks = parseChecklist(v);
+      if (checks.length) lists[m[1]] = checks;
+    }
+    const fallback = parseChecklist(str(formData, "cl:default"));
+    await patchShowroomSettings(db, showroom.id, { inspection_checklists: lists, inspection_default: fallback.length ? fallback : null });
+    const n = Object.keys(lists).length;
+    return `Saved: ${n} service${n === 1 ? "" : "s"} with their own checklist.`;
+  });
+}
+
 export async function saveServiceTilesAction(reset: boolean, formData: FormData) {
   return run("/app/settings/services", async () => {
     const user = await requireActor("manager");

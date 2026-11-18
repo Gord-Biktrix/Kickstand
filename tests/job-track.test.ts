@@ -138,3 +138,29 @@ describe("inspection checks", () => {
     expect(t.stepMinutes).toEqual({ inspection: 12, repair: 48 });
   });
 });
+
+describe("inspection checklists per service", () => {
+  it("a job gets the checks of each service on its work order once, or the store's default", async () => {
+    const { jobChecklist, parseChecklist, DEFAULT_CHECKS, checkKey } = await import("@/lib/job-track");
+    const lists = { "101": ["Brakes: pads", "Chain wear"], "102": ["Chain wear", "Motor error codes"] };
+    const lines = [{ itemId: "101" }, { itemId: "999" }, { itemId: "102" }];
+    expect(jobChecklist(lines, lists, null).map((c) => c.label)).toEqual(["Brakes: pads", "Chain wear", "Motor error codes"]);
+    expect(jobChecklist([{ itemId: "999" }], lists, null).map((c) => c.label)).toEqual([...DEFAULT_CHECKS]);
+    expect(jobChecklist([], lists, ["Test ride"]).map((c) => c.key)).toEqual(["insp:test-ride"]);
+    expect(checkKey("Brakes: pads, rotors")).toBe("insp:brakes-pads-rotors");
+    expect(parseChecklist("- Brakes\n\n• brakes\n  Tires  \r\nTires")).toEqual(["Brakes", "Tires"]);
+  });
+
+  it("each check is answered OK, Worn or Replace; clearing it takes the answer away", async () => {
+    const { checkResult } = await import("@/lib/job-track");
+    const log: LogEntry[] = [
+      { kind: "step", step: "inspection", at: at(0), actor: JORDAN },
+      { kind: "task_done", taskKey: "insp:brakes", taskLabel: "Brakes", reason: "replace", at: at(3), actor: JORDAN },
+      { kind: "task_done", taskKey: "insp:tires", taskLabel: "Tires", reason: "ok", at: at(4), actor: JORDAN },
+      { kind: "task_done", taskKey: "insp:chain", taskLabel: "Chain", reason: "worn", at: at(5), actor: JORDAN },
+      { kind: "task_undone", taskKey: "insp:chain", taskLabel: "Chain", at: at(6), actor: JORDAN },
+    ];
+    const t = deriveTrack(log, at(10));
+    expect([checkResult(t, "insp:brakes"), checkResult(t, "insp:tires"), checkResult(t, "insp:chain")]).toEqual(["replace", "ok", null]);
+  });
+});

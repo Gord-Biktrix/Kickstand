@@ -10,7 +10,8 @@ import { lsItems, lsWorkorders } from "@/db/schema";
 import { asList, LightspeedClient } from "./lightspeed";
 import { logger } from "./logger";
 
-export type WorkorderLine = { id: string; kind: "part" | "labour"; description: string; qty: number; unitPrice: number | null; minutes: number | null; note: string };
+/** itemId: the Lightspeed item behind the line (a service tile for labour), when there is one. */
+export type WorkorderLine = { id: string; kind: "part" | "labour"; description: string; qty: number; unitPrice: number | null; minutes: number | null; note: string; itemId?: string | null };
 
 const num = (v: unknown): number | null => {
   const n = typeof v === "number" ? v : typeof v === "string" && v.trim() !== "" ? Number(v) : NaN;
@@ -32,6 +33,7 @@ export function parseWorkorderLines(workorder: Record<string, unknown>, itemName
       unitPrice: price !== null && price > 0 ? price : (item?.price ?? price),
       minutes: null,
       note: item?.name ? String(w.note ?? "").trim() : "",
+      itemId: w.itemID && String(w.itemID) !== "0" ? String(w.itemID) : null,
     };
   });
   const lines: WorkorderLine[] = labour.map((l) => {
@@ -48,6 +50,7 @@ export function parseWorkorderLines(workorder: Record<string, unknown>, itemName
       unitPrice: override !== null && override > 0 ? override : (item?.price ?? null),
       minutes: minutes > 0 ? minutes : null,
       note: "",
+      itemId: l.itemID && String(l.itemID) !== "0" ? String(l.itemID) : null,
     };
   });
   return [...parts, ...lines];

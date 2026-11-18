@@ -17,7 +17,7 @@ type Tile = { itemId: string; name: string; price: number | null; minutes: numbe
 const money = (n: number) => new Intl.NumberFormat("en-CA", { style: "currency", currency: "CAD" }).format(n);
 const label = "text-[11px] font-extrabold tracking-wider text-[#3d3f43] uppercase";
 
-export function FindingSheet({ action, close, first, tiles, drafts }: { action: (fd: FormData) => void; close: string; first: string; tiles: Tile[]; drafts: number }) {
+export function FindingSheet({ action, close, first, tiles, drafts, about = "" }: { action: (fd: FormData) => void; close: string; first: string; tiles: Tile[]; drafts: number; about?: string }) {
   const [picks, setPicks] = useState<Pick[]>([]);
   const [level, setLevel] = useState<Level | null>(null);
   const [q, setQ] = useState("");
@@ -90,7 +90,7 @@ export function FindingSheet({ action, close, first, tiles, drafts }: { action: 
             </section>
             <section className="flex flex-col gap-2 rounded-xl bg-white p-4">
               <label htmlFor="why" className={label}>3 · Why ({first} reads this)</label>
-              <textarea id="why" name="why" rows={3} required className="input min-h-24" placeholder="Your rear rotor is worn past its limit, so the brakes won't stop as well in the rain." />
+              <textarea id="why" name="why" rows={3} required defaultValue={about ? `${about} ` : undefined} className="input min-h-24" placeholder="Your rear rotor is worn past its limit, so the brakes won't stop as well in the rain." />
             </section>
             <section className="flex flex-col gap-2 rounded-xl bg-white p-4">
               <p className={label}>4 · How strongly do you recommend it?</p>
