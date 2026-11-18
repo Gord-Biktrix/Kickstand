@@ -89,7 +89,7 @@ export function FindingSheet({ action, close, first, tiles, drafts, about = "" }
               <PhotoAdd />
             </section>
             <section className="flex flex-col gap-2 rounded-xl bg-white p-4">
-              <label htmlFor="why" className={label}>3 · Why ({first} reads this)</label>
+              <label htmlFor="why" className={label}>3 · Reason for recommendation</label>
               <textarea id="why" name="why" rows={3} required defaultValue={about ? `${about} ` : undefined} className="input min-h-24" placeholder="Your rear rotor is worn past its limit, so the brakes won't stop as well in the rain." />
             </section>
             <section className="flex flex-col gap-2 rounded-xl bg-white p-4">

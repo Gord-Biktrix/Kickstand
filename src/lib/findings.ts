@@ -3,7 +3,8 @@
  *
  * - A finding = the Lightspeed items it needs (prices frozen now), photos, why, and a recommendation level.
  * - Findings are drafts until Send: every draft on the work order goes out together as one request, one Klaviyo
- *   text ("Workshop: Needs your OK") with a link to /ok/<token>, where the customer says yes or no to each.
+ *   text ("Workshop: Needs your OK") with a link to /ok/<token>, which opens their repair tracker (/t/...), where
+ *   they say yes or no to each.
  * - Approved items are added to the Lightspeed work order then (they become Repair tasks on the job page).
  * - A finding never blocks the booked work. Still unanswered at Mark ready = handed over without it ("not_asked").
  * Staff can record an answer given on the phone or at the counter.

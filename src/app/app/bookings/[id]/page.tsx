@@ -18,6 +18,7 @@ import { bookingCustomerKey } from "@/lib/customers";
 import { getTypeAvailability } from "@/lib/type-slots";
 import { lightspeedEnabled } from "@/lib/lightspeed";
 import { lightspeedWorkorderUrl } from "@/lib/workorders";
+import { jobPath } from "@/lib/workshop";
 import { resendBookingConfirmationAction, retryBookingWorkorderAction, staffCancelTypeBookingAction, staffRescheduleTypeBookingAction } from "../../actions";
 
 export const metadata = { title: "Booking" };
@@ -109,6 +110,7 @@ export default async function BookingPage({ params, searchParams }: { params: Pr
                 <BookingStatusControl booking={b} type={type} now={now} />
               </div>
             )}
+            {b.lsWorkorderId && b.status !== "cancelled" && <Link href={jobPath(`b:${b.id}`)} className="btn btn-primary btn-sm">Open job</Link>}
             {b.status === "booked" && (
               <>
                 {b.startsAt > now && <Link href={`${self}?move=1`} className="btn btn-sm">Change time</Link>}
