@@ -34,7 +34,9 @@ import { deleteView, saveView, syncWorkorders } from "@/lib/workorders";
 import type { BoardColumn } from "@/lib/workshop-columns";
 import { assignMechanic, cancelTicket, markJobReady, moveJob, resolveJob } from "@/lib/workshop-moves";
 import { loadJobLog, logJob } from "@/lib/job-log";
-import { sendTracker } from "@/lib/tracker";
+import { ensureTracker, sendTracker } from "@/lib/tracker";
+import { conversationFor, markRead, savePhoto, sendText } from "@/lib/chat";
+import { jobForConversation } from "@/lib/chat-view";
 import { addFinding, answerFindings, closeUnanswered, deleteDraft, sendFindings } from "@/lib/findings";
 import { deriveTrack, isCheckResult, isInspectionTask, parseChecklist, type CheckResult } from "@/lib/job-track";
 import { createTicket, scheduleTicket, ticketPhotoData } from "@/lib/tickets";
@@ -1648,4 +1650,64 @@ export async function sendTrackerAction(jobId: string, back: string) {
     const r = await sendTracker(db, { showroom, jobId, actor: user.id, smsConsent: true });
     return r.told === "sent" ? "Tracker link sent." : r.told === "failed" ? "The message didn't go out. Copy the link and send it." : "There's no phone or email for this customer. Copy the link instead.";
   });
+}
+
+// ---- Kickstand Chat (docs/kickstand-chat.md). The inbox is a client screen, so these return results instead of redirecting.
+
+type ChatResult = { ok: true } | { ok: false; error: string };
+
+/** Staff reply in a conversation: text and/or photos (JPEG data URLs, shrunk in the browser). */
+export async function sendChatAction(conversationId: string, body: string, photos: string[] = []): Promise<ChatResult> {
+  try {
+    const user = await requireActor("staff");
+    const showroom = await currentShowroom(user);
+    const images = photos
+      .slice(0, 5)
+      .map((u) => /^data:image\/jpeg;base64,([A-Za-z0-9+/=]+)$/.exec(u.trim())?.[1])
+      .filter((b): b is string => !!b);
+    if (images.length !== photos.length) throw new Error("That photo couldn't be read. Try another.");
+    const tokens = [];
+    for (const base64 of images) tokens.push(await savePhoto(db, { showroomId: showroom.id, base64 }));
+    const msg = await sendText(db, { showroomId: showroom.id, conversationId, body, photoTokens: tokens, staff: { id: user.id, name: user.name.split(/\s+/)[0] ?? user.name } });
+    if (msg.status === "failed") return { ok: false, error: msg.errorCode === "21610" ? "The customer has opted out of texts." : `Not sent: ${msg.error ?? "the text was refused"}` };
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: errorMessage(err) };
+  }
+}
+
+/** Opening a conversation marks it read for everyone at the store. */
+export async function markChatReadAction(conversationId: string): Promise<void> {
+  // Looking at another store (view-only) leaves its threads unread for the people who work there.
+  const user = await requireActor("staff").catch(() => null);
+  if (!user) return;
+  const showroom = await currentShowroom(user);
+  await markRead(db, { showroomId: showroom.id, conversationId });
+}
+
+/** "+ New": start (or open) the conversation with a phone number. */
+export async function newChatAction(formData: FormData) {
+  const user = await requireActor("staff");
+  const showroom = await currentShowroom(user);
+  let id: string;
+  try {
+    id = (await conversationFor(db, showroom.id, str(formData, "phone"))).id;
+  } catch (err) {
+    redirect(withFlash("/app/messages?new=1", { error: errorMessage(err) }));
+  }
+  redirect(`/app/messages?c=${id}`);
+}
+
+/** The customer's tracker link for their open job (made if needed), for the composer. */
+export async function chatTrackerLinkAction(conversationId: string): Promise<{ ok: true; url: string } | { ok: false; error: string }> {
+  try {
+    const user = await requireActor("staff");
+    const showroom = await currentShowroom(user);
+    const found = await jobForConversation(db, showroom, conversationId);
+    if (!found) return { ok: false, error: "No open job for this customer." };
+    const { url } = await ensureTracker(db, { showroomId: showroom.id, workorderId: found.job.workorderId, customerName: found.name });
+    return { ok: true, url };
+  } catch (err) {
+    return { ok: false, error: errorMessage(err) };
+  }
 }

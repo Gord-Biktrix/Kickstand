@@ -1,10 +1,11 @@
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { Db } from "@/db/client";
-import { chatConversations, chatMessages, chatPhotos } from "@/db/schema";
+import { chatConversations, chatMessages, chatPhotos, findingRequests, findings, lsWorkorders } from "@/db/schema";
 import { applyStatus, ChatError, conversationFor, isUnread, markRead, receiveText, saveLine, savePhoto, sendText, unreadCount } from "@/lib/chat";
 import { MemorySender, optKeyword, plainText, segmentCount, setTextSender, twilioSignature, verifyTwilioSignature } from "@/lib/sms";
 import { handleTwilioWebhook } from "@/lib/twilio-webhook";
+import { listThreads, loadThread } from "@/lib/chat-view";
 import type { ShowroomCtx } from "@/lib/showroom";
 import { makeOrder, resetDb, testDb } from "./helpers";
 
@@ -167,4 +168,41 @@ describe("chat: two-way texting", () => {
     const [out] = await db.select().from(chatMessages).where(eq(chatMessages.twilioSid, "SMtest000001"));
     expect(out).toMatchObject({ status: "undelivered", errorCode: "30003" });
   });
+
+  it("inbox: lists threads newest first, filters unread and searches name or phone", async () => {
+    await makeOrder(db, van, { customerName: "Dana Morrow", customerPhone: "780-555-0137" });
+    await receiveText(db, inbound("Is the rotor urgent?"));
+    const other = await conversationFor(db, van.id, "+14035550199", "Marcus Lee");
+    await sendText(db, { showroomId: van.id, conversationId: other.id, body: "It's ready, we're open till 6.", staff: STAFF });
+
+    const all = await listThreads(db, van);
+    expect(all.map((t) => [t.name, t.unread, t.preview])).toEqual([
+      ["Marcus Lee", false, "You: It's ready, we're open till 6."],
+      ["Dana Morrow", true, "Is the rotor urgent?"],
+    ]);
+    expect((await listThreads(db, van, { filter: "unread" })).map((t) => t.name)).toEqual(["Dana Morrow"]);
+    expect((await listThreads(db, van, { q: "marc" })).map((t) => t.name)).toEqual(["Marcus Lee"]);
+    expect((await listThreads(db, van, { q: "555-0137" })).map((t) => t.name)).toEqual(["Dana Morrow"]);
+  });
+
+  it("inbox: a finding still waiting on the customer shows on the thread, its job in the panel", async () => {
+    await db.delete(lsWorkorders);
+    await db.insert(lsWorkorders).values({ id: "10074", showroomId: van.id, statusId: 1, customerName: "Dana Morrow", item: "Juggernaut Classic Duo" });
+    const [req] = await db.insert(findingRequests).values({ showroomId: van.id, workorderId: "10074", tokenHash: "h1", tokenEnc: "e1", customerName: "Dana Morrow", customerPhone: "780-555-0137" }).returning();
+    await db.insert(findings).values({ showroomId: van.id, workorderId: "10074", requestId: req.id, level: 2, why: "Worn", items: [{ itemId: "1", name: "Rear rotor", qty: 1, price: 54.99, minutes: 15 }], createdBy: STAFF.id });
+    await receiveText(db, inbound("Is the rotor something I need right away?"));
+
+    const [row] = await listThreads(db, van, { filter: "ok" });
+    expect(row.chip).toEqual({ label: "WO #10074 · Waiting on OK", kind: "ok" });
+    expect(await listThreads(db, van, { q: "10074" })).toHaveLength(1);
+
+    const view = await loadThread(db, van, row.id);
+    expect(view?.job).toMatchObject({ workorderId: "10074", waiting: { title: "Rear rotor", price: 54.99 } });
+    expect(view?.messages.map((m) => [m.direction, m.body, m.day])).toEqual([["in", "Is the rotor something I need right away?", "Today"]]);
+    expect(view?.canSend).toBe(true);
+
+    await saveLine(db, van.id, { enabled: false });
+    expect((await loadThread(db, van, row.id))?.lineState).toBe("off");
+  });
 });
+

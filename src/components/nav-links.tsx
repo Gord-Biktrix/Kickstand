@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 /** `match` widens the active test to a path prefix different from the link target (Settings → /app/settings/*). */
-export type NavItem = { href: string; label: string; exact?: boolean; match?: string; also?: string[] };
+export type NavItem = { href: string; label: string; exact?: boolean; match?: string; also?: string[]; badge?: number };
 
 /**
  * Nav links with an active state. `exact` matches the path alone (for "/app" so it does not
@@ -43,8 +43,9 @@ export function NavLinks({ items, variant = "top" }: { items: NavItem[]; variant
           ? active ? "border-action font-semibold text-white" : "border-transparent text-chrome-muted hover:text-white"
           : active ? "border-accent font-semibold text-accent" : "border-transparent text-foreground hover:text-accent";
         return (
-          <Link key={i.href} href={i.href} aria-current={active ? "page" : undefined} className={`border-b-2 pb-0.5 ${cls}`}>
+          <Link key={i.href} href={i.href} aria-current={active ? "page" : undefined} className={`inline-flex items-center gap-1.5 border-b-2 pb-0.5 ${cls}`}>
             {i.label}
+            {!!i.badge && <span aria-label={`${i.badge} unread`} className="rounded-full bg-action px-1.5 text-[11px] leading-[18px] font-extrabold text-chrome">{i.badge}</span>}
           </Link>
         );
       })}
