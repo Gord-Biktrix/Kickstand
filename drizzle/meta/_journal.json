@@ -183,6 +183,13 @@
       "when": 1794946960761,
       "tag": "0025_acoustic_zaladane",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1794959826176,
+      "tag": "0026_lumpy_sleepwalker",
+      "breakpoints": true
     }
   ]
 }

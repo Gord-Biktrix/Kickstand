@@ -523,6 +523,66 @@ export const jobLog = pgTable(
   ],
 );
 
+/**
+ * Findings: work outside the booked job a mechanic wants to do (the "+" on the job page). Each finding has the
+ * Lightspeed items it needs (prices frozen when it's made), photos, why, and how strongly it's recommended. Drafts
+ * (request_id null) are sent together as one finding_request: one text with one link, where the customer says yes or
+ * no to each. Approved items are added to the Lightspeed work order then. A finding never blocks the booked work.
+ */
+export const findingRequests = pgTable(
+  "finding_requests",
+  {
+    id: id(),
+    showroomId: uuid("showroom_id")
+      .notNull()
+      .references(() => showrooms.id),
+    workorderId: text("workorder_id").notNull(),
+    tokenHash: text("token_hash").notNull(),
+    tokenEnc: text("token_enc").notNull(),
+    customerName: text("customer_name").notNull().default(""),
+    customerPhone: text("customer_phone"),
+    customerEmail: text("customer_email"),
+    smsConsent: boolean("sms_consent").notNull().default(false),
+    sentBy: uuid("sent_by"),
+    sentAt: timestamp("sent_at", { withTimezone: true }).notNull().defaultNow(),
+    answeredAt: timestamp("answered_at", { withTimezone: true }),
+    toldStatus: text("told_status"),
+  },
+  (t) => [uniqueIndex("finding_requests_token_idx").on(t.tokenHash), index("finding_requests_workorder_idx").on(t.workorderId)],
+);
+
+export type FindingItem = { itemId: string; name: string; qty: number; price: number | null; minutes: number | null };
+
+export const findings = pgTable(
+  "findings",
+  {
+    id: id(),
+    showroomId: uuid("showroom_id")
+      .notNull()
+      .references(() => showrooms.id),
+    workorderId: text("workorder_id").notNull(),
+    requestId: uuid("request_id").references(() => findingRequests.id),
+    level: smallint("level").notNull(),
+    why: text("why").notNull().default(""),
+    items: jsonb("items").$type<FindingItem[]>().notNull(),
+    photoIds: jsonb("photo_ids").$type<string[]>().notNull().default([]),
+    decision: text("decision"),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    decidedBy: text("decided_by"),
+    lsAdded: boolean("ls_added").notNull().default(false),
+    lsError: text("ls_error"),
+    createdBy: uuid("created_by").notNull(),
+    ...timestamps,
+  },
+  (t) => [
+    index("findings_workorder_idx").on(t.workorderId),
+    check("findings_level_check", sql`${t.level} between 1 and 3`),
+    check("findings_decision_check", sql`${t.decision} is null or ${t.decision} in ('approved','declined','not_asked')`),
+  ],
+);
+
+export type FindingRequest = typeof findingRequests.$inferSelect;
+export type Finding = typeof findings.$inferSelect;
 export type JobLogRow = typeof jobLog.$inferSelect;
 export type LsWorkorder = typeof lsWorkorders.$inferSelect;
 export type LsWorkorderStatus = typeof lsWorkorderStatuses.$inferSelect;

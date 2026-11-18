@@ -15,7 +15,14 @@ import { listTicketPhotos } from "@/lib/tickets";
 import { loadJobLog, recordTaskTotal } from "@/lib/job-log";
 import { currentStep, deriveTrack, fmtMinutes, INSPECTION_TASKS, jobTasks, openTasks, repairDone, STEP_LABEL, STEP_ORDER, type JobStep, type Task, type Track } from "@/lib/job-track";
 import { ConfirmButton } from "@/components/confirm-button";
-import { jobReadyAction, jobResumeAction, jobStepAction, jobStepBackAction, jobTaskAction, cancelTicketAction, moveJobAction, setBookingStatusAction, staffCancelTypeBookingAction } from "../../actions";
+import { CopyButton } from "@/components/copy-button";
+import { FindingSheet } from "@/components/finding-sheet";
+import { LevelMeter } from "@/components/level-meter";
+import { findingPrice, findingTitle, isLevel, loadJobFindings, type JobFindings } from "@/lib/findings";
+import { LightspeedClient, lightspeedEnabled } from "@/lib/lightspeed";
+import { loadServiceItems, pickTiles } from "@/lib/service-items";
+import { listShowrooms, type ShowroomCtx } from "@/lib/showroom";
+import { jobReadyAction, jobResumeAction, jobStepAction, jobStepBackAction, jobTaskAction, cancelTicketAction, addFindingAction, deleteFindingAction, sendFindingsAction, staffAnswerFindingAction, moveJobAction, setBookingStatusAction, staffCancelTypeBookingAction } from "../../actions";
 
 export const metadata = { title: "Job" };
 
@@ -75,6 +82,12 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   const open = openTasks(tasks, track);
   const booked = tasks.reduce((s, t) => s + (t.minutes ?? 0), 0);
   const readying = sp(q.ready) === "1" && step === "repair";
+  // Findings: the "+" works on any step while the bike is in the shop.
+  const canFind = !!job.workorderId && !!step && step !== "pickup" && !job.notHereYet;
+  const jf = job.workorderId ? await loadJobFindings(db, job.workorderId) : null;
+  const drafts = jf?.findings.filter((f) => !f.requestId).length ?? 0;
+  const adding = canFind && sp(q.add) === "1";
+  const tiles = adding ? await findingTiles(showroom) : [];
 
   return (
     <div>
@@ -125,6 +138,8 @@ export default async function JobPage({ params, searchParams }: { params: Promis
             </>
           )}
 
+          {jf && jf.findings.length > 0 && <Findings jf={jf} jobId={job.id} self={self} first={first} tz={tz} />}
+
           {photos.length > 0 && (
             <div className="mt-auto">
               <p className={label}>Photos</p>
@@ -173,7 +188,12 @@ export default async function JobPage({ params, searchParams }: { params: Promis
             </section>
           )}
 
-          <section className="mt-auto flex flex-col gap-2 rounded-xl border border-border bg-card p-4">
+          {canFind && (
+            <div className="mt-auto flex justify-end">
+              <Link href={`${self}?add=1`} aria-label="Found something extra" title="Found something extra" className="flex h-16 w-16 items-center justify-center rounded-full bg-[#17181a] text-4xl leading-none font-light text-white shadow-[0_6px_16px_rgba(0,0,0,.25)]">+</Link>
+            </div>
+          )}
+          <section className={`${canFind ? "" : "mt-auto "}flex flex-col gap-2 rounded-xl border border-border bg-card p-4`}>
             <p className={label}>Next step</p>
             <NextStep job={job} step={step} track={track} open={open} self={self} first={first} lsUrl={lsUrl} />
             {job.workorderId && job.column !== "parts" && (step === "inspection" || step === "repair" || step === "pickup") && (
@@ -185,6 +205,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
         </aside>
       </div>
 
+      {adding && <FindingSheet action={addFindingAction.bind(null, job.id, self)} close={self} first={first} tiles={tiles} drafts={drafts} />}
       {readying && open.length > 0 && <ReadyPanel jobId={job.id} self={self} open={open} first={first} canTell={job.kind !== "floor" && !!job.customer} />}
     </div>
   );
@@ -421,6 +442,65 @@ function ReadyPanel({ jobId, self, open, first, canTell }: { jobId: string; self
           </div>
         </form>
       </section>
+    </div>
+  );
+}
+
+/** The store's service tiles for the + sheet (as on New ticket); none when Lightspeed can't be read. */
+async function findingTiles(showroom: ShowroomCtx): Promise<{ itemId: string; name: string; price: number | null; minutes: number | null }[]> {
+  if (!lightspeedEnabled(showroom)) return [];
+  try {
+    const others = (await listShowrooms(db)).filter((x) => x.id !== showroom.id).map((x) => `${x.name} ${x.slug}`);
+    const items = pickTiles(await loadServiceItems(new LightspeedClient(db)), { selected: showroom.settings.workshop_service_items, store: `${showroom.name} ${showroom.slug}`, otherStores: others });
+    return items.map((i) => ({ itemId: i.itemId, name: i.name, price: i.price ?? null, minutes: i.minutes ?? null }));
+  } catch {
+    return [];
+  }
+}
+
+/** What was found on this job: drafts (not sent), waiting for an answer, and answered. A branch; never blocks the job. */
+function Findings({ jf, jobId, self, first, tz }: { jf: JobFindings; jobId: string; self: string; first: string; tz: string }) {
+  const latest = jf.requests.at(-1);
+  const drafts = jf.findings.filter((f) => !f.requestId);
+  return (
+    <div>
+      <p className={label}>Found extra</p>
+      <ul className="mt-1">
+        {jf.findings.map((f) => {
+          const status = !f.requestId ? "Not sent" : f.decision === "approved" ? (f.lsError ? `Yes · Lightspeed didn't take it (${f.lsError})` : "Yes · on the work order") : f.decision === "declined" ? "No" : f.decision === "not_asked" ? "No answer · handed over without it" : `Waiting on ${first}`;
+          return (
+            <li key={f.id} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-[#f1efeb] py-2.5 first:border-t-0">
+              <div className="min-w-0 flex-1">
+                <p className="font-semibold">{findingTitle(f.items)} · {money(findingPrice(f.items))}</p>
+                <p className="flex flex-wrap items-center gap-2 text-[13px] text-muted">
+                  {isLevel(f.level) && <LevelMeter level={f.level} size="sm" />}
+                  <span className={f.decision === "approved" && !f.lsError ? "font-bold text-[#015d47]" : f.lsError ? "font-bold text-red-700" : ""}>{status}</span>
+                  {f.decidedAt && f.decision !== "not_asked" && <span>{formatTime(f.decidedAt, tz)}</span>}
+                </p>
+              </div>
+              {!f.requestId ? (
+                <form action={deleteFindingAction.bind(null, f.id, self)}>
+                  <button type="submit" className="btn btn-sm">Remove</button>
+                </form>
+              ) : !f.decision ? (
+                <div className="flex gap-2">
+                  <form action={staffAnswerFindingAction.bind(null, f.id, "approved", self)}><button type="submit" className="btn btn-sm">{first} said yes</button></form>
+                  <form action={staffAnswerFindingAction.bind(null, f.id, "declined", self)}><button type="submit" className="btn btn-sm">No</button></form>
+                </div>
+              ) : null}
+            </li>
+          );
+        })}
+      </ul>
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        {drafts.length > 0 && (
+          <form action={sendFindingsAction.bind(null, jobId, self)} className="flex flex-wrap items-center gap-2">
+            <label className="flex items-center gap-2 text-sm"><input type="checkbox" name="sms_consent" defaultChecked className="h-5 w-5" /> Text {first}</label>
+            <button type="submit" className="btn btn-primary btn-sm">Send {drafts.length} to {first}</button>
+          </form>
+        )}
+        {latest && <CopyButton text={latest.url} label="Copy their link" />}
+      </div>
     </div>
   );
 }

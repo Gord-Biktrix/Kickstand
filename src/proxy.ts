@@ -5,13 +5,13 @@ const LIMIT = 60;
 const hits = new Map<string, { count: number; resetAt: number }>();
 
 /**
- * §13: rate-limit /b/* and the public /book/* pages to 60 req/min per IP and bounce signed-out visitors away from /app.
+ * §13: rate-limit /b/*, the public /book/* pages and findings links (/ok/*) to 60 req/min per IP and bounce signed-out visitors away from /app.
  * The limiter is per-instance memory; on Vercel put a WAF rule or Upstash in front for hard limits.
  */
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  if (pathname.startsWith("/b/") || pathname.startsWith("/book/")) {
+  if (pathname.startsWith("/b/") || pathname.startsWith("/book/") || pathname.startsWith("/ok/")) {
     const ip =
       request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
       request.headers.get("x-real-ip") ??
@@ -45,5 +45,5 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/b/:path*", "/book/:path*", "/app/:path*"],
+  matcher: ["/b/:path*", "/book/:path*", "/ok/:path*", "/app/:path*"],
 };

@@ -6,7 +6,7 @@ import { removeGoogleConnection } from "@/lib/google-connection";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { db } from "@/db/client";
-import { appointments, capacityOverrides, capacityRules, lsEmployees, lsWorkorderStatuses, orders, staffSessions, staffUsers, units } from "@/db/schema";
+import { appointments, capacityOverrides, capacityRules, findings as findingsTable, lsEmployees, lsWorkorders, lsWorkorderStatuses, orders, staffSessions, staffUsers, units } from "@/db/schema";
 import { assignableRoles, canManage, clearPassword, deleteStaff, hasRole, inviteStaff, isRole, requireActor, roleLabel, SESSION_COOKIE, setPassword, setStaffActive, signOut, updateStaff } from "@/lib/auth";
 import { BOOKING_ERROR_TEXT, BookingError, bookGroup, cancelBooking, recordNoShow, rescheduleBooking } from "@/lib/booking";
 import { validateImport } from "@/lib/csv";
@@ -34,6 +34,7 @@ import { deleteView, saveView, syncWorkorders } from "@/lib/workorders";
 import type { BoardColumn } from "@/lib/workshop-columns";
 import { assignMechanic, cancelTicket, markJobReady, moveJob, resolveJob } from "@/lib/workshop-moves";
 import { loadJobLog, logJob } from "@/lib/job-log";
+import { addFinding, answerFindings, closeUnanswered, deleteDraft, sendFindings } from "@/lib/findings";
 import { deriveTrack, isInspectionTask } from "@/lib/job-track";
 import { createTicket, scheduleTicket, ticketPhotoData } from "@/lib/tickets";
 import { jobPath } from "@/lib/workshop";
@@ -787,7 +788,8 @@ export async function jobReadyAction(jobId: string, back: string, formData: Form
       await logJob(db, { showroomId: showroom.id, workorderId: job.workorderId, actor: user.id, entry: { kind: "task_skipped", taskKey, taskLabel: rest.join("|") || taskKey, reason } });
     }
     const told = r.told === "sent" ? " The customer has been told." : r.told === "failed" ? " The message to the customer didn't go out; call them." : r.told === "no_contact" ? " There's no phone or email to tell the customer." : "";
-    return `Ready. Lightspeed says ${r.status}.${told}`;
+    const closed = await closeUnanswered(db, { workorderId: job.workorderId, by: user.id });
+    return `Ready. Lightspeed says ${r.status}.${told}${closed ? ` ${closed} finding${closed === 1 ? "" : "s"} handed over without an answer.` : ""}`;
   });
 }
 
@@ -819,7 +821,8 @@ export async function readyJobAction(jobId: string, back: string, formData: Form
     const showroom = await currentShowroom(user);
     const r = await markJobReady(db, { showroom, jobId, notify: formData.get("notify") === "on", actor: user.id });
     const told = r.told === "sent" ? " The customer has been told." : r.told === "failed" ? " The message to the customer didn't go out; call them." : r.told === "no_contact" ? " There's no phone or email to tell the customer." : "";
-    return `Ready. Lightspeed says ${r.status}.${told}`;
+    const closed = await closeUnanswered(db, { workorderId: (await resolveJob(db, showroom, jobId)).workorderId, by: user.id });
+    return `Ready. Lightspeed says ${r.status}.${told}${closed ? ` ${closed} finding${closed === 1 ? "" : "s"} handed over without an answer.` : ""}`;
   });
 }
 
@@ -1519,5 +1522,64 @@ export async function retryBookingWorkorderAction(id: string) {
     const synced = await syncBookingWorkorder(db, { showroom, type: detail.type, booking: detail.booking, actor: user.id });
     if (!synced?.lsWorkorderId) throw new Error("Lightspeed didn't take it. The reason is on the timeline below.");
     return `Work order #${synced.lsWorkorderId} is in Lightspeed.`;
+  });
+}
+
+// ---- Findings (the + on the job page) ---------------------------------------
+
+/** Save a finding as a draft: items ("part" = "itemId|qty|price|minutes|name"), photos, why, level. */
+export async function addFindingAction(jobId: string, back: string, formData: FormData) {
+  // "Add another" reopens the sheet; "Send" sends every finding on the job.
+  const then = str(formData, "then");
+  const to = safeReturn(back, "/app/workshop");
+  return run(then === "send" ? to : `${to}?add=1`, async () => {
+    const user = await requireActor("staff");
+    const showroom = await currentShowroom(user);
+    const job = await resolveJob(db, showroom, jobId);
+    await addFinding(db, {
+      showroomId: showroom.id,
+      workorderId: job.workorderId,
+      level: Number(str(formData, "level")),
+      why: str(formData, "why"),
+      items: ticketParts(formData),
+      photos: ticketPhotoData(formData.getAll("photo").filter((v): v is string => typeof v === "string")),
+      actor: user.id,
+    });
+    if (then !== "send") return "Added. Add the next one.";
+    const r = await sendFindings(db, { showroom, jobId, actor: user.id, smsConsent: formData.get("sms_consent") === "on" });
+    const what = `${r.count} finding${r.count === 1 ? "" : "s"}`;
+    return r.told === "sent" ? `Sent ${what}. They'll get a link to say yes or no.` : r.told === "failed" ? `Saved ${what}, but the message didn't go out. Copy the link and send it, or call them.` : `Saved ${what}, but there's no phone or email. Copy the link and send it, or ask them in person.`;
+  });
+}
+
+export async function deleteFindingAction(findingId: string, back: string) {
+  return run(safeReturn(back, "/app/workshop"), async () => {
+    const user = await requireActor("staff");
+    const showroom = await currentShowroom(user);
+    await deleteDraft(db, { showroomId: showroom.id, findingId });
+  });
+}
+
+export async function sendFindingsAction(jobId: string, back: string, formData: FormData) {
+  return run(safeReturn(back, "/app/workshop"), async () => {
+    const user = await requireActor("staff");
+    const showroom = await currentShowroom(user);
+    const r = await sendFindings(db, { showroom, jobId, actor: user.id, smsConsent: formData.get("sms_consent") === "on" });
+    const what = `${r.count} finding${r.count === 1 ? "" : "s"}`;
+    return r.told === "sent" ? `Sent ${what}. They'll get a link to say yes or no.` : r.told === "failed" ? `Saved ${what}, but the message didn't go out. Copy the link and send it, or call them.` : `Saved ${what}, but there's no phone or email. Copy the link and send it, or ask them in person.`;
+  });
+}
+
+/** Staff record the customer's answer to one finding (phone, counter). */
+export async function staffAnswerFindingAction(findingId: string, decision: "approved" | "declined", back: string) {
+  return run(safeReturn(back, "/app/workshop"), async () => {
+    const user = await requireActor("staff");
+    const showroom = await currentShowroom(user);
+    const [f] = await db.select().from(findingsTable).where(eq(findingsTable.id, findingId));
+    if (!f || f.showroomId !== showroom.id || !f.requestId) throw new Error("That finding couldn't be found.");
+    const [wo] = await db.select({ employeeId: lsWorkorders.employeeId }).from(lsWorkorders).where(eq(lsWorkorders.id, f.workorderId));
+    const r = await answerFindings(db, { requestId: f.requestId, decisions: { [f.id]: decision }, by: user.id, employeeId: wo?.employeeId ?? null });
+    if (r.lsFailed) return "Saved as yes, but Lightspeed didn't take every line. Add it on the work order.";
+    return decision === "approved" ? "Saved as yes. It's on the work order now." : "Saved as no.";
   });
 }

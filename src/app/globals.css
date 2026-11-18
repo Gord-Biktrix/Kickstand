@@ -48,6 +48,7 @@
   --color-danger-soft: var(--danger-soft);
   --font-sans: var(--font-inter);
   --font-mono: var(--font-geist-mono);
+  --font-condensed: var(--font-barlow-condensed);
 }
 
 body {

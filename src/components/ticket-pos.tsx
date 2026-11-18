@@ -386,7 +386,7 @@ async function shrink(file: File): Promise<string> {
  * Photos as a drop zone: drag photos in, "Select photos" from the library, or "Take photo" with the camera (phones
  * and iPads). Up to 6, shrunk on the device, shown as thumbnails with ×, sent as `photo` with the ticket.
  */
-function PhotoAdd() {
+export function PhotoAdd() {
   const [photos, setPhotos] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [over, setOver] = useState(false);
