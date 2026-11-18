@@ -63,8 +63,11 @@ export default async function BookTypePage({ params, searchParams }: { params: P
       {error && <Alert tone="danger">{error}</Alert>}
       {date && time && !slot && <Alert tone="danger">That time was just taken or is no longer open. Please pick another.</Alert>}
       {slot && sp(q.confirm) === "1" ? (
-        <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm lg:grid lg:grid-cols-[minmax(240px,300px)_minmax(0,1fr)]">
-          <div className="border-b border-border p-6 lg:border-b-0 lg:border-r">
+        // Same columns as the calendar step (sized by the card, not the window), so the card keeps its shape
+        // from one step to the next, also inside the website embed.
+        <div className="@container overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
+          <div className="grid @3xl:min-h-[540px] @3xl:grid-cols-[minmax(240px,300px)_minmax(0,1fr)]">
+          <div className="border-b border-border p-6 @3xl:border-b-0 @3xl:border-r">
             {info}
             <p className="mt-3 text-xs text-muted">{zoneLabel(tz)}</p>
           </div>
@@ -89,6 +92,7 @@ export default async function BookTypePage({ params, searchParams }: { params: P
               <Field label="Anything we should know? (optional)" htmlFor="bk_note"><textarea id="bk_note" name="note" rows={3} className="input" /></Field>
               <button type="submit" className="btn btn-block text-white" style={{ background: accent, borderColor: accent }}>Schedule</button>
             </form>
+          </div>
           </div>
         </div>
       ) : (

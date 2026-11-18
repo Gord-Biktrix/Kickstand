@@ -24,7 +24,7 @@ import { findingPrice, findingTitle, isLevel, loadJobFindings, type JobFindings 
 import { LightspeedClient, lightspeedEnabled } from "@/lib/lightspeed";
 import { loadServiceItems, pickTiles } from "@/lib/service-items";
 import { listShowrooms, type ShowroomCtx } from "@/lib/showroom";
-import { jobReadyAction, jobResumeAction, jobStepAction, jobStepBackAction, jobTaskAction, jobCheckAction, sendTrackerAction, cancelTicketAction, addFindingAction, deleteFindingAction, sendFindingsAction, staffAnswerFindingAction, moveJobAction, setBookingStatusAction, staffCancelTypeBookingAction } from "../../actions";
+import { jobReadyAction, jobResumeAction, jobStepAction, jobStepBackAction, jobTaskAction, jobCheckAction, sendTrackerAction, cancelTicketAction, addFindingAction, deleteFindingAction, sendFindingsAction, staffAnswerFindingAction, findingTakenOffAction, moveJobAction, setBookingStatusAction, staffCancelTypeBookingAction } from "../../actions";
 
 export const metadata = { title: "Job" };
 
@@ -524,14 +524,14 @@ function Findings({ jf, jobId, self, first, tz, canChangeFindings }: { jf: JobFi
       <p className={label}>Found extra</p>
       <ul className="mt-1">
         {jf.findings.map((f) => {
-          const status = !f.requestId ? "Not sent" : f.decision === "approved" ? (f.lsError ? `Yes · Lightspeed didn't take it (${f.lsError})` : "Yes · on the work order") : f.decision === "declined" ? "No" : f.decision === "not_asked" ? "No answer · handed over without it" : `Waiting on ${first}`;
+          const status = f.decision === "declined" && f.lsAdded ? `Changed to no · take it off the Lightspeed work order` : !f.requestId ? "Not sent" : f.decision === "approved" ? (f.lsError ? `Yes · Lightspeed didn't take it (${f.lsError})` : "Yes · on the work order") : f.decision === "declined" ? "No" : f.decision === "not_asked" ? "No answer · handed over without it" : `Waiting on ${first}`;
           return (
             <li key={f.id} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-[#f1efeb] py-2.5 first:border-t-0">
               <div className="min-w-0 flex-1">
                 <p className="font-semibold">{findingTitle(f.items)} · {money(findingPrice(f.items))}</p>
                 <p className="flex flex-wrap items-center gap-2 text-[13px] text-muted">
                   {isLevel(f.level) && <LevelMeter level={f.level} size="sm" />}
-                  <span className={f.decision === "approved" && !f.lsError ? "font-bold text-[#015d47]" : f.lsError ? "font-bold text-red-700" : ""}>{status}</span>
+                  <span className={f.decision === "approved" && !f.lsError ? "font-bold text-[#015d47]" : f.lsError || (f.decision === "declined" && f.lsAdded) ? "font-bold text-red-700" : ""}>{status}</span>
                   {f.decidedAt && f.decision !== "not_asked" && <span>{formatTime(f.decidedAt, tz)}</span>}
                 </p>
               </div>
@@ -544,8 +544,12 @@ function Findings({ jf, jobId, self, first, tz, canChangeFindings }: { jf: JobFi
                   <form action={staffAnswerFindingAction.bind(null, f.id, "approved", self)}><button type="submit" className="btn btn-sm">Yes</button></form>
                   <form action={staffAnswerFindingAction.bind(null, f.id, "declined", self)}><button type="submit" className="btn btn-sm">No</button></form>
                 </div>
-              ) : f.decision === "declined" && canChangeFindings ? (
-                <form action={staffAnswerFindingAction.bind(null, f.id, "approved", self)}><button type="submit" className="btn btn-sm">Change to yes</button></form>
+              ) : f.decision === "declined" && f.lsAdded ? (
+                <form action={findingTakenOffAction.bind(null, f.id, self)}><button type="submit" className="btn btn-sm">Taken off</button></form>
+              ) : (f.decision === "declined" || f.decision === "approved") && canChangeFindings ? (
+                <form action={staffAnswerFindingAction.bind(null, f.id, f.decision === "declined" ? "approved" : "declined", self)}>
+                  <ConfirmButton className="btn btn-sm" message={f.decision === "declined" ? `Change to yes? Its items go on the Lightspeed work order.` : `Change to no? You'll take its lines off the Lightspeed work order.`}>{f.decision === "declined" ? "Change to yes" : "Change to no"}</ConfirmButton>
+                </form>
               ) : null}
             </li>
           );

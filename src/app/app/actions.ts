@@ -37,7 +37,7 @@ import { loadJobLog, logJob } from "@/lib/job-log";
 import { ensureTracker, sendTracker } from "@/lib/tracker";
 import { conversationFor, markRead, savePhoto, sendText } from "@/lib/chat";
 import { jobForConversation } from "@/lib/chat-view";
-import { addFinding, answerFindings, changeToYes, closeUnanswered, deleteDraft, sendFindings } from "@/lib/findings";
+import { addFinding, answerFindings, changeAnswer, closeUnanswered, markTakenOff, deleteDraft, sendFindings } from "@/lib/findings";
 import { deriveTrack, isCheckResult, isInspectionTask, parseChecklist, type CheckResult } from "@/lib/job-track";
 import { createTicket, scheduleTicket, ticketPhotoData } from "@/lib/tickets";
 import { jobPath } from "@/lib/workshop";
@@ -1636,9 +1636,11 @@ export async function staffAnswerFindingAction(findingId: string, decision: "app
     const [f] = await db.select().from(findingsTable).where(eq(findingsTable.id, findingId));
     if (!f || f.showroomId !== showroom.id || !f.requestId) throw new Error("That finding couldn't be found.");
     const [wo] = await db.select({ employeeId: lsWorkorders.employeeId }).from(lsWorkorders).where(eq(lsWorkorders.id, f.workorderId));
-    if (f.decision === "declined" && decision === "approved") {
+    if (f.decision === "declined" || f.decision === "approved") {
       // They changed their mind (phone, counter).
-      const c = await changeToYes(db, { findingId: f.id, workorderId: f.workorderId, by: user.id, employeeId: wo?.employeeId ?? null });
+      const c = await changeAnswer(db, { findingId: f.id, workorderId: f.workorderId, to: decision, by: user.id, employeeId: wo?.employeeId ?? null });
+      if (!c.changed) return;
+      if (decision === "declined") return c.takeOff ? "Changed to no. Take its lines off the Lightspeed work order, then press Taken off." : "Changed to no.";
       return c.lsFailed ? "Changed to yes, but Lightspeed didn't take every line. Add it on the work order." : "Changed to yes. It's on the work order now.";
     }
     const r = await answerFindings(db, { requestId: f.requestId, decisions: { [f.id]: decision }, by: user.id, employeeId: wo?.employeeId ?? null });
@@ -1715,4 +1717,13 @@ export async function chatTrackerLinkAction(conversationId: string): Promise<{ o
   } catch (err) {
     return { ok: false, error: errorMessage(err) };
   }
+}
+
+/** Staff took a changed-to-no finding's lines off the Lightspeed work order. */
+export async function findingTakenOffAction(findingId: string, back: string) {
+  return run(safeReturn(back, "/app/workshop"), async () => {
+    const user = await requireActor("staff");
+    const showroom = await currentShowroom(user);
+    await markTakenOff(db, { findingId, showroomId: showroom.id, by: user.id });
+  });
 }

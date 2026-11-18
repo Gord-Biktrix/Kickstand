@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { Db } from "@/db/client";
 import { findingRequests, findings, lsWorkorders } from "@/db/schema";
-import { addFinding, answerFindings, changeToYes, closeUnanswered, deleteDraft, FindingError, loadJobFindings, NEEDS_OK_METRIC, requestByToken, sendFindings } from "@/lib/findings";
+import { addFinding, answerFindings, changeAnswer, closeUnanswered, deleteDraft, markTakenOff, FindingError, loadJobFindings, NEEDS_OK_METRIC, requestByToken, sendFindings } from "@/lib/findings";
 import { saveConnection, setLightspeedFetch } from "@/lib/lightspeed";
 import { MemoryNotifier, setNotifier } from "@/lib/notifier";
 import type { ShowroomCtx } from "@/lib/showroom";
@@ -100,20 +100,29 @@ describe("findings: extra work the customer approves", () => {
     expect((await db.select().from(findings).where(eq(findings.id, chain.id)))[0].decision).toBe("not_asked");
   });
 
-  it("a no can change to a yes once: the items go on the work order then; a yes or unanswered one isn't touched", async () => {
+  it("answers can change either way: no → yes adds the lines once; yes → no leaves them for staff to take off", async () => {
     const calls = fakeLightspeed();
     const rotor = await addFinding(db, { showroomId: van.id, workorderId: "10237", level: 3, why: "Rotor worn.", items: [ROTOR], photos: [], actor: STAFF });
     const chain = await addFinding(db, { showroomId: van.id, workorderId: "10237", level: 1, why: "Chain.", items: [CHAIN], photos: [], actor: STAFF });
     const sent = await sendFindings(db, { showroom: van, jobId: "w:10237", actor: STAFF, smsConsent: false });
     const req = await requestByToken(db, sent.url.split("/ok/")[1]);
     await answerFindings(db, { requestId: req!.request.id, decisions: { [rotor.id]: "declined" }, by: "customer" });
-    expect(calls.filter((c) => c.method === "POST")).toHaveLength(0);
-    expect(await changeToYes(db, { findingId: chain.id, workorderId: "10237", by: "customer" })).toEqual({ changed: false, lsFailed: false });
-    expect(await changeToYes(db, { findingId: rotor.id, workorderId: "other", by: "customer" })).toEqual({ changed: false, lsFailed: false });
-    expect(await changeToYes(db, { findingId: rotor.id, workorderId: "10237", by: "customer", employeeId: "57" })).toEqual({ changed: true, lsFailed: false });
-    expect(await changeToYes(db, { findingId: rotor.id, workorderId: "10237", by: "customer" })).toEqual({ changed: false, lsFailed: false });
-    expect(calls.filter((c) => c.method === "POST")).toEqual([expect.objectContaining({ body: expect.objectContaining({ itemID: 77 }) })]);
-    expect((await db.select().from(findings).where(eq(findings.id, rotor.id)))[0]).toMatchObject({ decision: "approved", lsAdded: true });
+    const posts = () => calls.filter((c) => c.method === "POST").length;
+    expect(posts()).toBe(0);
+    // Unanswered, another job's id, or already that answer: nothing changes.
+    expect((await changeAnswer(db, { findingId: chain.id, workorderId: "10237", to: "approved", by: "customer" })).changed).toBe(false);
+    expect((await changeAnswer(db, { findingId: rotor.id, workorderId: "other", to: "approved", by: "customer" })).changed).toBe(false);
+    expect((await changeAnswer(db, { findingId: rotor.id, workorderId: "10237", to: "declined", by: "customer" })).changed).toBe(false);
+
+    expect(await changeAnswer(db, { findingId: rotor.id, workorderId: "10237", to: "approved", by: "customer", employeeId: "57" })).toEqual({ changed: true, lsFailed: false, takeOff: false });
+    expect(posts()).toBe(1);
+    expect(await changeAnswer(db, { findingId: rotor.id, workorderId: "10237", to: "declined", by: "customer" })).toEqual({ changed: true, lsFailed: false, takeOff: true });
+    // Back to yes before staff took the lines off: they're still there, so nothing is added again.
+    await changeAnswer(db, { findingId: rotor.id, workorderId: "10237", to: "approved", by: "customer" });
+    expect(posts()).toBe(1);
+    await changeAnswer(db, { findingId: rotor.id, workorderId: "10237", to: "declined", by: "customer" });
+    await markTakenOff(db, { findingId: rotor.id, showroomId: van.id, by: STAFF });
+    expect((await db.select().from(findings).where(eq(findings.id, rotor.id)))[0]).toMatchObject({ decision: "declined", lsAdded: false });
   });
 
   it("with no phone or email the link is still made, to copy and send by hand", async () => {

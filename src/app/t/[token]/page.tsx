@@ -7,6 +7,7 @@ import { LevelMeter } from "@/components/level-meter";
 import type { Finding } from "@/db/schema";
 import { sp, type SearchParams } from "@/lib/flash";
 import { answerOnTrackerAction, changeMindAction } from "./actions";
+import { ChangeMind } from "./change-mind";
 import { loadJobLog } from "@/lib/job-log";
 import { currentStep, deriveTrack, repairDone, type JobStep } from "@/lib/job-track";
 import { getShowroomById } from "@/lib/showroom";
@@ -149,8 +150,9 @@ export default async function TrackerPage({ params, searchParams }: { params: Pr
           )}
 
           {answered.length > 0 && (
-            <section aria-label="Your answers" className="rounded-2xl bg-white p-4">
+            <section id="answers" aria-label="Your answers" className="scroll-mt-4 rounded-2xl bg-white p-4">
               <p className={label}>What we found · your answers</p>
+              {sp(q.changed) && <p className="mt-2 rounded-lg bg-[#015d47] px-3 py-2 text-sm font-semibold text-white">{sp(q.changed) === "yes" ? "Got it, we'll fix it." : "Got it, we'll leave it off."}</p>}
               {sp(q.error) === "ready" && <p className="mt-2 rounded-lg bg-[#fdecec] px-3 py-2 text-sm text-[#9f1d1d]">Your bike is already ready, so we can&apos;t add it now. Call the shop and we&apos;ll sort it out.</p>}
               <div className="mt-2 flex flex-col gap-2.5">
                 {answered.map((f) => <FindingCard key={f.id} f={f} token={token} canChange={step !== "pickup"} />)}
@@ -171,7 +173,7 @@ export default async function TrackerPage({ params, searchParams }: { params: Pr
               </ul>
               {lines.length > 0 && (
                 <p className="mt-2 flex justify-between border-t border-[#f1efeb] pt-2 font-extrabold">
-                  <span>So far</span>
+                  <span>Subtotal</span>
                   <span className="tabular-nums">{money(total)}</span>
                 </p>
               )}
@@ -226,11 +228,9 @@ function FindingCard({ f, token, canChange = false }: { f: Finding; token: strin
           {f.decision === "approved" ? "✓ You said yes · added to your repair" : "You said not this time"}
         </p>
       ) : null}
-      {f.decision === "declined" && canChange ? (
-        <form action={changeMindAction.bind(null, token, f.id)}>
-          <button type="submit" className="min-h-11 w-full rounded-xl border border-[#015d47] font-bold text-[#015d47]">Changed your mind? Fix it</button>
-        </form>
-      ) : null}
+      {canChange && (f.decision === "declined" || f.decision === "approved") && (
+        <ChangeMind action={changeMindAction.bind(null, token, f.id, f.decision === "declined" ? "approved" : "declined")} current={f.decision} price={money(findingPrice(f.items))} />
+      )}
       {!f.decision && (
       <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label={`${title}: yes or no`}>
         <label className="cursor-pointer">

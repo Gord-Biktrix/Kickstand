@@ -181,22 +181,32 @@ async function addToWorkorder(db: Db, client: LightspeedClient, f: Finding, empl
 }
 
 /**
- * "Changed your mind": a finding the customer said no to becomes a yes (from their tracker, or staff on their behalf),
- * and its items go on the work order. Only while the job isn't ready; a finding that isn't a no is left alone.
+ * "Changed your mind", either way, while the bike isn't ready (customer on their tracker, or staff for them).
+ * - No → yes: its items go on the work order (unless they're still there from an earlier yes).
+ * - Yes → no: the answer changes; the lines Kickstand added stay on the work order until staff take them off and
+ *   press "Taken off" (ls_added true on a "no" = still to take off).
  */
-export async function changeToYes(
+export async function changeAnswer(
   db: Db,
-  args: { findingId: string; workorderId: string; by: string; employeeId?: string | null; client?: LightspeedClient; now?: Date },
-): Promise<{ changed: boolean; lsFailed: boolean }> {
+  args: { findingId: string; workorderId: string; to: "approved" | "declined"; by: string; employeeId?: string | null; client?: LightspeedClient; now?: Date },
+): Promise<{ changed: boolean; lsFailed: boolean; takeOff: boolean }> {
+  const from = args.to === "approved" ? "declined" : "approved";
   const [f] = await db
     .update(findings)
-    .set({ decision: "approved", decidedAt: args.now ?? new Date(), decidedBy: args.by })
-    .where(and(eq(findings.id, args.findingId), eq(findings.workorderId, args.workorderId), eq(findings.decision, "declined")))
+    .set({ decision: args.to, decidedAt: args.now ?? new Date(), decidedBy: args.by })
+    .where(and(eq(findings.id, args.findingId), eq(findings.workorderId, args.workorderId), eq(findings.decision, from)))
     .returning();
-  if (!f) return { changed: false, lsFailed: false };
-  const ok = await addToWorkorder(db, args.client ?? new LightspeedClient(db), f, args.employeeId ?? null);
-  await db.insert(events).values({ showroomId: f.showroomId, type: "finding_changed_to_yes", actor: args.by, payload: { workorder_id: f.workorderId, finding_id: f.id, ls_failed: !ok } });
-  return { changed: true, lsFailed: !ok };
+  if (!f) return { changed: false, lsFailed: false, takeOff: false };
+  let ok = true;
+  if (args.to === "approved" && !f.lsAdded) ok = await addToWorkorder(db, args.client ?? new LightspeedClient(db), f, args.employeeId ?? null);
+  await db.insert(events).values({ showroomId: f.showroomId, type: "finding_answer_changed", actor: args.by, payload: { workorder_id: f.workorderId, finding_id: f.id, to: args.to, ls_failed: !ok } });
+  return { changed: true, lsFailed: !ok, takeOff: args.to === "declined" && f.lsAdded };
+}
+
+/** Staff took a changed-to-no finding's lines off the Lightspeed work order. */
+export async function markTakenOff(db: Db, args: { findingId: string; showroomId: string; by: string }): Promise<void> {
+  const [f] = await db.update(findings).set({ lsAdded: false }).where(and(eq(findings.id, args.findingId), eq(findings.showroomId, args.showroomId), eq(findings.decision, "declined"))).returning();
+  if (f) await db.insert(events).values({ showroomId: f.showroomId, type: "finding_taken_off", actor: args.by, payload: { workorder_id: f.workorderId, finding_id: f.id } });
 }
 
 /** At Mark ready: anything still unanswered is handed over without it. */
