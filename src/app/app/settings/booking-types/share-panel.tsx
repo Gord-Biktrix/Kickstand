@@ -11,16 +11,21 @@ const HEX = /^#[0-9a-f]{6}$/i;
  * preview. `t` null = the store's whole list. Options are a GET form so the code updates without JavaScript.
  */
 export function SharePanel({
-  t, storeSlug, storeName, root, close, how, text, color, textColor,
-}: { t: BookingType | null; storeSlug: string; storeName: string; root: string; close: string; how: EmbedHow; text?: string; color?: string; textColor?: string }) {
-  const name = t?.name ?? `${storeName} booking page`;
+  t, storeSlug: ownSlug, storeName, root, close, how, text, color, textColor, scope,
+}: { t: BookingType | null; storeSlug: string; storeName: string; root: string; close: string; how: EmbedHow; text?: string; color?: string; textColor?: string; scope?: string }) {
+  // A type in the all-showrooms directory can be shared as this store's page or as the directory (/book/all/<slug>).
+  const directory = !!t?.inDirectory;
+  const all = directory && scope === "all";
+  const storeSlug = all ? "all" : ownSlug;
+  const name = t ? (all ? `${t.name} · all showrooms` : t.name) : `${storeName} booking page`;
   const link = `${root}/book/${storeSlug}${t ? `/${t.slug}` : ""}`;
   const label = (text ?? "").trim().slice(0, 60) || (t ? `Book a ${t.name.toLowerCase()}` : "Book an appointment");
   const bg = color && HEX.test(color) ? color : t ? colorOf(t.color).hex : "#ff6b1a";
   const fg = textColor && HEX.test(textColor) ? textColor : "#ffffff";
   const code = embedSnippet({ root, store: storeSlug, type: t?.slug ?? null, how, text: label, color: bg, textColor: fg });
   const shareId = t?.id ?? "all";
-  const tab = (h: EmbedHow) => `${close}?share=${shareId}&how=${h}`;
+  const scopeQ = all ? "&scope=all" : "";
+  const tab = (h: EmbedHow) => `${close}?share=${shareId}&how=${h}${scopeQ}`;
   const info = EMBED_HOWS.find((h) => h.key === how)!;
 
   return (
@@ -34,6 +39,15 @@ export function SharePanel({
           </div>
           <Link href={close} className="btn btn-sm" aria-label="Close">✕</Link>
         </header>
+
+        {directory && (
+          <nav aria-label="Which page" className="mx-5 mt-4 flex gap-1 rounded-lg bg-background p-1 text-sm">
+            {[{ key: "store", label: storeName, href: `${close}?share=${shareId}&how=${how}` }, { key: "all", label: "All showrooms", href: `${close}?share=${shareId}&how=${how}&scope=all` }].map((o) => {
+              const on = (o.key === "all") === all;
+              return <Link key={o.key} href={o.href} aria-current={on ? "page" : undefined} className={`flex-1 rounded-md px-3 py-2 text-center ${on ? "bg-card font-semibold shadow-sm" : "text-muted hover:text-foreground"}`}>{o.label}</Link>;
+            })}
+          </nav>
+        )}
 
         <section className="space-y-2 border-b border-border px-5 py-4">
           <h3 className="text-sm font-semibold">Link</h3>
@@ -59,6 +73,7 @@ export function SharePanel({
             <form method="get" action={close} className="grid gap-3 rounded-lg border border-border p-3 sm:grid-cols-[1fr_auto_auto_auto] sm:items-end">
               <input type="hidden" name="share" value={shareId} />
               <input type="hidden" name="how" value={how} />
+              {all && <input type="hidden" name="scope" value="all" />}
               <label className="text-sm">
                 <span className="mb-1 block font-medium">{how === "button" ? "Button text" : "Link text"}</span>
                 <input name="text" defaultValue={label} maxLength={60} className="input" />

@@ -1373,6 +1373,7 @@ function bookingTypeFromForm(formData: FormData, profileKind: string, current?: 
     useStoreHours,
     color: str(formData, "color") || "orange",
     createsWorkOrder: bool(formData, "creates_work_order"),
+    inDirectory: bool(formData, "in_directory"),
     ...(formData.has("questions") ? { questions: validateQuestions(parseJson(str(formData, "questions"))) } : {}),
     ...(formData.has("hosts_shown") ? { hostIds: formData.getAll("host_ids").map(String) } : {}),
   }, profileKind);

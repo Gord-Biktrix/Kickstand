@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { boolean, check, date, index, integer, jsonb, numeric, pgTable, primaryKey, smallint, text, time, timestamp, unique, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { boolean, check, date, doublePrecision, index, integer, jsonb, numeric, pgTable, primaryKey, smallint, text, time, timestamp, unique, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 
 const id = () => uuid("id").primaryKey().defaultRandom();
 const timestamps = {
@@ -26,6 +26,9 @@ export const showrooms = pgTable("showrooms", {
   timezone: text("timezone").notNull(),
   addressLine: text("address_line").notNull(),
   phone: text("phone"),
+  /** Rough position (the store's city is enough), to put the closest showroom first in the all-showrooms directory. */
+  lat: doublePrecision("lat"),
+  lng: doublePrecision("lng"),
   settings: jsonb("settings").$type<Record<string, unknown>>().notNull().default({}),
   ...timestamps,
 }, (t) => [check("showrooms_kind_check", sql`${t.kind} in ('showroom','online')`)]);
@@ -414,6 +417,8 @@ export const bookingTypes = pgTable(
     /** Colour key (see BOOKING_COLORS) for the type's row, the booking page and calendar blocks. */
     color: text("color").notNull().default("orange"),
     createsWorkOrder: boolean("creates_work_order").notNull().default(false),
+    /** Listed in the all-showrooms directory (/book/all/<slug>), which gathers every store's type with this slug. */
+    inDirectory: boolean("in_directory").notNull().default(false),
     /** Questions on the booking form (src/lib/booking-questions.ts). */
     questions: jsonb("questions").notNull().default([]),
     /** Staff shown with their photos on the booking page ("You'll talk to…"), in this order. */

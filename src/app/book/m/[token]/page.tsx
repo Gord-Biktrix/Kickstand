@@ -28,7 +28,9 @@ export default async function ManageBookingPage({ params, searchParams }: { para
     return <div className="mx-auto max-w-md"><Card title="Link not found"><p className="text-sm">This booking link isn&apos;t valid. Check the link in your confirmation, or book again.</p></Card></div>;
   }
   const { booking, type, showroom } = view;
-  const tz = viewZone(sp(q.tz), showroom.timezone);
+  // In person: the store's own time (that's where they'll be); calls: the customer's zone.
+  const inPerson = type.location === "in_person";
+  const tz = inPerson ? showroom.timezone : viewZone(sp(q.tz), showroom.timezone);
   const tzq = tz === showroom.timezone ? "" : `?tz=${encodeURIComponent(tz)}`;
   const active = booking.status === "booked" && booking.startsAt > new Date();
   const ok = sp(q.ok);
@@ -45,7 +47,7 @@ export default async function ManageBookingPage({ params, searchParams }: { para
     const remote = type.location === "phone" || type.location === "video";
     return (
       <div className="mx-auto max-w-3xl space-y-4">
-        <ZoneAuto storeTz={showroom.timezone} />
+        {!inPerson && <ZoneAuto storeTz={showroom.timezone} />}
         <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
           <RideBanner accent={accent} />
           <div className={`grid gap-8 p-6 sm:p-8 ${remote ? "md:grid-cols-[minmax(0,1fr)_300px]" : ""}`}>
@@ -85,7 +87,7 @@ export default async function ManageBookingPage({ params, searchParams }: { para
 
   return (
     <div className="mx-auto max-w-md space-y-4">
-      <ZoneAuto storeTz={showroom.timezone} />
+      {!inPerson && <ZoneAuto storeTz={showroom.timezone} />}
       {ok && OK[ok] && <Alert tone="ok">{OK[ok]}</Alert>}
       {error && <Alert tone="danger">{error}</Alert>}
       <Card

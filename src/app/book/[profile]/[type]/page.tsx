@@ -17,6 +17,16 @@ import { ZonePicker } from "@/components/zone-picker";
 import { daysInZone, viewZone } from "@/lib/view-tz";
 import { QuestionFields } from "@/components/question-fields";
 import { readQuestions } from "@/lib/booking-questions";
+import { cityOf } from "@/lib/directory";
+
+/** The prefill (name, email, phone) to carry back to the directory, without the directory flag itself. */
+function prefillQueryWithout(query: string): string {
+  const p = new URLSearchParams(query);
+  p.delete("dir");
+  p.delete("tz");
+  const s = p.toString();
+  return s ? `?${s}` : "";
+}
 
 export const metadata = { title: "Pick a time" };
 
@@ -29,8 +39,10 @@ export default async function BookTypePage({ params, searchParams }: { params: P
   const [type] = await db.select().from(bookingTypes).where(and(eq(bookingTypes.showroomId, showroom.id), eq(bookingTypes.slug, typeSlug)));
   if (!type || type.kind !== "standard" || type.access !== "public" || !type.active) notFound();
   const storeTz = showroom.timezone;
-  // Times in the customer's own zone (?tz=, filled in from their browser by the zone picker).
-  const tz = viewZone(sp(q.tz), storeTz);
+  // In person: always the store's own time, since that's where they'll be. Calls: the customer's own zone (?tz=,
+  // filled in from their browser by the zone picker).
+  const inPerson = type.location === "in_person";
+  const tz = inPerson ? storeTz : viewZone(sp(q.tz), storeTz);
   const days = daysInZone(await getTypeAvailability(db, { showroom, type }), storeTz, tz);
   const date = sp(q.date);
   const time = sp(q.time);
@@ -38,7 +50,9 @@ export default async function BookTypePage({ params, searchParams }: { params: P
   const slot = date && time ? days.find((d) => d.date === date)?.slots.find((s) => s.time === time) : undefined;
   // Details passed in by a share link or the website embed (data-name / data-email / data-phone) fill the form.
   const prefill = { name: sp(q.name)?.slice(0, 200), email: sp(q.email)?.slice(0, 200), phone: sp(q.phone)?.slice(0, 40), tz: tz === storeTz ? undefined : tz };
-  const prefillQuery = new URLSearchParams(Object.entries(prefill).filter((e): e is [string, string] => !!e[1])).toString();
+  // Came from the all-showrooms directory: keep "← All showrooms" on every step.
+  const fromDirectory = sp(q.dir) === "1" && type.inDirectory;
+  const prefillQuery = new URLSearchParams(Object.entries({ ...prefill, dir: fromDirectory ? "1" : undefined }).filter((e): e is [string, string] => !!e[1])).toString();
   const base = `/book/${showroom.slug}/${type.slug}${prefillQuery ? `?${prefillQuery}` : ""}`;
   const join = prefillQuery ? "&" : "?";
   const error = sp(q.error);
@@ -59,7 +73,11 @@ export default async function BookTypePage({ params, searchParams }: { params: P
 
   return (
     <div className="space-y-4">
-      <Link href={`/book/${showroom.slug}`} className="all-types-link text-sm text-accent underline">← All appointment types</Link>
+      {fromDirectory ? (
+        <Link href={`/book/all/${type.slug}${prefillQueryWithout(prefillQuery)}`} className="text-sm text-accent underline">← All showrooms</Link>
+      ) : (
+        <Link href={`/book/${showroom.slug}`} className="all-types-link text-sm text-accent underline">← All appointment types</Link>
+      )}
       {error && <Alert tone="danger">{error}</Alert>}
       {date && time && !slot && <Alert tone="danger">That time was just taken or is no longer open. Please pick another.</Alert>}
       {slot && sp(q.confirm) === "1" ? (
@@ -69,7 +87,7 @@ export default async function BookTypePage({ params, searchParams }: { params: P
           <div className="grid @3xl:min-h-[540px] @3xl:grid-cols-[minmax(240px,300px)_minmax(0,1fr)]">
           <div className="border-b border-border p-6 @3xl:border-b-0 @3xl:border-r">
             {info}
-            <p className="mt-3 text-xs text-muted">{zoneLabel(tz)}</p>
+            <p className="mt-3 text-xs text-muted">{inPerson ? `${cityOf(showroom.name)} time (${zoneLabel(storeTz)})` : zoneLabel(tz)}</p>
           </div>
           <div className="p-6">
             <Link href={`${base}${join}month=${date!.slice(0, 7)}&date=${date}&time=${time}`} className="text-sm text-accent underline">← Back</Link>
@@ -96,7 +114,7 @@ export default async function BookTypePage({ params, searchParams }: { params: P
           </div>
         </div>
       ) : (
-        <BookingCalendar days={days} tz={tz} base={base} month={month} date={date} time={time} accent={accent} info={info} zone={<ZonePicker current={tz} storeTz={storeTz} />} />
+        <BookingCalendar days={days} tz={tz} base={base} month={month} date={date} time={time} accent={accent} info={info} zone={inPerson ? `${cityOf(showroom.name)} time (${zoneLabel(storeTz)})` : <ZonePicker current={tz} storeTz={storeTz} />} />
       )}
     </div>
   );

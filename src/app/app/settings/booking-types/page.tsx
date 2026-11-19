@@ -94,7 +94,7 @@ export default async function BookingTypesPage({ searchParams }: { searchParams:
       <p className="mt-3 text-xs text-muted">Store availability: {hoursSummary(storeHours)} · <Link href="/app/settings/availability" className="underline">change</Link></p>
 
       {sharing !== undefined && (
-        <SharePanel t={sharing} storeSlug={showroom.slug} storeName={showroom.name} root={root} close={close} how={how} text={sp(q.text)} color={sp(q.color)} textColor={sp(q.text_color)} />
+        <SharePanel t={sharing} storeSlug={showroom.slug} storeName={showroom.name} root={root} close={close} how={how} text={sp(q.text)} color={sp(q.color)} textColor={sp(q.text_color)} scope={sp(q.scope)} />
       )}
       {(editing || creating) && (
         <EditorPanel t={editing} online={online} storeHours={storeHours} profileSlug={showroom.slug} close={close} people={people} />
@@ -115,7 +115,7 @@ function TypeRow({ t, profileSlug, root, storeHours, selected }: { t: BookingTyp
       <span aria-hidden="true" className="h-10 w-1.5 shrink-0 rounded-full" style={{ background: colorOf(t.color).hex }} />
       <div className="min-w-0 flex-1">
         <p className="font-semibold">{t.name}{!t.active && <span className="ml-2"><Badge>off</Badge></span>}</p>
-        <p className="truncate text-sm text-muted">{meta}{t.createsWorkOrder ? " · creates a Lightspeed work order" : ""}</p>
+        <p className="truncate text-sm text-muted">{meta}{t.createsWorkOrder ? " · creates a Lightspeed work order" : ""}{t.inDirectory && t.access === "public" ? " · in the all-showrooms directory" : ""}</p>
       </div>
       <div className="flex flex-wrap items-center gap-2">
         {linkable && t.active && <Link href={`/app/settings/booking-types?share=${t.id}`} className="btn btn-sm">Share</Link>}
@@ -252,6 +252,17 @@ function EditorPanel({ t, online, storeHours, profileSlug, close, people }: { t?
                     ))}
                   </ul>
                 )}
+              </fieldset>
+
+              <fieldset>
+                <legend className="mb-1 font-semibold">All-showrooms directory</legend>
+                <label className="flex items-start gap-2 text-sm">
+                  <input type="checkbox" name="in_directory" defaultChecked={t?.inDirectory ?? false} className="mt-0.5 h-4 w-4" />
+                  <span>
+                    List in the all-showrooms directory
+                    {t && <span className="block text-xs text-muted">/book/all/{t.slug}</span>}
+                  </span>
+                </label>
               </fieldset>
 
               <details className="rounded-lg border border-border p-3">

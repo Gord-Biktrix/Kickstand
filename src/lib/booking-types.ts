@@ -186,6 +186,8 @@ export type BookingTypeInput = {
   benchCapacity: number;
   hours: WeeklyHours;
   createsWorkOrder: boolean;
+  /** Listed in the all-showrooms directory (/book/all/<slug>). */
+  inDirectory?: boolean;
   /** Follow the profile's availability instead of `hours`. */
   useStoreHours?: boolean;
   color?: string;

@@ -13,6 +13,7 @@ import { rescheduleTypeAction } from "../../../actions";
 import { zoneLabel } from "../../../zone";
 import { ZonePicker } from "@/components/zone-picker";
 import { daysInZone, viewZone } from "@/lib/view-tz";
+import { cityOf } from "@/lib/directory";
 
 export const metadata = { title: "Change time" };
 
@@ -23,7 +24,8 @@ export default async function RescheduleBookingPage({ params, searchParams }: { 
   if (!view || view.booking.status !== "booked" || view.booking.startsAt <= new Date()) redirect(`/book/m/${token}`);
   const { booking, type, showroom } = view;
   const storeTz = showroom.timezone;
-  const tz = viewZone(sp(q.tz), storeTz);
+  const inPerson = type.location === "in_person";
+  const tz = inPerson ? storeTz : viewZone(sp(q.tz), storeTz);
   // The customer's own booking doesn't block the times around it.
   const days = daysInZone(await getTypeAvailability(db, { showroom, type, exceptBookingId: booking.id }), storeTz, tz);
   const date = sp(q.date);
@@ -62,7 +64,7 @@ export default async function RescheduleBookingPage({ params, searchParams }: { 
           </Card>
         </div>
       ) : (
-        <BookingCalendar days={days} tz={tz} base={base} month={sp(q.month)} date={date} time={time} accent={accent} info={info} zone={<ZonePicker current={tz} storeTz={storeTz} />} />
+        <BookingCalendar days={days} tz={tz} base={base} month={sp(q.month)} date={date} time={time} accent={accent} info={info} zone={inPerson ? `${cityOf(showroom.name)} time (${zoneLabel(storeTz)})` : <ZonePicker current={tz} storeTz={storeTz} />} />
       )}
     </div>
   );
