@@ -373,7 +373,11 @@ export async function ensureDefaultBookingTypes(dbx: DbOrTx, showroom: { id: str
  * rename carries over. Runs when the type is in the directory or was until now (unticking reaches every copy).
  * Returns the stores it couldn't give the new name to (another of their types already uses it).
  */
-export async function syncDirectoryCopies(dbx: DbOrTx, sourceId: string, previousSlug: string): Promise<string[]> {
+/**
+ * `only`: the showrooms ticked under the directory switch. Others keep their copy (shared fields still synced) but
+ * out of the directory, and get no new copy. Omitted = every showroom.
+ */
+export async function syncDirectoryCopies(dbx: DbOrTx, sourceId: string, previousSlug: string, only?: string[]): Promise<string[]> {
   const [src] = await dbx.select().from(bookingTypes).where(eq(bookingTypes.id, sourceId));
   if (!src || src.kind !== "standard") return [];
   const stores = await dbx.select({ id: showrooms.id, name: showrooms.name }).from(showrooms).where(eq(showrooms.kind, "showroom"));
@@ -399,9 +403,10 @@ export async function syncDirectoryCopies(dbx: DbOrTx, sourceId: string, previou
     const copy = theirs.find((t) => t.kind === "standard" && (t.slug === previousSlug || t.slug === src.slug));
     const clash = theirs.find((t) => t.slug === src.slug && t.id !== copy?.id);
     if (clash) { skipped.push(store.name); continue; }
+    const picked = !only || only.includes(store.id);
     if (copy) {
-      await dbx.update(bookingTypes).set(shared).where(eq(bookingTypes.id, copy.id));
-    } else if (src.inDirectory) {
+      await dbx.update(bookingTypes).set({ ...shared, inDirectory: shared.inDirectory && picked }).where(eq(bookingTypes.id, copy.id));
+    } else if (src.inDirectory && picked) {
       await dbx.insert(bookingTypes).values({
         ...shared,
         showroomId: store.id,
@@ -417,4 +422,13 @@ export async function syncDirectoryCopies(dbx: DbOrTx, sourceId: string, previou
     }
   }
   return skipped;
+}
+
+/** Showroom ids whose copy of this type is in the directory (for ticking the editor's checklist). */
+export async function directoryStoreIds(dbx: DbOrTx, slug: string): Promise<string[]> {
+  const rows = await dbx
+    .select({ id: bookingTypes.showroomId })
+    .from(bookingTypes)
+    .where(and(eq(bookingTypes.slug, slug), eq(bookingTypes.kind, "standard"), eq(bookingTypes.inDirectory, true)));
+  return rows.map((r) => r.id);
 }

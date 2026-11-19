@@ -11,6 +11,7 @@ import {
   ACCESS_LABEL,
   BOOKING_COLORS,
   CAPACITY_LABEL,
+  directoryStoreIds,
   colorOf,
   DURATION_CHOICES,
   effectiveHours,
@@ -30,7 +31,8 @@ import { baseUrl } from "@/lib/messages";
 import { EMBED_HOWS, type EmbedHow } from "@/lib/embed-script";
 import { SharePanel } from "./share-panel";
 import { and, eq, isNull, or, sql } from "drizzle-orm";
-import { staffUsers } from "@/db/schema";
+import { showrooms, staffUsers } from "@/db/schema";
+import { cityOf } from "@/lib/directory";
 import { Avatar } from "@/components/avatar";
 import { photoUrls } from "@/lib/staff-photos";
 import { createBookingTypeAction, setBookingTypeActiveAction, updateBookingTypeAction } from "../../actions";
@@ -64,6 +66,14 @@ export default async function BookingTypesPage({ searchParams }: { searchParams:
     : [];
   const teamPhotos = await photoUrls(db, team.map((p) => p.id));
   const people = team.map((p) => ({ ...p, photo: teamPhotos.get(p.id) ?? null }));
+  // The directory checklist: every other showroom, ticked where this type is listed (all of them for a new listing).
+  const dirStores = (editing || creating) && !online
+    ? await (async () => {
+        const all = (await db.select({ id: showrooms.id, name: showrooms.name }).from(showrooms).where(eq(showrooms.kind, "showroom")).orderBy(showrooms.name)).filter((s) => s.id !== showroom.id);
+        const listed = editing?.inDirectory ? new Set(await directoryStoreIds(db, editing.slug)) : null;
+        return all.map((s) => ({ ...s, on: listed ? listed.has(s.id) : true }));
+      })()
+    : [];
 
   return (
     <div>
@@ -97,7 +107,7 @@ export default async function BookingTypesPage({ searchParams }: { searchParams:
         <SharePanel t={sharing} storeSlug={showroom.slug} storeName={showroom.name} root={root} close={close} how={how} text={sp(q.text)} color={sp(q.color)} textColor={sp(q.text_color)} scope={sp(q.scope)} />
       )}
       {(editing || creating) && (
-        <EditorPanel t={editing} online={online} storeHours={storeHours} profileSlug={showroom.slug} close={close} people={people} />
+        <EditorPanel t={editing} online={online} storeHours={storeHours} profileSlug={showroom.slug} close={close} people={people} dirStores={dirStores} storeName={showroom.name} />
       )}
     </div>
   );
@@ -132,7 +142,7 @@ function TypeRow({ t, profileSlug, root, storeHours, selected }: { t: BookingTyp
 }
 
 /** The Calendly-style side panel: name and colour, duration, location, availability; the rest under More options. */
-function EditorPanel({ t, online, storeHours, profileSlug, close, people }: { t?: BookingType; online: boolean; storeHours: WeeklyHours; profileSlug: string; close: string; people: { id: string; name: string; photo: string | null }[] }) {
+function EditorPanel({ t, online, storeHours, profileSlug, close, people, dirStores, storeName }: { t?: BookingType; online: boolean; storeHours: WeeklyHours; profileSlug: string; close: string; people: { id: string; name: string; photo: string | null }[]; dirStores: { id: string; name: string; on: boolean }[]; storeName: string }) {
   const pickup = t?.kind === "pickup";
   const locations: BookingLocation[] = online ? ["video", "phone"] : ["in_person", "video", "phone"];
   const duration = t?.durationMin ?? NEW_TYPE_DEFAULTS.durationMin;
@@ -254,15 +264,37 @@ function EditorPanel({ t, online, storeHours, profileSlug, close, people }: { t?
                 )}
               </fieldset>
 
-              {!online && <fieldset>
+              {!online && <fieldset className="group">
                 <legend className="mb-1 font-semibold">All-showrooms directory</legend>
                 <label className="flex items-start gap-2 text-sm">
-                  <input type="checkbox" name="in_directory" defaultChecked={t?.inDirectory ?? false} className="mt-0.5 h-4 w-4" />
+                  <input id="eddir" type="checkbox" name="in_directory" defaultChecked={t?.inDirectory ?? false} className="mt-0.5 h-4 w-4" />
                   <span>
                     List in the all-showrooms directory
-                    <span className="block text-xs text-muted">Offered at every showroom{t ? ` · /book/all/${t.slug}` : ""}</span>
+                    {t && <span className="block text-xs text-muted">/book/all/{t.slug}</span>}
                   </span>
                 </label>
+                {dirStores.length > 0 && (
+                  <div className="ml-6 mt-2 hidden group-has-[#eddir:checked]:block">
+                    <input type="hidden" name="dir_stores_shown" value="1" />
+                    <p className="text-xs font-medium text-muted">Showrooms</p>
+                    <ul className="mt-1 grid grid-cols-2 gap-x-3">
+                      <li>
+                        <label className="flex items-center gap-2 py-0.5 text-sm text-muted">
+                          <input type="checkbox" checked disabled className="h-4 w-4" />
+                          {cityOf(storeName)}
+                        </label>
+                      </li>
+                      {dirStores.map((s) => (
+                        <li key={s.id}>
+                          <label className="flex items-center gap-2 py-0.5 text-sm">
+                            <input type="checkbox" name="dir_store" value={s.id} defaultChecked={s.on} className="h-4 w-4" />
+                            {cityOf(s.name)}
+                          </label>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
               </fieldset>}
 
               <details className="rounded-lg border border-border p-3">

@@ -2,7 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { bookingTypes, showrooms } from "@/db/schema";
-import { defaultTypes, syncDirectoryCopies, updateBookingType, validateBookingType } from "@/lib/booking-types";
+import { defaultTypes, directoryStoreIds, syncDirectoryCopies, updateBookingType, validateBookingType } from "@/lib/booking-types";
 import { cityOf, loadDirectory, openLine, orderStores, visitorPosition } from "@/lib/directory";
 import { resetDb, testDb } from "./helpers";
 
@@ -91,6 +91,16 @@ describe("all-showrooms directory", () => {
       await syncDirectoryCopies(db, src.id, "showroom-visit");
       expect((await db.select().from(bookingTypes).where(eq(bookingTypes.id, calCopy.id)))[0].inDirectory).toBe(false);
       expect(validateBookingType({ ...rest, location: "video", inDirectory: true }, "online").inDirectory).toBe(false);
+
+      // Ticked at some showrooms only: Calgary unticked keeps its copy but leaves the directory; Edmonton gets none.
+      const [edm] = await db.insert(showrooms).values({ slug: "edmonton", name: "Biktrix Edmonton", timezone: "America/Edmonton", addressLine: "" }).returning();
+      await updateBookingType(db, van.id, src.id, validateBookingType({ ...rest, name: "Showroom visit", durationMin: 45, inDirectory: true }, "showroom"));
+      await syncDirectoryCopies(db, src.id, "showroom-visit", [cal.id]);
+      expect((await db.select().from(bookingTypes).where(eq(bookingTypes.id, calCopy.id)))[0].inDirectory).toBe(true);
+      await syncDirectoryCopies(db, src.id, "showroom-visit", []);
+      expect((await db.select().from(bookingTypes).where(eq(bookingTypes.id, calCopy.id)))[0]).toMatchObject({ inDirectory: false, durationMin: 45 });
+      expect((await db.select().from(bookingTypes).where(eq(bookingTypes.showroomId, edm.id))).some((t) => t.slug === "showroom-visit")).toBe(false);
+      expect(await directoryStoreIds(db, "showroom-visit")).toEqual([van.id]);
     });
   });
 });

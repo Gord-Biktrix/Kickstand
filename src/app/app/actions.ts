@@ -1379,13 +1379,18 @@ function bookingTypeFromForm(formData: FormData, profileKind: string, current?: 
   }, profileKind);
 }
 
+/** The other showrooms ticked under the directory switch; undefined when the checklist wasn't on the form. */
+function directoryPick(formData: FormData): string[] | undefined {
+  return formData.has("dir_stores_shown") ? formData.getAll("dir_store").map(String) : undefined;
+}
+
 export async function createBookingTypeAction(formData: FormData) {
   let target: string;
   try {
     const user = await requireActor("manager");
     const showroom = await currentShowroom(user);
     const t = await createBookingType(db, showroom.id, bookingTypeFromForm(formData, showroom.kind));
-    if (t.inDirectory) await syncDirectoryCopies(db, t.id, t.slug);
+    if (t.inDirectory) await syncDirectoryCopies(db, t.id, t.slug, directoryPick(formData));
     await logEvent(db, { showroomId: showroom.id, type: "booking_type_created", actor: user.id, payload: { booking_type_id: t.id, name: t.name } });
     target = withFlash(`${BT_PATH}?edit=${t.id}`, { ok: `${t.name} created.` });
   } catch (err) {
@@ -1399,6 +1404,7 @@ export async function updateBookingTypeAction(id: string, formData: FormData) {
   let target: string;
   let skipped: string[] = [];
   let listed = false;
+  let listedAt = 0;
   try {
     const user = await requireActor("manager");
     const showroom = await currentShowroom(user);
@@ -1408,11 +1414,13 @@ export async function updateBookingTypeAction(id: string, formData: FormData) {
       const current = await getBookingType(db, showroom.id, id);
       const input = bookingTypeFromForm(formData, showroom.kind, current);
       await updateBookingType(db, showroom.id, id, input);
-      if (input.inDirectory || current.inDirectory) skipped = await syncDirectoryCopies(db, id, current.slug);
+      const pick = directoryPick(formData);
+      if (input.inDirectory || current.inDirectory) skipped = await syncDirectoryCopies(db, id, current.slug, pick);
       listed = !!input.inDirectory;
+      if (listed && pick) listedAt = pick.length + 1;
     }
     await logEvent(db, { showroomId: showroom.id, type: "booking_type_updated", actor: user.id, payload: { booking_type_id: id, name: str(formData, "name") } });
-    target = withFlash(`${BT_PATH}?edit=${id}`, { ok: listed ? "Saved at every showroom." : "Saved.", ...(skipped.length ? { error: `Not changed at ${skipped.join(", ")}: another of their booking types already has this name.` } : {}) });
+    target = withFlash(`${BT_PATH}?edit=${id}`, { ok: listed ? (listedAt ? `Saved · in the directory at ${listedAt} showroom${listedAt === 1 ? "" : "s"}.` : "Saved at every showroom.") : "Saved.", ...(skipped.length ? { error: `Not changed at ${skipped.join(", ")}: another of their booking types already has this name.` } : {}) });
   } catch (err) {
     target = withFlash(`${BT_PATH}?edit=${id}`, { error: errorMessage(err) });
   }
