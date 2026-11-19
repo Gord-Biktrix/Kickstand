@@ -101,6 +101,13 @@ describe("all-showrooms directory", () => {
       expect((await db.select().from(bookingTypes).where(eq(bookingTypes.id, calCopy.id)))[0]).toMatchObject({ inDirectory: false, durationMin: 45 });
       expect((await db.select().from(bookingTypes).where(eq(bookingTypes.showroomId, edm.id))).some((t) => t.slug === "showroom-visit")).toBe(false);
       expect(await directoryStoreIds(db, "showroom-visit")).toEqual([van.id]);
+
+      // Switch on but the editing store unticked: its own type is out, Calgary's copy is in.
+      await db.update(bookingTypes).set({ inDirectory: false }).where(eq(bookingTypes.id, src.id));
+      await syncDirectoryCopies(db, src.id, "showroom-visit", [cal.id], true);
+      expect(await directoryStoreIds(db, "showroom-visit")).toEqual([cal.id]);
+      await syncDirectoryCopies(db, src.id, "showroom-visit", [cal.id, edm.id], true);
+      expect((await directoryStoreIds(db, "showroom-visit")).sort()).toEqual([cal.id, edm.id].sort()); // a new copy is listed too
     });
   });
 });

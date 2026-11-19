@@ -6,7 +6,7 @@ import { removeGoogleConnection } from "@/lib/google-connection";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { db } from "@/db/client";
-import { appointments, capacityOverrides, capacityRules, findings as findingsTable, lsEmployees, lsWorkorders, lsWorkorderStatuses, orders, staffSessions, staffUsers, units } from "@/db/schema";
+import { appointments, capacityOverrides, capacityRules, findings as findingsTable, lsEmployees, lsWorkorders, lsWorkorderStatuses, orders, staffSessions, staffUsers, units, type BookingType } from "@/db/schema";
 import { assignableRoles, canManage, clearPassword, deleteStaff, hasRole, inviteStaff, isRole, requireActor, roleLabel, SESSION_COOKIE, setPassword, setStaffActive, signOut, updateStaff } from "@/lib/auth";
 import { BOOKING_ERROR_TEXT, BookingError, bookGroup, cancelBooking, recordNoShow, rescheduleBooking } from "@/lib/booking";
 import { validateImport } from "@/lib/csv";
@@ -25,7 +25,7 @@ import { attachUnit, bookableCompanions, bookableSiblings, linkOrdersForPickup, 
 import { currentShowroom } from "@/lib/current-showroom";
 import { createShowroom, importShowroomsFromLightspeed, isProfileKind, setLightspeedLink, updateShowroomDetails } from "@/lib/showroom-admin";
 import { cancelTypeBooking, createTypeBooking, getBookingDetail, rescheduleTypeBooking, resendBookingConfirmation, setBookingOutcome, syncBookingWorkorder } from "@/lib/type-bookings";
-import { createBookingType, getBookingType, hoursFromForm, NEW_TYPE_DEFAULTS, setBookingTypeActive, setStoreHours, syncDirectoryCopies, updateBookingType, updatePickupType, validateBookingType, type BookingTypeInput, listBookingTypes } from "@/lib/booking-types";
+import { createBookingType, getBookingType, hoursFromForm, NEW_TYPE_DEFAULTS, setBookingTypeActive, setStoreHours, directoryStoreIds, syncDirectoryCopies, updateBookingType, updatePickupType, validateBookingType, type BookingTypeInput, listBookingTypes } from "@/lib/booking-types";
 import { LightspeedClient, lightspeedEnabled } from "@/lib/lightspeed";
 import { googleEnabled } from "@/lib/google-auth";
 import { mailerKind } from "@/lib/mailer";
@@ -1379,9 +1379,31 @@ function bookingTypeFromForm(formData: FormData, profileKind: string, current?: 
   }, profileKind);
 }
 
-/** The other showrooms ticked under the directory switch; undefined when the checklist wasn't on the form. */
-function directoryPick(formData: FormData): string[] | undefined {
-  return formData.has("dir_stores_shown") ? formData.getAll("dir_store").map(String) : undefined;
+/**
+ * The directory switch and the showrooms ticked under it (this store included); `only` is undefined when the
+ * checklist wasn't on the form. This store's own type is listed only when the switch is on and its box is ticked.
+ */
+function directoryPick(formData: FormData, storeId: string, switchOn: boolean): { only?: string[]; self: boolean } {
+  if (!formData.has("dir_stores_shown")) return { self: switchOn };
+  const only = formData.getAll("dir_store").map(String);
+  return { only, self: switchOn && only.includes(storeId) };
+}
+
+/**
+ * A company-wide type's shared fields belong to admins: for a store manager they come from the saved type, whatever
+ * the form says (the editor shows them disabled, so they aren't posted).
+ */
+function keepShared(formData: FormData, t: BookingType): FormData {
+  const f = new FormData();
+  for (const [k, v] of formData) f.append(k, v);
+  const set: Record<string, string> = {
+    name: t.name, description: t.description, location: t.location, access: t.access,
+    duration: String(t.durationMin), buffer_min: String(t.bufferMin), slot_step_min: String(t.slotStepMin),
+    notice_hours: String(t.noticeMin / 60), horizon_days: String(t.horizonDays), color: t.color ?? "orange",
+    questions: JSON.stringify(t.questions ?? []),
+  };
+  for (const [k, v] of Object.entries(set)) f.set(k, v);
+  return f;
 }
 
 export async function createBookingTypeAction(formData: FormData) {
@@ -1389,8 +1411,11 @@ export async function createBookingTypeAction(formData: FormData) {
   try {
     const user = await requireActor("manager");
     const showroom = await currentShowroom(user);
-    const t = await createBookingType(db, showroom.id, bookingTypeFromForm(formData, showroom.kind));
-    if (t.inDirectory) await syncDirectoryCopies(db, t.id, t.slug, directoryPick(formData));
+    const input = bookingTypeFromForm(formData, showroom.kind);
+    const switchOn = !!input.inDirectory && hasRole(user.role, "admin");
+    const pick = directoryPick(formData, showroom.id, switchOn);
+    const t = await createBookingType(db, showroom.id, { ...input, inDirectory: pick.self });
+    if (switchOn) await syncDirectoryCopies(db, t.id, t.slug, pick.only, true);
     await logEvent(db, { showroomId: showroom.id, type: "booking_type_created", actor: user.id, payload: { booking_type_id: t.id, name: t.name } });
     target = withFlash(`${BT_PATH}?edit=${t.id}`, { ok: `${t.name} created.` });
   } catch (err) {
@@ -1403,8 +1428,7 @@ export async function createBookingTypeAction(formData: FormData) {
 export async function updateBookingTypeAction(id: string, formData: FormData) {
   let target: string;
   let skipped: string[] = [];
-  let listed = false;
-  let listedAt = 0;
+  let listedAt: number | null = null;
   try {
     const user = await requireActor("manager");
     const showroom = await currentShowroom(user);
@@ -1412,15 +1436,24 @@ export async function updateBookingTypeAction(id: string, formData: FormData) {
       await updatePickupType(db, showroom.id, id, { name: str(formData, "name"), description: str(formData, "description") });
     } else {
       const current = await getBookingType(db, showroom.id, id);
-      const input = bookingTypeFromForm(formData, showroom.kind, current);
-      await updateBookingType(db, showroom.id, id, input);
-      const pick = directoryPick(formData);
-      if (input.inDirectory || current.inDirectory) skipped = await syncDirectoryCopies(db, id, current.slug, pick);
-      listed = !!input.inDirectory;
-      if (listed && pick) listedAt = pick.length + 1;
+      // Company-wide before this save (this store may be the one left out), so switching off reaches every copy.
+      const wasListed = current.inDirectory || (await directoryStoreIds(db, current.slug)).length > 0;
+      if (hasRole(user.role, "admin")) {
+        const input = bookingTypeFromForm(formData, showroom.kind, current);
+        const switchOn = !!input.inDirectory;
+        const pick = directoryPick(formData, showroom.id, switchOn);
+        await updateBookingType(db, showroom.id, id, { ...input, inDirectory: pick.self });
+        if (switchOn || wasListed) skipped = await syncDirectoryCopies(db, id, current.slug, pick.only, switchOn);
+        if (switchOn) listedAt = pick.only ? pick.only.length : -1;
+      } else {
+        // Managers can't see the switch: it stays as it was, and a company-wide type keeps its shared fields.
+        const input = bookingTypeFromForm(wasListed ? keepShared(formData, current) : formData, showroom.kind, current);
+        await updateBookingType(db, showroom.id, id, { ...input, inDirectory: current.inDirectory });
+      }
     }
     await logEvent(db, { showroomId: showroom.id, type: "booking_type_updated", actor: user.id, payload: { booking_type_id: id, name: str(formData, "name") } });
-    target = withFlash(`${BT_PATH}?edit=${id}`, { ok: listed ? (listedAt ? `Saved · in the directory at ${listedAt} showroom${listedAt === 1 ? "" : "s"}.` : "Saved at every showroom.") : "Saved.", ...(skipped.length ? { error: `Not changed at ${skipped.join(", ")}: another of their booking types already has this name.` } : {}) });
+    const ok = listedAt === null ? "Saved." : listedAt < 0 ? "Saved at every showroom." : `Saved · company-wide at ${listedAt} showroom${listedAt === 1 ? "" : "s"}.`;
+    target = withFlash(`${BT_PATH}?edit=${id}`, { ok, ...(skipped.length ? { error: `Not changed at ${skipped.join(", ")}: another of their booking types already has this name.` } : {}) });
   } catch (err) {
     target = withFlash(`${BT_PATH}?edit=${id}`, { error: errorMessage(err) });
   }

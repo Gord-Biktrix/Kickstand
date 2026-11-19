@@ -374,12 +374,14 @@ export async function ensureDefaultBookingTypes(dbx: DbOrTx, showroom: { id: str
  * Returns the stores it couldn't give the new name to (another of their types already uses it).
  */
 /**
- * `only`: the showrooms ticked under the directory switch. Others keep their copy (shared fields still synced) but
+ * `only`: the showrooms ticked under the directory switch; `listed`: the switch itself (defaults to the source's own). Others keep their copy (shared fields still synced) but
  * out of the directory, and get no new copy. Omitted = every showroom.
  */
-export async function syncDirectoryCopies(dbx: DbOrTx, sourceId: string, previousSlug: string, only?: string[]): Promise<string[]> {
+export async function syncDirectoryCopies(dbx: DbOrTx, sourceId: string, previousSlug: string, only?: string[], listed?: boolean): Promise<string[]> {
   const [src] = await dbx.select().from(bookingTypes).where(eq(bookingTypes.id, sourceId));
   if (!src || src.kind !== "standard") return [];
+  // The directory switch; the source's own inDirectory also needs its store ticked, so it can't stand in when given.
+  const on = listed ?? src.inDirectory;
   const stores = await dbx.select({ id: showrooms.id, name: showrooms.name }).from(showrooms).where(eq(showrooms.kind, "showroom"));
   const shared = {
     name: src.name,
@@ -394,7 +396,7 @@ export async function syncDirectoryCopies(dbx: DbOrTx, sourceId: string, previou
     horizonDays: src.horizonDays,
     questions: src.questions,
     color: src.color,
-    inDirectory: src.inDirectory,
+    inDirectory: on,
   };
   const skipped: string[] = [];
   for (const store of stores) {
@@ -405,8 +407,8 @@ export async function syncDirectoryCopies(dbx: DbOrTx, sourceId: string, previou
     if (clash) { skipped.push(store.name); continue; }
     const picked = !only || only.includes(store.id);
     if (copy) {
-      await dbx.update(bookingTypes).set({ ...shared, inDirectory: shared.inDirectory && picked }).where(eq(bookingTypes.id, copy.id));
-    } else if (src.inDirectory && picked) {
+      await dbx.update(bookingTypes).set({ ...shared, inDirectory: on && picked }).where(eq(bookingTypes.id, copy.id));
+    } else if (on && picked) {
       await dbx.insert(bookingTypes).values({
         ...shared,
         showroomId: store.id,

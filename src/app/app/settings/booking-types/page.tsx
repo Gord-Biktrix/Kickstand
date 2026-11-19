@@ -6,7 +6,7 @@ import { HoursEditor } from "@/components/hours-editor";
 import { QuestionsEditor } from "@/components/questions-editor";
 import { readQuestions } from "@/lib/booking-questions";
 import { Badge, Field, Flash, PageHeader } from "@/components/ui";
-import { requireUser } from "@/lib/auth";
+import { hasRole, requireUser } from "@/lib/auth";
 import {
   ACCESS_LABEL,
   BOOKING_COLORS,
@@ -66,14 +66,16 @@ export default async function BookingTypesPage({ searchParams }: { searchParams:
     : [];
   const teamPhotos = await photoUrls(db, team.map((p) => p.id));
   const people = team.map((p) => ({ ...p, photo: teamPhotos.get(p.id) ?? null }));
-  // The directory checklist: every other showroom, ticked where this type is listed (all of them for a new listing).
+  // The directory checklist: every showroom (this one first), ticked where this type is listed, or all of them when
+  // it isn't listed anywhere yet. The switch shows on while any store lists it, even if this one is left out.
+  const listedAt = editing && !online ? new Set(await directoryStoreIds(db, editing.slug)) : new Set<string>();
   const dirStores = (editing || creating) && !online
-    ? await (async () => {
-        const all = (await db.select({ id: showrooms.id, name: showrooms.name }).from(showrooms).where(eq(showrooms.kind, "showroom")).orderBy(showrooms.name)).filter((s) => s.id !== showroom.id);
-        const listed = editing?.inDirectory ? new Set(await directoryStoreIds(db, editing.slug)) : null;
-        return all.map((s) => ({ ...s, on: listed ? listed.has(s.id) : true }));
-      })()
+    ? (await db.select({ id: showrooms.id, name: showrooms.name }).from(showrooms).where(eq(showrooms.kind, "showroom")).orderBy(showrooms.name))
+        .sort((a, b) => Number(b.id === showroom.id) - Number(a.id === showroom.id))
+        .map((s) => ({ ...s, on: listedAt.size ? listedAt.has(s.id) : true }))
     : [];
+  const dirOn = listedAt.size > 0;
+  const admin = hasRole(user.role, "admin");
 
   return (
     <div>
@@ -107,7 +109,7 @@ export default async function BookingTypesPage({ searchParams }: { searchParams:
         <SharePanel t={sharing} storeSlug={showroom.slug} storeName={showroom.name} root={root} close={close} how={how} text={sp(q.text)} color={sp(q.color)} textColor={sp(q.text_color)} scope={sp(q.scope)} />
       )}
       {(editing || creating) && (
-        <EditorPanel t={editing} online={online} storeHours={storeHours} profileSlug={showroom.slug} close={close} people={people} dirStores={dirStores} storeName={showroom.name} />
+        <EditorPanel t={editing} online={online} storeHours={storeHours} profileSlug={showroom.slug} close={close} people={people} dirStores={dirStores} dirOn={dirOn} admin={admin} />
       )}
     </div>
   );
@@ -125,7 +127,7 @@ function TypeRow({ t, profileSlug, root, storeHours, selected }: { t: BookingTyp
       <span aria-hidden="true" className="h-10 w-1.5 shrink-0 rounded-full" style={{ background: colorOf(t.color).hex }} />
       <div className="min-w-0 flex-1">
         <p className="font-semibold">{t.name}{!t.active && <span className="ml-2"><Badge>off</Badge></span>}</p>
-        <p className="truncate text-sm text-muted">{meta}{t.createsWorkOrder ? " · creates a Lightspeed work order" : ""}{t.inDirectory && t.access === "public" ? " · in the all-showrooms directory" : ""}</p>
+        <p className="truncate text-sm text-muted">{meta}{t.createsWorkOrder ? " · creates a Lightspeed work order" : ""}{t.inDirectory ? " · company-wide" : ""}</p>
       </div>
       <div className="flex flex-wrap items-center gap-2">
         {linkable && t.active && <Link href={`/app/settings/booking-types?share=${t.id}`} className="btn btn-sm">Share</Link>}
@@ -142,7 +144,7 @@ function TypeRow({ t, profileSlug, root, storeHours, selected }: { t: BookingTyp
 }
 
 /** The Calendly-style side panel: name and colour, duration, location, availability; the rest under More options. */
-function EditorPanel({ t, online, storeHours, profileSlug, close, people, dirStores, storeName }: { t?: BookingType; online: boolean; storeHours: WeeklyHours; profileSlug: string; close: string; people: { id: string; name: string; photo: string | null }[]; dirStores: { id: string; name: string; on: boolean }[]; storeName: string }) {
+function EditorPanel({ t, online, storeHours, profileSlug, close, people, dirStores, dirOn, admin }: { t?: BookingType; online: boolean; storeHours: WeeklyHours; profileSlug: string; close: string; people: { id: string; name: string; photo: string | null }[]; dirStores: { id: string; name: string; on: boolean }[]; dirOn: boolean; admin: boolean }) {
   const pickup = t?.kind === "pickup";
   const locations: BookingLocation[] = online ? ["video", "phone"] : ["in_person", "video", "phone"];
   const duration = t?.durationMin ?? NEW_TYPE_DEFAULTS.durationMin;
@@ -150,6 +152,9 @@ function EditorPanel({ t, online, storeHours, profileSlug, close, people, dirSto
   const useStore = t ? t.useStoreHours : true;
   const preview = t && !pickup && t.active && t.access === "public" ? `/book/${profileSlug}/${t.slug}` : null;
   const action = t ? updateBookingTypeAction.bind(null, t.id) : createBookingTypeAction;
+  // A company-wide type's name, length, location, questions and booking rules are an admin's; a store manager
+  // sets only this store's on/off, hours, capacity, people and work order.
+  const locked = !admin && dirOn;
 
   return (
     <div className="fixed inset-0 z-40 flex justify-end bg-black/30" role="dialog" aria-modal="true" aria-label={t ? `Edit ${t.name}` : "New booking type"}>
@@ -167,12 +172,12 @@ function EditorPanel({ t, online, storeHours, profileSlug, close, people, dirSto
         <div className="flex items-start justify-between border-b border-border p-5">
           <div className="min-w-0 flex-1">
             <p className="text-xs font-medium text-muted">{t ? "Booking type" : "New booking type"}</p>
-            <input name="name" defaultValue={t?.name ?? ""} required placeholder={online ? "Video call with an expert" : "Test ride"} aria-label="Name" className="mt-1 w-full rounded-md border border-transparent bg-transparent px-1 text-2xl font-bold hover:border-border focus:border-accent focus:outline-none" />
+            <input name="name" readOnly={locked} defaultValue={t?.name ?? ""} required placeholder={online ? "Video call with an expert" : "Test ride"} aria-label="Name" className="mt-1 w-full rounded-md border border-transparent bg-transparent px-1 text-2xl font-bold hover:border-border focus:border-accent focus:outline-none" />
             {!pickup && (
               <div className="mt-2 flex flex-wrap gap-1.5" role="radiogroup" aria-label="Colour">
                 {Object.entries(BOOKING_COLORS).map(([key, c]) => (
                   <label key={key} className="cursor-pointer" title={c.label}>
-                    <input type="radio" name="color" value={key} defaultChecked={(t?.color ?? "orange") === key} className="peer sr-only" />
+                    <input type="radio" name="color" value={key} defaultChecked={(t?.color ?? "orange") === key} disabled={locked} className="peer sr-only" />
                     <span className="block h-6 w-6 rounded-full ring-offset-2 peer-checked:ring-2 peer-focus-visible:ring-2" style={{ background: c.hex, ["--tw-ring-color" as string]: c.hex }} />
                     <span className="sr-only">{c.label}</span>
                   </label>
@@ -191,7 +196,7 @@ function EditorPanel({ t, online, storeHours, profileSlug, close, people, dirSto
             </>
           ) : (
             <>
-              <fieldset>
+              <fieldset disabled={locked}>
                 <legend className="mb-2 font-semibold">Duration</legend>
                 <div className="flex flex-wrap gap-2">
                   {DURATION_CHOICES.map((d) => (
@@ -208,7 +213,7 @@ function EditorPanel({ t, online, storeHours, profileSlug, close, people, dirSto
                 </div>
               </fieldset>
 
-              <fieldset>
+              <fieldset disabled={locked}>
                 <legend className="mb-2 font-semibold">Location</legend>
                 <div className="grid grid-cols-3 gap-2">
                   {locations.map((l) => (
@@ -239,7 +244,7 @@ function EditorPanel({ t, online, storeHours, profileSlug, close, people, dirSto
                 </details>
               </fieldset>
 
-              <fieldset>
+              <fieldset disabled={locked}>
                 <legend className="mb-1 font-semibold">Booking form</legend>
                 <p className="mb-2 text-xs text-muted">Name, email, phone and a note are always asked. Add questions to know why they&apos;re booking; answers show in Slack, on the booking and in Klaviyo.</p>
                 <QuestionsEditor initial={readQuestions(t?.questions)} />
@@ -264,13 +269,13 @@ function EditorPanel({ t, online, storeHours, profileSlug, close, people, dirSto
                 )}
               </fieldset>
 
-              {!online && <fieldset className="group">
-                <legend className="mb-1 font-semibold">All-showrooms directory</legend>
+              {!online && admin && <fieldset className="group">
+                <legend className="mb-1 font-semibold">Company-wide</legend>
                 <label className="flex items-start gap-2 text-sm">
-                  <input id="eddir" type="checkbox" name="in_directory" defaultChecked={t?.inDirectory ?? false} className="mt-0.5 h-4 w-4" />
+                  <input id="eddir" type="checkbox" name="in_directory" defaultChecked={dirOn} className="mt-0.5 h-4 w-4" />
                   <span>
-                    List in the all-showrooms directory
-                    {t && <span className="block text-xs text-muted">/book/all/{t.slug}</span>}
+                    Company-wide booking type
+                    <span className="block text-xs text-muted">Same type at the showrooms below{t ? ` · /book/all/${t.slug}` : ""}</span>
                   </span>
                 </label>
                 {dirStores.length > 0 && (
@@ -278,12 +283,6 @@ function EditorPanel({ t, online, storeHours, profileSlug, close, people, dirSto
                     <input type="hidden" name="dir_stores_shown" value="1" />
                     <p className="text-xs font-medium text-muted">Showrooms</p>
                     <ul className="mt-1 grid grid-cols-2 gap-x-3">
-                      <li>
-                        <label className="flex items-center gap-2 py-0.5 text-sm text-muted">
-                          <input type="checkbox" checked disabled className="h-4 w-4" />
-                          {cityOf(storeName)}
-                        </label>
-                      </li>
                       {dirStores.map((s) => (
                         <li key={s.id}>
                           <label className="flex items-center gap-2 py-0.5 text-sm">
@@ -296,10 +295,12 @@ function EditorPanel({ t, online, storeHours, profileSlug, close, people, dirSto
                   </div>
                 )}
               </fieldset>}
+              {locked && <p className="rounded-md bg-background px-3 py-2 text-sm"><Badge>Company-wide</Badge> <span className="text-muted">Name, length, location and questions are set by an admin.</span></p>}
 
               <details className="rounded-lg border border-border p-3">
                 <summary className="cursor-pointer font-semibold">More options</summary>
                 <div className="mt-3 space-y-3">
+                  <fieldset disabled={locked} className="space-y-3">
                   <Field label="Description" htmlFor="ed_desc" hint="Shown to customers on the booking page."><textarea id="ed_desc" name="description" defaultValue={t?.description} rows={2} className="input" /></Field>
                   <Field label="Who can book" htmlFor="ed_access">
                     <select id="ed_access" name="access" defaultValue={t?.access ?? "public"} className="input">
@@ -312,6 +313,7 @@ function EditorPanel({ t, online, storeHours, profileSlug, close, people, dirSto
                     <Field label="Minimum notice (hours)" htmlFor="ed_notice"><input id="ed_notice" name="notice_hours" type="number" min={0} step={0.5} defaultValue={(t?.noticeMin ?? NEW_TYPE_DEFAULTS.noticeMin) / 60} className="input" /></Field>
                     <Field label="Up to (days ahead)" htmlFor="ed_hz"><input id="ed_hz" name="horizon_days" type="number" min={1} max={365} defaultValue={t?.horizonDays ?? NEW_TYPE_DEFAULTS.horizonDays} className="input" /></Field>
                   </div>
+                  </fieldset>
                   <Field label="Capacity" htmlFor="ed_cap" hint="Bench: a set number of bookings at once for the store.">
                     <select id="ed_cap" name="capacity_mode" defaultValue={t?.capacityMode ?? "bench"} className="input">
                       {(["bench", "staff"] as const).map((c) => <option key={c} value={c}>{CAPACITY_LABEL[c]}</option>)}
