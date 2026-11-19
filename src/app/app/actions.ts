@@ -25,7 +25,7 @@ import { attachUnit, bookableCompanions, bookableSiblings, linkOrdersForPickup, 
 import { currentShowroom } from "@/lib/current-showroom";
 import { createShowroom, importShowroomsFromLightspeed, isProfileKind, setLightspeedLink, updateShowroomDetails } from "@/lib/showroom-admin";
 import { cancelTypeBooking, createTypeBooking, getBookingDetail, rescheduleTypeBooking, resendBookingConfirmation, setBookingOutcome, syncBookingWorkorder } from "@/lib/type-bookings";
-import { createBookingType, getBookingType, hoursFromForm, NEW_TYPE_DEFAULTS, setBookingTypeActive, setStoreHours, updateBookingType, updatePickupType, validateBookingType, type BookingTypeInput, listBookingTypes } from "@/lib/booking-types";
+import { createBookingType, getBookingType, hoursFromForm, NEW_TYPE_DEFAULTS, setBookingTypeActive, setStoreHours, syncDirectoryCopies, updateBookingType, updatePickupType, validateBookingType, type BookingTypeInput, listBookingTypes } from "@/lib/booking-types";
 import { LightspeedClient, lightspeedEnabled } from "@/lib/lightspeed";
 import { googleEnabled } from "@/lib/google-auth";
 import { mailerKind } from "@/lib/mailer";
@@ -1385,6 +1385,7 @@ export async function createBookingTypeAction(formData: FormData) {
     const user = await requireActor("manager");
     const showroom = await currentShowroom(user);
     const t = await createBookingType(db, showroom.id, bookingTypeFromForm(formData, showroom.kind));
+    if (t.inDirectory) await syncDirectoryCopies(db, t.id, t.slug);
     await logEvent(db, { showroomId: showroom.id, type: "booking_type_created", actor: user.id, payload: { booking_type_id: t.id, name: t.name } });
     target = withFlash(`${BT_PATH}?edit=${t.id}`, { ok: `${t.name} created.` });
   } catch (err) {
@@ -1396,6 +1397,8 @@ export async function createBookingTypeAction(formData: FormData) {
 /** Saves and keeps the panel open, so the preview beside it shows the change. */
 export async function updateBookingTypeAction(id: string, formData: FormData) {
   let target: string;
+  let skipped: string[] = [];
+  let listed = false;
   try {
     const user = await requireActor("manager");
     const showroom = await currentShowroom(user);
@@ -1403,10 +1406,13 @@ export async function updateBookingTypeAction(id: string, formData: FormData) {
       await updatePickupType(db, showroom.id, id, { name: str(formData, "name"), description: str(formData, "description") });
     } else {
       const current = await getBookingType(db, showroom.id, id);
-      await updateBookingType(db, showroom.id, id, bookingTypeFromForm(formData, showroom.kind, current));
+      const input = bookingTypeFromForm(formData, showroom.kind, current);
+      await updateBookingType(db, showroom.id, id, input);
+      if (input.inDirectory || current.inDirectory) skipped = await syncDirectoryCopies(db, id, current.slug);
+      listed = !!input.inDirectory;
     }
     await logEvent(db, { showroomId: showroom.id, type: "booking_type_updated", actor: user.id, payload: { booking_type_id: id, name: str(formData, "name") } });
-    target = withFlash(`${BT_PATH}?edit=${id}`, { ok: "Saved." });
+    target = withFlash(`${BT_PATH}?edit=${id}`, { ok: listed ? "Saved at every showroom." : "Saved.", ...(skipped.length ? { error: `Not changed at ${skipped.join(", ")}: another of their booking types already has this name.` } : {}) });
   } catch (err) {
     target = withFlash(`${BT_PATH}?edit=${id}`, { error: errorMessage(err) });
   }

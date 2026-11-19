@@ -254,16 +254,16 @@ function EditorPanel({ t, online, storeHours, profileSlug, close, people }: { t?
                 )}
               </fieldset>
 
-              <fieldset>
+              {!online && <fieldset>
                 <legend className="mb-1 font-semibold">All-showrooms directory</legend>
                 <label className="flex items-start gap-2 text-sm">
                   <input type="checkbox" name="in_directory" defaultChecked={t?.inDirectory ?? false} className="mt-0.5 h-4 w-4" />
                   <span>
                     List in the all-showrooms directory
-                    {t && <span className="block text-xs text-muted">/book/all/{t.slug}</span>}
+                    <span className="block text-xs text-muted">Offered at every showroom{t ? ` · /book/all/${t.slug}` : ""}</span>
                   </span>
                 </label>
-              </fieldset>
+              </fieldset>}
 
               <details className="rounded-lg border border-border p-3">
                 <summary className="cursor-pointer font-semibold">More options</summary>

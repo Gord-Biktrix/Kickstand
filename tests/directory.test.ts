@@ -2,7 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { bookingTypes, showrooms } from "@/db/schema";
-import { defaultTypes } from "@/lib/booking-types";
+import { defaultTypes, syncDirectoryCopies, updateBookingType, validateBookingType } from "@/lib/booking-types";
 import { cityOf, loadDirectory, openLine, orderStores, visitorPosition } from "@/lib/directory";
 import { resetDb, testDb } from "./helpers";
 
@@ -62,6 +62,35 @@ describe("all-showrooms directory", () => {
 
       await db.update(bookingTypes).set({ active: false }).where(eq(bookingTypes.showroomId, cal.id));
       expect((await loadDirectory(db, "showroom-visit"))?.stores.map((s) => s.slug)).toEqual([van.slug]);
+    });
+
+    it("ticking it on one store's type offers it at every showroom; saves and renames carry over, per-store things stay", async () => {
+      const [van] = await db.select().from(showrooms).limit(1);
+      const [cal] = await db.insert(showrooms).values({ slug: "calgary", name: "Biktrix Calgary", timezone: "America/Edmonton", addressLine: "", bookingHours: HOURS }).returning();
+      const [online] = await db.insert(showrooms).values({ slug: "online", name: "Biktrix Online", kind: "online", timezone: "America/Vancouver", addressLine: "" }).returning();
+      const base = { ...defaultTypes("showroom", HOURS).find((t) => t.slug === "showroom-visit")!, name: "test", slug: "test" };
+      const [src] = await db.insert(bookingTypes).values({ ...base, showroomId: van.id, kind: "standard", inDirectory: true }).returning();
+      expect(await syncDirectoryCopies(db, src.id, "test")).toEqual([]);
+      const copies = async () => db.select().from(bookingTypes).where(eq(bookingTypes.slug, src.slug));
+      const [calCopy] = (await copies()).filter((t) => t.showroomId === cal.id);
+      expect(calCopy).toMatchObject({ name: "test", inDirectory: true, useStoreHours: true, active: true });
+      expect((await copies()).some((t) => t.showroomId === online.id)).toBe(false);
+      expect((await loadDirectory(db, "test"))?.stores.map((s) => s.slug).sort()).toEqual(["calgary", van.slug].sort());
+
+      // Calgary turns its copy off and changes its capacity; Vancouver renames and lengthens it.
+      await db.update(bookingTypes).set({ active: false, benchCapacity: 3 }).where(eq(bookingTypes.id, calCopy.id));
+      const { slug: _s, ...rest } = base;
+      void _s;
+      await updateBookingType(db, van.id, src.id, validateBookingType({ ...rest, name: "Showroom visit", durationMin: 45, inDirectory: true }, "showroom"));
+      await syncDirectoryCopies(db, src.id, "test");
+      const [after] = await db.select().from(bookingTypes).where(eq(bookingTypes.id, calCopy.id));
+      expect(after).toMatchObject({ name: "Showroom visit", slug: "showroom-visit", durationMin: 45, active: false, benchCapacity: 3 });
+
+      // Unticking reaches every copy.
+      await updateBookingType(db, van.id, src.id, validateBookingType({ ...rest, name: "Showroom visit", durationMin: 45, inDirectory: false }, "showroom"));
+      await syncDirectoryCopies(db, src.id, "showroom-visit");
+      expect((await db.select().from(bookingTypes).where(eq(bookingTypes.id, calCopy.id)))[0].inDirectory).toBe(false);
+      expect(validateBookingType({ ...rest, location: "video", inDirectory: true }, "online").inDirectory).toBe(false);
     });
   });
 });

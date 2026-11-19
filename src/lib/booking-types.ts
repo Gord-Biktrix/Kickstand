@@ -228,6 +228,8 @@ export function validateBookingType(raw: BookingTypeInput, profileKind: string):
     horizonDays: int(raw.horizonDays, 1, 365, "Bookable up to (days ahead)"),
     benchCapacity: int(raw.benchCapacity, 1, 50, "Bookings at the same time"),
     createsWorkOrder: raw.location === "in_person" && raw.createsWorkOrder,
+    // The directory is of showrooms; the online team's calls aren't listed in it.
+    inDirectory: profileKind !== "online" && !!raw.inDirectory,
     useStoreHours: !!raw.useStoreHours,
     color: raw.color && isBookingColor(raw.color) ? raw.color : "orange",
     ...(raw.hostIds ? { hostIds: [...new Set(raw.hostIds.filter((id) => /^[0-9a-f-]{36}$/i.test(id)))].slice(0, 6) } : {}),
@@ -361,4 +363,58 @@ export async function ensureDefaultBookingTypes(dbx: DbOrTx, showroom: { id: str
     .insert(bookingTypes)
     .values(types.map((t, i) => ({ ...t, showroomId: showroom.id, kind: "standard", sortOrder: i + 1 })))
     .onConflictDoNothing();
+}
+
+/**
+ * A booking type in the all-showrooms directory is offered at every showroom: each store gets its own copy (so
+ * its bookings, capacity, Lightspeed and calendar stay that store's), and saving any copy brings the others in
+ * line. Shared: what the customer sees and the booking rules. Per store: on/off, hours, capacity, people shown,
+ * Lightspeed work order. Copies are found by the slug the type had before this save (`previousSlug`), so a
+ * rename carries over. Runs when the type is in the directory or was until now (unticking reaches every copy).
+ * Returns the stores it couldn't give the new name to (another of their types already uses it).
+ */
+export async function syncDirectoryCopies(dbx: DbOrTx, sourceId: string, previousSlug: string): Promise<string[]> {
+  const [src] = await dbx.select().from(bookingTypes).where(eq(bookingTypes.id, sourceId));
+  if (!src || src.kind !== "standard") return [];
+  const stores = await dbx.select({ id: showrooms.id, name: showrooms.name }).from(showrooms).where(eq(showrooms.kind, "showroom"));
+  const shared = {
+    name: src.name,
+    slug: src.slug,
+    description: src.description,
+    location: src.location,
+    access: src.access,
+    durationMin: src.durationMin,
+    bufferMin: src.bufferMin,
+    slotStepMin: src.slotStepMin,
+    noticeMin: src.noticeMin,
+    horizonDays: src.horizonDays,
+    questions: src.questions,
+    color: src.color,
+    inDirectory: src.inDirectory,
+  };
+  const skipped: string[] = [];
+  for (const store of stores) {
+    if (store.id === src.showroomId) continue;
+    const theirs = await listBookingTypes(dbx, store.id);
+    const copy = theirs.find((t) => t.kind === "standard" && (t.slug === previousSlug || t.slug === src.slug));
+    const clash = theirs.find((t) => t.slug === src.slug && t.id !== copy?.id);
+    if (clash) { skipped.push(store.name); continue; }
+    if (copy) {
+      await dbx.update(bookingTypes).set(shared).where(eq(bookingTypes.id, copy.id));
+    } else if (src.inDirectory) {
+      await dbx.insert(bookingTypes).values({
+        ...shared,
+        showroomId: store.id,
+        kind: "standard",
+        capacityMode: src.capacityMode,
+        benchCapacity: src.benchCapacity,
+        hours: src.hours,
+        useStoreHours: true,
+        createsWorkOrder: src.createsWorkOrder,
+        hostIds: [],
+        sortOrder: Math.max(0, ...theirs.map((t) => t.sortOrder)) + 1,
+      });
+    }
+  }
+  return skipped;
 }
