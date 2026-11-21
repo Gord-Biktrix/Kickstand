@@ -5,7 +5,7 @@ import { BookingCalendar, BookingInfo } from "@/components/booking-calendar";
 import { Card, Field, Flash, PageHeader } from "@/components/ui";
 import { requireUser } from "@/lib/auth";
 import { colorOf, ensureDefaultBookingTypes,
-  listBookingTypes, LOCATION_LABEL, type BookingLocation } from "@/lib/booking-types";
+  listBookingTypes, LOCATION_LABEL, staffBookHref, type BookingLocation } from "@/lib/booking-types";
 import { currentShowroom } from "@/lib/current-showroom";
 import { sp, type SearchParams } from "@/lib/flash";
 import { formatLongDateFromLocal, formatTime } from "@/lib/time";
@@ -48,7 +48,7 @@ export default async function NewBookingPage({ searchParams }: { searchParams: P
             <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
               {types.map((t) => (
                 <li key={t.id}>
-                  <Link href={`/app/bookings/new?type=${t.id}`} className="block rounded-lg border border-border p-3 hover:border-accent">
+                  <Link href={staffBookHref(t, showroom.kind)} className="block rounded-lg border border-border p-3 hover:border-accent">
                     <span className="font-medium">{t.name}</span>
                     <span className="block text-xs text-muted">{t.durationMin} min · {LOCATION_LABEL[t.location as BookingLocation]}{t.access === "invite" ? " · invite only" : ""}</span>
                   </Link>

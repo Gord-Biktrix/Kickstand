@@ -434,3 +434,13 @@ export async function directoryStoreIds(dbx: DbOrTx, slug: string): Promise<stri
     .where(and(eq(bookingTypes.slug, slug), eq(bookingTypes.kind, "standard"), eq(bookingTypes.inDirectory, true)));
   return rows.map((r) => r.id);
 }
+
+/** Types booked through New ticket (it adds the work order's lines): on, in person, and they create a work order. */
+export function isTicketType(t: Pick<BookingType, "kind" | "active" | "createsWorkOrder" | "location">): boolean {
+  return t.kind === "standard" && t.active && t.createsWorkOrder && t.location === "in_person";
+}
+
+/** Where staff book a type: New ticket set to that type, or the booking form. Online stores have no workshop. */
+export function staffBookHref(t: Pick<BookingType, "id" | "kind" | "active" | "createsWorkOrder" | "location">, storeKind: string): string {
+  return storeKind !== "online" && isTicketType(t) ? `/app/workshop/new?type=${t.id}` : `/app/bookings/new?type=${t.id}`;
+}

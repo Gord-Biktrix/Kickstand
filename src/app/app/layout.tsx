@@ -11,7 +11,7 @@ import { canSwitchShowroom, currentShowroom, readOnlyReason } from "@/lib/curren
 import { listShowrooms } from "@/lib/showroom";
 import { hasRole, PASSWORD_NUDGE_COOKIE, requireUser, roleLabel } from "@/lib/auth";
 import { HeaderMenu } from "@/components/header-menu";
-import { colorOf, ensureDefaultBookingTypes, listBookingTypes, LOCATION_LABEL, type BookingLocation } from "@/lib/booking-types";
+import { colorOf, ensureDefaultBookingTypes, isTicketType, listBookingTypes, LOCATION_LABEL, type BookingLocation } from "@/lib/booking-types";
 import { signOutAction } from "./actions";
 
 // Three places, one question each (redesign 2026-11): who's coming in (Schedule), what's on the bench (Workshop),
@@ -36,7 +36,10 @@ export default async function StaffLayout({ children }: { children: React.ReactN
   // First-run nudge: people land here via Google/link and don't know a password is optional and where it lives.
   // "+ New" lists what can be booked here, like Calendly's Create menu, so staff pick the type in one click.
   await ensureDefaultBookingTypes(db, showroom);
-  const visitTypes = (await listBookingTypes(db, showroom.id)).filter((t) => t.kind === "standard" && t.active);
+  const active = (await listBookingTypes(db, showroom.id)).filter((t) => t.kind === "standard" && t.active);
+  // Types that create a work order open New ticket (so the work order gets its lines); the rest use the booking form.
+  const ticketTypes = showroom.kind === "online" ? [] : active.filter(isTicketType);
+  const visitTypes = active.filter((t) => !ticketTypes.includes(t));
   const manager = hasRole(user.role, "manager");
   const nudgePassword = !user.passwordHash && !(await cookies()).get(PASSWORD_NUDGE_COOKIE);
   return (
@@ -68,6 +71,23 @@ export default async function StaffLayout({ children }: { children: React.ReactN
             <Suspense fallback={<Link href="/app/bookings/new" className="btn btn-primary h-9 py-0">+ New</Link>}>
               <HeaderMenu label="New" summary={<>+ New <span aria-hidden="true" className="text-xs">▾</span></>} summaryClassName="btn btn-primary h-9 gap-1.5 py-0">
                 <div className="absolute right-0 z-50 mt-2 w-80 max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border border-border bg-card text-sm text-foreground shadow-lg">
+                  {showroom.kind !== "online" && (
+                    <>
+                      <p className="px-4 pt-3 pb-1 text-xs font-bold tracking-wider text-muted uppercase">Workshop</p>
+                      <nav aria-label="Workshop" className="flex flex-col border-b border-border pb-2">
+                        {(ticketTypes.length > 1 ? ticketTypes : [ticketTypes[0] ?? null]).map((t) => (
+                          <Link key={t?.id ?? "ticket"} href={t && ticketTypes.length > 1 ? `/app/workshop/new?type=${t.id}` : "/app/workshop/new"} className="flex gap-3 px-4 py-2.5 hover:bg-background">
+                            <span aria-hidden="true" className="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-[2px]" style={{ background: t ? colorOf(t.color).hex : "#17181a" }} />
+                            <span>
+                              <span className="block font-semibold">{ticketTypes.length > 1 && t ? t.name : "Repair ticket"}</span>
+                              <span className="block text-xs text-muted">Check a bike in now, or book {t ? `a ${t.name.toLowerCase()}` : "a service"}</span>
+                            </span>
+                          </Link>
+                        ))}
+                      </nav>
+                    </>
+                  )}
+                  {(visitTypes.length > 0 || ticketTypes.length === 0) && (<>
                   <p className="px-4 pt-3 pb-1 text-xs font-bold tracking-wider text-muted uppercase">Book a visit</p>
                   <nav aria-label="Book a visit" className="flex flex-col pb-2">
                     {visitTypes.map((t) => (
@@ -81,6 +101,7 @@ export default async function StaffLayout({ children }: { children: React.ReactN
                     ))}
                     {visitTypes.length === 0 && <p className="px-4 py-2 text-muted">Nothing can be booked here yet.</p>}
                   </nav>
+                  </>)}
                   {showroom.kind !== "online" && (
                     <div className="border-t border-border py-2">
                       <Link href="/app/bikes?filter=not_booked" className="flex gap-3 px-4 py-2.5 hover:bg-background">

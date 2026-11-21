@@ -25,7 +25,7 @@ import { attachUnit, bookableCompanions, bookableSiblings, linkOrdersForPickup, 
 import { currentShowroom } from "@/lib/current-showroom";
 import { createShowroom, importShowroomsFromLightspeed, isProfileKind, setLightspeedLink, updateShowroomDetails } from "@/lib/showroom-admin";
 import { cancelTypeBooking, createTypeBooking, getBookingDetail, rescheduleTypeBooking, resendBookingConfirmation, setBookingOutcome, syncBookingWorkorder } from "@/lib/type-bookings";
-import { createBookingType, getBookingType, hoursFromForm, NEW_TYPE_DEFAULTS, setBookingTypeActive, setStoreHours, directoryStoreIds, syncDirectoryCopies, updateBookingType, updatePickupType, validateBookingType, type BookingTypeInput, listBookingTypes } from "@/lib/booking-types";
+import { createBookingType, getBookingType, hoursFromForm, NEW_TYPE_DEFAULTS, setBookingTypeActive, setStoreHours, directoryStoreIds, syncDirectoryCopies, updateBookingType, updatePickupType, validateBookingType, type BookingTypeInput, listBookingTypes, isTicketType } from "@/lib/booking-types";
 import { LightspeedClient, lightspeedEnabled } from "@/lib/lightspeed";
 import { googleEnabled } from "@/lib/google-auth";
 import { mailerKind } from "@/lib/mailer";
@@ -649,7 +649,7 @@ export async function createTicketAction(formData: FormData) {
   const user = await requireActor("staff");
   const showroom = await currentShowroom(user);
   const keep = new URLSearchParams();
-  for (const k of ["c", "nn", "np", "ne", "bike", "serial", "sid", "said", "ready", "mech", "dropoff"]) {
+  for (const k of ["c", "nn", "np", "ne", "bike", "serial", "sid", "said", "ready", "mech", "dropoff", "type"]) {
     const val = str(formData, k);
     if (val) keep.set(k, val);
   }
@@ -668,7 +668,8 @@ export async function createTicketAction(formData: FormData) {
     if (dropoff && dropoff !== "now") {
       const startsAt = new Date(dropoff);
       if (Number.isNaN(startsAt.getTime())) throw new Error("Pick the drop-off time again.");
-      const type = (await listBookingTypes(db, showroom.id)).find((t) => t.kind === "standard" && t.active && t.createsWorkOrder && t.location === "in_person");
+      const ticketTypes = (await listBookingTypes(db, showroom.id)).filter(isTicketType);
+      const type = ticketTypes.find((t) => t.id === str(formData, "type")) ?? ticketTypes[0];
       if (!type) throw new Error("This store has no service booking type to book drop-offs with (Settings › Booking types).");
       const who = lsId ? { lsCustomerId: lsId, name: cName, phone: cPhone, email: cEmail } : { lsCustomerId: null, ...(customer as { name: string; phone: string; email: string }) };
       const r = await scheduleTicket(db, {

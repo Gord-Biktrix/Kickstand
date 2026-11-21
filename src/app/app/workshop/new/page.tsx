@@ -4,7 +4,7 @@ import { lsEmployees } from "@/db/schema";
 import { TicketPos } from "@/components/ticket-pos";
 import { Flash } from "@/components/ui";
 import { requireUser } from "@/lib/auth";
-import { ensureDefaultBookingTypes, ensureStoreHours, listBookingTypes } from "@/lib/booking-types";
+import { ensureDefaultBookingTypes, ensureStoreHours, isTicketType, listBookingTypes } from "@/lib/booking-types";
 import { benchLoads, estimateReady } from "@/lib/ready-estimate";
 import { workshopJobs } from "@/lib/workshop";
 import { currentShowroom } from "@/lib/current-showroom";
@@ -38,7 +38,9 @@ export default async function NewTicketPage({ searchParams }: { searchParams: Pr
   const ls = lightspeedEnabled(showroom);
   const employees = await db.select({ id: lsEmployees.id, name: lsEmployees.name }).from(lsEmployees).orderBy(lsEmployees.name);
   await ensureDefaultBookingTypes(db, showroom);
-  const serviceType = (await listBookingTypes(db, showroom.id)).find((t) => t.kind === "standard" && t.active && t.createsWorkOrder && t.location === "in_person") ?? null;
+  // The service type to book drop-offs with: the one picked in "+ New" (?type=), else the store's first.
+  const ticketTypes = (await listBookingTypes(db, showroom.id)).filter(isTicketType);
+  const serviceType = ticketTypes.find((t) => t.id === v("type")) ?? ticketTypes[0] ?? null;
 
   // Service and labour tiles: the shop's Lightspeed items, or the starter list if Lightspeed can't be read.
   let tiles: { key: string; name: string; minutes: number; itemId?: string; price?: number | null; labour?: boolean }[] = SERVICE_MENU;
@@ -85,11 +87,15 @@ export default async function NewTicketPage({ searchParams }: { searchParams: Pr
     <div>
       <Flash ok={sp(q.ok)} error={sp(q.error)} />
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <Link href="/app/workshop" className="text-sm underline">← Workshop</Link>
+        <span className="flex gap-4 text-sm">
+          <Link href="/app/workshop" className="underline">← Workshop</Link>
+          <Link href="/app/bookings/new" className="text-muted underline">Book something else</Link>
+        </span>
         {!ls && <p className="text-sm text-red-700">Lightspeed isn&apos;t switched on for this store, so tickets can&apos;t be created here.</p>}
       </div>
 
       <form action={createTicketAction} className="grid gap-4 lg:grid-cols-[420px_minmax(0,1fr)]">
+        {serviceType && <input type="hidden" name="type" value={serviceType.id} />}
         <TicketPos
           services={tiles.filter((t) => !t.labour)}
           labourItems={tiles.filter((t) => t.labour)}
