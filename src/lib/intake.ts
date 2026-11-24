@@ -4,9 +4,9 @@
  * and on record before anyone starts. Every field is optional; a field not answered stays blank.
  */
 export const INTAKE_FIELDS = [
-  { key: "chain", label: "Chain wear", options: { ok: "Under 0.5%", p05: "0.5%", p075: "0.75%", p1: "1%+" } },
-  { key: "bearings", label: "Play in bearings", options: { none: "None", play: "Play" } },
-  { key: "key", label: "Key", options: { not_needed: "Not needed", with_bike: "With bike", kept: "Customer kept" } },
+  { key: "chain", label: "Chain wear", options: { ok: "Under 0.5%", p05: "0.5%", p075: "0.75%", p1: "1%+" }, short: { ok: "<0.5%" } },
+  { key: "bearings", label: "Bearing play", options: { none: "None", play: "Play" } },
+  { key: "key", label: "Key", options: { not_needed: "Not needed", with_bike: "With bike", kept: "Customer kept" }, short: { not_needed: "None", kept: "Kept" } },
   { key: "brakes", label: "Brakes", options: { ok: "Good", adjust: "Adjust", bleed: "Bleed" } },
   { key: "pads", label: "Brake pads", options: { ok: "Good", low: "Low", replace: "Replace" } },
 ] as const;
