@@ -1,4 +1,5 @@
 import { Suspense } from "react";
+import { VERSION } from "@/lib/version";
 import Link from "next/link";
 import { cookies } from "next/headers";
 import { NavLinks } from "@/components/nav-links";
@@ -162,6 +163,7 @@ export default async function StaffLayout({ children }: { children: React.ReactN
         </div>
       )}
       <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6">{children}</main>
+      <footer className="mx-auto w-full max-w-7xl px-4 pb-4 text-xs text-muted">Kickstand {VERSION}</footer>
     </div>
   );
 }
