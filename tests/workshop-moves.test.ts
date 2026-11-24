@@ -184,6 +184,16 @@ describe("new tickets from the POS screen", () => {
     expect(jobs.find((j) => j.workorderId === "10300")).toMatchObject({ column: "todo", title: "Stunner Lite 3, peach", customer: "Ahmed Ali" });
   });
 
+  it("the bike's condition at the counter goes in the work order note and on the job", async () => {
+    const { createTicket } = await import("@/lib/tickets");
+    const { loadJobSheet } = await import("@/lib/job-sheet");
+    const ls = fakeCreate();
+    setLightspeedFetch(ls.fetchImpl);
+    await createTicket(db, { showroom: van, ticket: { ...base, customer: { lsCustomerId: "9020", name: "Hana Sato" }, intake: { odometer: 1240, chain: "p075", key: "with_bike" } }, actor: "11111111-1111-4111-8111-111111111111" });
+    expect((ls.calls.find((c) => c.url.endsWith("Workorder.json"))!.body as { note: string }).note).toContain("Condition: Odometer 1,240 km · Chain wear 0.75% · Key With bike");
+    expect((await loadJobSheet(db, "10300"))?.intake).toEqual({ odometer: 1240, chain: "p075", key: "with_bike" });
+  });
+
   it("an existing Lightspeed customer isn't created again; bad input and Lightspeed failures save nothing", async () => {
     const { createTicket } = await import("@/lib/tickets");
     const ls = fakeCreate();

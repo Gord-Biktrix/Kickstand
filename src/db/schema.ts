@@ -609,6 +609,24 @@ export const jobTrackers = pgTable(
 );
 
 /**
+ * A repair's own notes, kept in Kickstand (Lightspeed has nowhere for them): the bike's condition when it came in
+ * (lib/intake.ts) and a note per work order line, keyed by the line's id ("i123" part, "l456" labour).
+ */
+export type LineNote = { text: string; by: string | null; at: string };
+export const jobSheets = pgTable("job_sheets", {
+  workorderId: text("workorder_id").primaryKey(),
+  showroomId: uuid("showroom_id")
+    .notNull()
+    .references(() => showrooms.id),
+  intake: jsonb("intake").$type<import("@/lib/intake").Intake>(),
+  intakeBy: uuid("intake_by"),
+  intakeAt: timestamp("intake_at", { withTimezone: true }),
+  lineNotes: jsonb("line_notes").$type<Record<string, LineNote>>().notNull().default({}),
+  ...timestamps,
+});
+export type JobSheet = typeof jobSheets.$inferSelect;
+
+/**
  * Kickstand Chat (docs/kickstand-chat.md): two-way texting on Twilio. One line per store: its texting number and
  * whether Kickstand may text customers from it. `enabled` is off until a manager turns the store on; inbound texts
  * are recorded either way.

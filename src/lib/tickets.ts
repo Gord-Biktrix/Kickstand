@@ -12,6 +12,8 @@ import { normalizePhone } from "./phone";
 import { baseUrl } from "./messages";
 import { itemNames, lightspeedReason } from "./workorder-lines";
 import { createTypeBooking } from "./type-bookings";
+import { intakeSummary, isEmptyIntake, type Intake } from "./intake";
+import { saveIntake } from "./job-sheet";
 import type { BookingType } from "@/db/schema";
 import type { ShowroomCtx } from "./showroom";
 
@@ -224,6 +226,8 @@ export type NewTicket = {
   parts?: { itemId: string; name: string; qty: number; price?: number | null; minutes?: number | null }[];
   /** Photos (base64 JPEG) taken at the counter; kept in Kickstand and shown on the job screen. */
   photos?: string[];
+  /** The bike's condition at the counter (odometer, chain, brakes…); kept on the job and in the note. */
+  intake?: Intake | null;
 };
 
 const MAX_PHOTOS = 6;
@@ -317,6 +321,7 @@ export async function scheduleTicket(
     customer: { lsCustomerId: string | null; name: string; phone: string; email: string };
     bike: string; serial: string; serializedId: string | null; service: string; said: string; employeeId: string | null;
     parts: { itemId: string; name: string; qty: number; price?: number | null; minutes?: number | null }[]; photos: string[];
+    intake?: Intake | null;
   },
 ): Promise<{ bookingId: string; workorderId: string | null; partsAdded: number; partsFailed: string[]; partsError?: string | null }> {
   if (!args.service.trim()) throw new TicketError("Tap what it needs.");
@@ -325,13 +330,14 @@ export async function scheduleTicket(
     type: args.type,
     startsAt: args.startsAt,
     createdBy: args.actor,
-    details: { name: args.customer.name, email: args.customer.email, phone: args.customer.phone, smsConsent: args.smsConsent, note: [args.service, args.said.trim()].filter(Boolean).join(". ") },
+    details: { name: args.customer.name, email: args.customer.email, phone: args.customer.phone, smsConsent: args.smsConsent, note: [args.service, args.said.trim(), intakeSummary(args.intake)].filter(Boolean).join(". ") },
     answers: (field) => (field === "q_bike" ? args.bike : field === "q_serial" ? args.serial : ""),
     lsCustomerId: args.customer.lsCustomerId,
     lsSerializedId: args.serializedId,
     now: args.now,
   });
   if (!booking.lsWorkorderId) return { bookingId: booking.id, workorderId: null, partsAdded: 0, partsFailed: args.parts.map((p) => p.name) };
+  if (!isEmptyIntake(args.intake)) await saveIntake(db, { showroomId: args.showroom.id, workorderId: booking.lsWorkorderId, intake: args.intake ?? null, actor: args.actor, now: args.now });
   const client = args.client ?? new LightspeedClient(db);
   const { added, failed, reason } = await addWorkorderParts(client, booking.lsWorkorderId, args.parts, args.employeeId);
   await attachTicketPhotos(db, client, { showroomId: args.showroom.id, workorderId: booking.lsWorkorderId, images: args.photos, actor: args.actor });
@@ -371,6 +377,7 @@ export async function createTicket(db: Db, args: { showroom: ShowroomCtx; ticket
     `${ticket.service.toUpperCase()} · ticket from Kickstand`,
     `Bike: ${ticket.bike.trim()}${ticket.serial.trim() ? ` · serial ${ticket.serial.trim()}` : ""}`,
     ticket.said.trim() ? `Notes: ${ticket.said.trim()}` : "",
+    intakeSummary(ticket.intake) ? `Condition: ${intakeSummary(ticket.intake)}` : "",
     ticket.parts?.length ? `Items: ${ticket.parts.map((p) => `${p.name}${p.qty > 1 ? ` ×${p.qty}` : ""}`).join(", ")}` : "",
   ].filter(Boolean).join("\n");
   let workorderID: string;
@@ -405,6 +412,7 @@ export async function createTicket(db: Db, args: { showroom: ShowroomCtx; ticket
     etaOut: ticket.readyBy,
     lsUpdatedAt: now,
   }).onConflictDoNothing();
+  if (!isEmptyIntake(ticket.intake)) await saveIntake(db, { showroomId: showroom.id, workorderId: workorderID, intake: ticket.intake ?? null, actor: args.actor, now });
   const { added: partsAdded, failed: partsFailed, reason: partsError } = await addWorkorderParts(client, workorderID, ticket.parts ?? [], ticket.employeeId);
   const photos = await attachTicketPhotos(db, client, { showroomId: showroom.id, workorderId: workorderID, images: ticket.photos ?? [], actor: args.actor });
   await db.insert(events).values({ showroomId: showroom.id, type: "ticket_created", actor: args.actor, payload: { workorder_id: workorderID, customer_id: customerId, service: ticket.service, parts_added: partsAdded, parts_failed: partsFailed, photos } });

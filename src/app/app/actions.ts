@@ -40,6 +40,8 @@ import { jobForConversation } from "@/lib/chat-view";
 import { addFinding, answerFindings, changeAnswer, closeUnanswered, markTakenOff, deleteDraft, sendFindings } from "@/lib/findings";
 import { deriveTrack, isCheckResult, isInspectionTask, parseChecklist, type CheckResult } from "@/lib/job-track";
 import { createTicket, scheduleTicket, ticketPhotoData } from "@/lib/tickets";
+import { intakeFromForm } from "@/lib/intake";
+import { removeLine, saveIntake, saveLineNote, setLinePrice } from "@/lib/job-sheet";
 import { jobPath } from "@/lib/workshop";
 
 /** Run a mutation and land back on `returnTo` with a flash; auth errors surface the same way. */
@@ -677,6 +679,7 @@ export async function createTicketAction(formData: FormData) {
         bike: str(formData, "bike"), serial: str(formData, "serial"), serializedId: str(formData, "sid") || null,
         service: ticketServices(formData), said: str(formData, "said"), employeeId: str(formData, "mech") || null,
         parts: ticketParts(formData), photos: ticketPhotoData(formData.getAll("photo").filter((v): v is string => typeof v === "string")),
+        intake: intakeFromForm((k) => str(formData, k)),
       });
       const lines = !r.workorderId ? " The Lightspeed work order isn't there yet, so its lines weren't added; open the booking to retry." : r.partsFailed.length ? ` ${r.partsFailed.length} line${r.partsFailed.length > 1 ? "s" : ""} couldn't be added (${r.partsFailed.join(", ")})${r.partsError ? `: Lightspeed said ${r.partsError}` : ""}.` : r.partsAdded ? ` ${r.partsAdded} line${r.partsAdded > 1 ? "s" : ""} on work order #${r.workorderId}.` : "";
       target = withFlash(`/app/bookings/${r.bookingId}`, { ok: `Drop-off booked. The customer gets a confirmation.${lines}` });
@@ -686,7 +689,7 @@ export async function createTicketAction(formData: FormData) {
     const readyBy = d && t ? localToUtc(d, t.slice(0, 5), showroom.timezone) : new Date(Date.now() + showroom.settings.repair_minutes * 60_000);
     const r = await createTicket(db, {
       showroom,
-      ticket: { customer, bike: str(formData, "bike"), serial: str(formData, "serial"), service: ticketServices(formData), said: str(formData, "said"), readyBy, employeeId: str(formData, "mech") || null, serializedId: str(formData, "sid") || null, parts: ticketParts(formData), photos: ticketPhotoData(formData.getAll("photo").filter((v): v is string => typeof v === "string")) },
+      ticket: { customer, bike: str(formData, "bike"), serial: str(formData, "serial"), service: ticketServices(formData), said: str(formData, "said"), readyBy, employeeId: str(formData, "mech") || null, serializedId: str(formData, "sid") || null, parts: ticketParts(formData), photos: ticketPhotoData(formData.getAll("photo").filter((v): v is string => typeof v === "string")), intake: intakeFromForm((k) => str(formData, k)) },
       actor: user.id,
     });
     const id = r.workorderId;
@@ -784,6 +787,57 @@ export async function jobCheckAction(jobId: string, key: string, label: string, 
     const step = deriveTrack(job.workorderId ? await loadJobLog(db, job.workorderId) : [], new Date()).step;
     if (step !== "inspection") throw new Error("Checks are answered during the inspection.");
     await logJob(db, { showroomId: showroom.id, workorderId: job.workorderId, actor: user.id, entry: result ? { kind: "task_done", taskKey: key, taskLabel: label, reason: result } : { kind: "task_undone", taskKey: key, taskLabel: label } });
+  });
+}
+
+/** Job page: the bike's condition at check-in (odometer, chain, bearings, key, brakes, pads). */
+export async function saveIntakeAction(jobId: string, back: string, formData: FormData) {
+  return run(safeReturn(back, "/app/workshop"), async () => {
+    const user = await requireActor("staff");
+    const showroom = await currentShowroom(user);
+    const job = await resolveJob(db, showroom, jobId);
+    await saveIntake(db, { showroomId: showroom.id, workorderId: job.workorderId, intake: intakeFromForm((k) => str(formData, k)), actor: user.id });
+    return "Condition saved.";
+  });
+}
+
+/** Job page: a note on one work order line (empty clears it). Kept in Kickstand. */
+export async function lineNoteAction(jobId: string, lineId: string, back: string, formData: FormData) {
+  return run(safeReturn(back, "/app/workshop"), async () => {
+    const user = await requireActor("staff");
+    const showroom = await currentShowroom(user);
+    const job = await resolveJob(db, showroom, jobId);
+    await saveLineNote(db, { showroomId: showroom.id, workorderId: job.workorderId, lineId, text: str(formData, "note"), actor: user.id });
+  });
+}
+
+/** Lines change before the repair starts (Check in and Inspection); after that, in Lightspeed. */
+async function lineEditJob(jobId: string) {
+  const user = await requireActor("staff");
+  const showroom = await currentShowroom(user);
+  const job = await resolveJob(db, showroom, jobId);
+  const step = deriveTrack(await loadJobLog(db, job.workorderId), new Date()).step;
+  if (step === "repair" || step === "pickup") throw new Error("Lines are changed during the inspection. Go back to Inspection, or change it in Lightspeed.");
+  return { user, showroom, job };
+}
+
+/** Inspection: take a line off the Lightspeed work order. */
+export async function removeLineAction(jobId: string, lineId: string, label: string, back: string) {
+  return run(safeReturn(back, "/app/workshop"), async () => {
+    const { user, showroom, job } = await lineEditJob(jobId);
+    await removeLine(db, new LightspeedClient(db), { showroomId: showroom.id, workorderId: job.workorderId, lineId, label, actor: user.id });
+    return `${label} taken off work order #${job.workorderId}.`;
+  });
+}
+
+/** Inspection: change a line's price (each, before tax) on the Lightspeed work order. */
+export async function linePriceAction(jobId: string, lineId: string, label: string, was: number | null, back: string, formData: FormData) {
+  return run(safeReturn(back, "/app/workshop"), async () => {
+    const { user, showroom, job } = await lineEditJob(jobId);
+    const price = Number(str(formData, "price").replace(/[$,\s]/g, ""));
+    if (was !== null && Math.abs(price - was) < 0.005) return;
+    await setLinePrice(db, new LightspeedClient(db), { showroomId: showroom.id, workorderId: job.workorderId, lineId, label, price, was, actor: user.id });
+    return `${label} is now $${price.toFixed(2)}.`;
   });
 }
 

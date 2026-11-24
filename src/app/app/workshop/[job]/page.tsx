@@ -24,7 +24,11 @@ import { findingPrice, findingTitle, isLevel, loadJobFindings, type JobFindings 
 import { LightspeedClient, lightspeedEnabled } from "@/lib/lightspeed";
 import { loadServiceItems, pickTiles } from "@/lib/service-items";
 import { listShowrooms, type ShowroomCtx } from "@/lib/showroom";
-import { jobReadyAction, jobResumeAction, jobStepAction, jobStepBackAction, jobTaskAction, jobCheckAction, sendTrackerAction, cancelTicketAction, addFindingAction, deleteFindingAction, sendFindingsAction, staffAnswerFindingAction, findingTakenOffAction, moveJobAction, setBookingStatusAction, staffCancelTypeBookingAction } from "../../actions";
+import { jobReadyAction, jobResumeAction, jobStepAction, jobStepBackAction, jobTaskAction, jobCheckAction, sendTrackerAction, cancelTicketAction, addFindingAction, deleteFindingAction, sendFindingsAction, staffAnswerFindingAction, findingTakenOffAction, moveJobAction, setBookingStatusAction, staffCancelTypeBookingAction, saveIntakeAction, lineNoteAction, removeLineAction, linePriceAction } from "../../actions";
+import { IntakeFields } from "@/components/intake-fields";
+import { intakeRows, type Intake } from "@/lib/intake";
+import { loadJobSheet } from "@/lib/job-sheet";
+import type { LineNote } from "@/db/schema";
 
 export const metadata = { title: "Job" };
 
@@ -94,6 +98,13 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   const drafts = jf?.findings.filter((f) => !f.requestId).length ?? 0;
   const adding = canFind && sp(q.add) === "1";
   const tiles = adding ? await findingTiles(showroom) : [];
+  const sheet = job.workorderId ? await loadJobSheet(db, job.workorderId) : null;
+  const notes = sheet?.lineNotes ?? {};
+  // Before the repair starts, the condition and the lines can still change.
+  const early = !!job.workorderId && (step === "checked_in" || step === "inspection");
+  const editingCondition = early && (sp(q.condition) === "1" || !sheet?.intake);
+  const editingLines = early && sp(q.lines) === "1" && !!lines?.length;
+  const noting = sp(q.note) ?? null;
 
   return (
     <div>
@@ -128,19 +139,36 @@ export default async function JobPage({ params, searchParams }: { params: Promis
             </div>
           )}
 
+          {job.workorderId && (editingCondition ? (
+            <form action={saveIntakeAction.bind(null, job.id, self)} className="rounded-lg border border-border p-3">
+              <p className={`${label} mb-2`}>Condition</p>
+              <IntakeFields value={sheet?.intake} />
+              <div className="mt-3 flex justify-end gap-2">
+                {sheet?.intake && <Link href={self} className="btn btn-sm">Cancel</Link>}
+                <button type="submit" className="btn btn-primary btn-sm">Save condition</button>
+              </div>
+            </form>
+          ) : sheet?.intake ? (
+            <Condition intake={sheet.intake} changeHref={early ? `${self}?condition=1` : null} />
+          ) : null)}
+
           {lines === null ? (
             <p className="text-sm text-red-700">Lightspeed didn&apos;t send the work order&apos;s lines{failReason ? ` (${failReason})` : ""}. Open it in Lightspeed or try again.</p>
           ) : step === "pickup" ? (
-            <Done tasks={tasks} track={track} names={names} />
+            <Done tasks={tasks} track={track} names={names} notes={notes} />
           ) : step === "repair" ? (
             <>
-              <TaskList title="Repair · the work order's lines" tasks={tasks} track={track} names={names} jobId={job.id} self={self} canTick />
+              <TaskList title="Repair · the work order's lines" tasks={tasks} track={track} names={names} jobId={job.id} self={self} canTick notes={notes} noting={noting} />
               <InspectionSummary checks={checks} track={track} />
             </>
           ) : (
             <>
               <CheckList checks={checks} track={track} jobId={job.id} self={self} canAnswer={step === "inspection"} canFind={canFind} />
-              <TaskList title="Repair, next · the work order's lines" tasks={tasks} track={track} names={names} jobId={job.id} self={self} canTick={false} muted />
+              {editingLines ? (
+                <LineEditor lines={lines} jobId={job.id} self={self} />
+              ) : (
+                <TaskList title="Repair, next · the work order's lines" tasks={tasks} track={track} names={names} jobId={job.id} self={self} canTick={false} muted notes={notes} noting={null} change={early && lines.length > 0 ? `${self}?lines=1` : null} />
+              )}
             </>
           )}
 
@@ -270,12 +298,15 @@ function Steps({ job, step, track, tz, checks }: { job: WorkshopJob; step: JobSt
   );
 }
 
-function TaskList({ title, tasks, track, names, jobId, self, canTick, muted }: { title: string; tasks: Task[]; track: Track; names: Map<string, string>; jobId: string; self: string; canTick: boolean; muted?: boolean }) {
+function TaskList({ title, tasks, track, names, jobId, self, canTick, muted, notes, noting, change }: { title: string; tasks: Task[]; track: Track; names: Map<string, string>; jobId: string; self: string; canTick: boolean; muted?: boolean; notes: Record<string, LineNote>; noting: string | null; change?: string | null }) {
   const current = tasks.find((t) => !track.tasks.has(t.key));
   return (
-    <div className={muted ? "opacity-60" : ""}>
-      <p className={label}>{title}</p>
-      <ul className="mt-1">
+    <div>
+      <p className="flex items-baseline justify-between gap-2">
+        <span className={`${label} ${muted ? "opacity-60" : ""}`}>{title}</span>
+        {change && <Link href={change} className="text-sm font-bold text-[#015d47] underline">Change lines</Link>}
+      </p>
+      <ul className={`mt-1 ${muted ? "opacity-60" : ""}`}>
         {tasks.map((t) => {
           const s = track.tasks.get(t.key);
           const isNow = canTick && track.running && current?.key === t.key;
@@ -299,9 +330,10 @@ function TaskList({ title, tasks, track, names, jobId, self, canTick, muted }: {
               </span>
             </>
           );
-          const cls = "grid min-h-14 w-full grid-cols-[34px_minmax(0,1fr)_auto] items-center gap-2.5 border-t border-[#f1efeb] text-[15px] first:border-t-0";
+          const cls = "grid min-h-14 w-full grid-cols-[34px_minmax(0,1fr)_auto] items-center gap-2.5 text-[15px]";
+          const note = notes[t.key]?.text;
           return (
-            <li key={t.key}>
+            <li key={t.key} className="border-t border-[#f1efeb] first:border-t-0">
               {canTick && s?.status !== "skipped" ? (
                 <form action={jobTaskAction.bind(null, jobId, t.key, t.label, s?.status !== "done", self)}>
                   <button type="submit" className={cls} aria-label={s?.status === "done" ? `Undo ${t.label}` : `${t.label} done`}>{row}</button>
@@ -309,6 +341,20 @@ function TaskList({ title, tasks, track, names, jobId, self, canTick, muted }: {
               ) : (
                 <div className={cls}>{row}</div>
               )}
+              {canTick && noting === t.key ? (
+                <form action={lineNoteAction.bind(null, jobId, t.key, self)} className="mb-2 ml-[44px] grid gap-2">
+                  <textarea name="note" defaultValue={note ?? ""} rows={2} autoFocus aria-label={`Note on ${t.label}`} placeholder="What you did, what you used, what to watch" className="input min-h-16 py-2 text-base" />
+                  <span className="flex justify-end gap-2">
+                    <Link href={self} className="btn btn-sm">Cancel</Link>
+                    <button type="submit" className="btn btn-primary btn-sm">Save note</button>
+                  </span>
+                </form>
+              ) : note || canTick ? (
+                <p className="-mt-1.5 mb-2 ml-[44px] text-sm">
+                  {note && <span className="whitespace-pre-line text-[#3d3f43]">{note} </span>}
+                  {canTick && <Link href={`${self}?note=${encodeURIComponent(t.key)}`} className="font-semibold text-muted underline">{note ? "Edit" : "+ Note"}</Link>}
+                </p>
+              ) : null}
             </li>
           );
         })}
@@ -364,7 +410,55 @@ function InspectionSummary({ checks, track }: { checks: Task[]; track: Track }) 
   return <p className="text-sm text-muted">Inspection: {ok} OK{flagged.length ? ` · ${flagged.join(", ")}` : ""}{track.stepMinutes.inspection ? ` · ${fmtMinutes(track.stepMinutes.inspection)}` : ""}.</p>;
 }
 
-function Done({ tasks, track, names }: { tasks: Task[]; track: Track; names: Map<string, string> }) {
+/** The bike's condition at check-in, read only, with Change while it's still before the repair. */
+function Condition({ intake, changeHref }: { intake: Intake; changeHref: string | null }) {
+  const rows = intakeRows(intake);
+  return (
+    <div>
+      <p className="flex items-baseline justify-between gap-2">
+        <span className={label}>Condition</span>
+        {changeHref && <Link href={changeHref} className="text-sm font-bold text-[#015d47] underline">Change</Link>}
+      </p>
+      <dl className="mt-1 grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-0.5 text-[15px] sm:grid-cols-[auto_minmax(0,1fr)_auto_minmax(0,1fr)]">
+        {rows.map(([k, v]) => (
+          <div key={k} className="contents">
+            <dt className="text-muted">{k}</dt>
+            <dd className="font-semibold">{v}</dd>
+          </div>
+        ))}
+      </dl>
+    </div>
+  );
+}
+
+/** Inspection: change a line's price or take it off the Lightspeed work order. */
+function LineEditor({ lines, jobId, self }: { lines: WorkorderLine[]; jobId: string; self: string }) {
+  return (
+    <div>
+      <p className="flex items-baseline justify-between gap-2">
+        <span className={label}>Change lines · Lightspeed work order</span>
+        <Link href={self} className="text-sm font-bold text-[#015d47] underline">Done</Link>
+      </p>
+      <ul className="mt-1">
+        {lines.map((l) => (
+          <li key={l.id} className="flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-[#f1efeb] py-2.5 text-[15px] first:border-t-0">
+            <span className="min-w-0 flex-1 font-semibold">{l.description}{l.qty !== 1 ? ` × ${l.qty}` : ""}</span>
+            <form action={linePriceAction.bind(null, jobId, l.id, l.description, l.unitPrice, `${self}?lines=1`)} className="flex items-center gap-1.5">
+              <span className="text-muted">$</span>
+              <input name="price" inputMode="decimal" defaultValue={l.unitPrice !== null ? l.unitPrice.toFixed(2) : ""} aria-label={`${l.description} price each`} className="input h-11 w-24 text-right text-base tabular-nums" />
+              <button type="submit" className="btn btn-sm">Save</button>
+            </form>
+            <form action={removeLineAction.bind(null, jobId, l.id, l.description, `${self}?lines=1`)}>
+              <ConfirmButton className="btn btn-danger btn-sm" message={`Take ${l.description} off the work order in Lightspeed?`}>Remove</ConfirmButton>
+            </form>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function Done({ tasks, track, names, notes }: { tasks: Task[]; track: Track; names: Map<string, string>; notes: Record<string, LineNote> }) {
   return (
     <div>
       <p className={label}>What was done</p>
@@ -374,7 +468,7 @@ function Done({ tasks, track, names }: { tasks: Task[]; track: Track; names: Map
           return (
             <li key={t.key} className="grid min-h-11 grid-cols-[26px_minmax(0,1fr)_auto] items-center gap-2.5 border-t border-[#f1efeb] text-[15px] first:border-t-0">
               <span aria-hidden className={`flex h-6 w-6 items-center justify-center rounded-md text-sm font-bold ${s?.status === "done" ? "bg-[#015d47] text-white" : "bg-[#f1efeb] text-muted"}`}>{s?.status === "done" ? "✓" : "–"}</span>
-              <span>{t.label}</span>
+              <span>{t.label}{notes[t.key]?.text && <span className="block text-sm whitespace-pre-line text-muted">{notes[t.key].text}</span>}</span>
               <span className="text-[13px] text-muted">
                 {s?.status === "done" ? [s.actor ? names.get(s.actor) : null, s.minutes !== null ? fmtMinutes(s.minutes) : null].filter(Boolean).join(" · ") : s?.status === "skipped" ? `skipped: ${s.reason}` : "not ticked"}
               </span>

@@ -5,6 +5,7 @@ import type { Picked } from "./customer-picker";
 import { readyLabel } from "./ready-picker";
 import { Wheel } from "./booking-calendar-picker";
 import { TicketCustomerBike } from "./ticket-customer-bike";
+import { IntakeFields } from "./intake-fields";
 import { estimateReady, type WeeklyHours } from "@/lib/ready-estimate";
 import { zoneAt } from "@/lib/tz-rules";
 
@@ -265,6 +266,10 @@ export function TicketPos(props: {
           <button type="button" onClick={() => setAddOpen(true)} className="my-3 flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-[#cfcbc4] text-sm font-bold lg:hidden">
             <span aria-hidden className="text-lg leading-none">+</span> Add service, labour or part
           </button>
+          <div className="border-t border-border py-3">
+            <p className={`${label} mb-2`}>Condition</p>
+            <IntakeFields />
+          </div>
           <div className="border-t border-border py-3">
             <label htmlFor="said" className={label}>Notes</label>
             <textarea id="said" name="said" defaultValue={props.initial.said} rows={2} placeholder="What they said, what you noticed" className="input mt-1 min-h-16 py-2 text-base" />
