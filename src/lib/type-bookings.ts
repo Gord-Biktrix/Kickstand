@@ -384,7 +384,12 @@ async function syncCheckInWorkorder(db: Db, args: { booking: Booking; outcome: "
   const statusID = args.outcome === "completed" ? showroom.settings.lightspeed.open_status_id : await appointmentStatusId(db, showroom);
   try {
     await new LightspeedClient(db).updateWorkorder(b.lsWorkorderId, { workorderStatusID: statusID, ...(args.outcome === "completed" ? { timeIn: args.now.toISOString() } : {}) });
-    await db.update(lsWorkorders).set({ statusId: statusID, ...(args.outcome === "completed" ? { timeIn: args.now } : {}) }).where(eq(lsWorkorders.id, b.lsWorkorderId));
+    // Kickstand's copy has it from now on, even before the hourly sync has seen it: the board and the job page need it.
+    const moved = { statusId: statusID, ...(args.outcome === "completed" ? { timeIn: args.now } : {}) };
+    await db
+      .insert(lsWorkorders)
+      .values({ id: b.lsWorkorderId, showroomId: b.showroomId, customerName: b.customerName, hookIn: type.name.slice(0, 40), etaOut: b.endsAt, lsUpdatedAt: args.now, ...moved })
+      .onConflictDoUpdate({ target: lsWorkorders.id, set: moved });
     await db.insert(events).values({ showroomId: b.showroomId, type: "booking_workorder_updated", actor: args.actor, payload: { booking_id: b.id, workorder_id: b.lsWorkorderId, status_id: statusID } });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -491,6 +496,11 @@ export async function syncBookingWorkorder(db: Db, args: { showroom: ShowroomCtx
       ...common,
     });
     const [row] = await db.update(bookings).set({ lsWorkorderId: workorderID }).where(eq(bookings.id, b.id)).returning();
+    // On the board straight away, not at the next hourly sync.
+    await db
+      .insert(lsWorkorders)
+      .values({ id: workorderID, showroomId: showroom.id, statusId: await appointmentStatusId(db, showroom), customerId: String(customerID), customerName: b.customerName, note: common.note, hookIn: common.hookIn, hookOut: common.hookOut, etaOut: b.startsAt, timeIn: new Date(), lsUpdatedAt: new Date() })
+      .onConflictDoNothing();
     await db.insert(events).values({ showroomId: showroom.id, type: "booking_workorder_created", actor: args.actor, payload: { booking_id: b.id, workorder_id: workorderID, customer_id: customerID, customer_matched: matched } });
     return row;
   } catch (err) {

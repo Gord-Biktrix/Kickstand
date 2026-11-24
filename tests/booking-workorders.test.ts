@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { Db } from "@/db/client";
-import { bookings, events, lsWorkorderStatuses, type BookingType } from "@/db/schema";
+import { bookings, events, lsWorkorders, lsWorkorderStatuses, type BookingType } from "@/db/schema";
 import { createBookingType, validateBookingType, WEEKDAY_8_TO_4 } from "@/lib/booking-types";
 import { saveConnection, setLightspeedFetch } from "@/lib/lightspeed";
 import { MemoryNotifier, setNotifier } from "@/lib/notifier";
@@ -109,6 +109,21 @@ describe("service bookings and Lightspeed work orders", () => {
     expect(checkIn.body).toEqual({ workorderStatusID: 1, timeIn: at.toISOString() });
     await setBookingOutcome(db, { showroomId: van.id, bookingId: booking.id, outcome: "booked", actor: "staff-1", now: at });
     expect(ls.calls.filter((c) => c.method === "PUT").at(-1)!.body).toEqual({ workorderStatusID: 27 });
+  });
+
+  it("a checked-in booking's job page opens before the hourly sync has seen its work order", async () => {
+    const { workshopJobs } = await import("@/lib/workshop");
+    await db.insert(lsWorkorderStatuses).values([{ id: 1, name: "Open", systemValue: "open" }, { id: 27, name: "Appointment", systemValue: null }]);
+    setLightspeedFetch(fakeLightspeed().fetchImpl);
+    const { booking } = await createTypeBooking(db, { showroom: van, type: service, startsAt: slot("10:00"), details, createdBy: "customer", now: NOW });
+    const [made] = await db.select().from(lsWorkorders).where(eq(lsWorkorders.id, booking.lsWorkorderId!));
+    expect(made).toMatchObject({ statusId: 27, customerName: "Pat Mechanic" });
+    // Kickstand's copy lost it (made before this fix, say): check in puts it back.
+    await db.delete(lsWorkorders);
+    const at = localToUtc("2027-11-16", "09:55", TZ);
+    await setBookingOutcome(db, { showroomId: van.id, bookingId: booking.id, outcome: "completed", actor: "staff-1", now: at });
+    const jobs = await workshopJobs(db, van, at);
+    expect(jobs.find((j) => j.id === `b:${booking.id}`)).toMatchObject({ workorderId: booking.lsWorkorderId, notHereYet: false });
   });
 
   it("a booking scheduled from New ticket uses the Lightspeed customer and bike already picked", async () => {
