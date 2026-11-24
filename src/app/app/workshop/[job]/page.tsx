@@ -26,6 +26,7 @@ import { loadServiceItems, pickTiles } from "@/lib/service-items";
 import { listShowrooms, type ShowroomCtx } from "@/lib/showroom";
 import { jobReadyAction, jobResumeAction, jobStepAction, jobStepBackAction, jobTaskAction, jobCheckAction, sendTrackerAction, cancelTicketAction, addFindingAction, deleteFindingAction, sendFindingsAction, staffAnswerFindingAction, findingTakenOffAction, moveJobAction, setBookingStatusAction, staffCancelTypeBookingAction, saveIntakeAction, lineNoteAction, removeLineAction, linePriceAction } from "../../actions";
 import { IntakeFields } from "@/components/intake-fields";
+import { FitWindow } from "@/components/fit-window";
 import { intakeRows, type Intake } from "@/lib/intake";
 import { loadJobSheet } from "@/lib/job-sheet";
 import type { LineNote } from "@/db/schema";
@@ -121,10 +122,10 @@ export default async function JobPage({ params, searchParams }: { params: Promis
         </div>
       </div>
 
-      <div className="grid gap-3 lg:grid-cols-[220px_minmax(0,1fr)_300px]">
+      <FitWindow className="grid gap-3 lg:grid-cols-[220px_minmax(0,1fr)_300px]">
         <Steps job={job} step={step} track={track} tz={tz} checks={checks} />
 
-        <section aria-label={step ? STEP_LABEL[step] : "Booked"} className="flex min-w-0 flex-col gap-4 rounded-xl border border-border bg-card p-4">
+        <section aria-label={step ? STEP_LABEL[step] : "Booked"} className="flex min-w-0 flex-col gap-4 rounded-xl border border-border bg-card p-4 lg:min-h-0 lg:overflow-y-auto lg:overscroll-contain">
           <div className="flex items-baseline justify-between gap-2">
             <h2 className="text-lg font-extrabold">{step ? STEP_LABEL[step] : "Booked, not here yet"}</h2>
             {step && track.stepAt[step] && <span className="text-sm text-muted">started {formatTime(track.stepAt[step]!, tz)}</span>}
@@ -189,7 +190,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
           )}
         </section>
 
-        <aside aria-label="Customer and next step" className="flex min-w-0 flex-col gap-3">
+        <aside aria-label="Customer and next step" className="flex min-w-0 flex-col gap-3 lg:min-h-0 lg:overflow-y-auto lg:overscroll-contain">
           <section className="rounded-xl border border-border bg-card p-4" aria-labelledby="cust">
             <p id="cust" className={label}>Customer</p>
             <p className="mt-1 text-base font-extrabold">{job.customer ?? "Shop bike"}</p>
@@ -247,7 +248,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
             )}
           </section>
         </aside>
-      </div>
+      </FitWindow>
 
       {adding && <FindingSheet action={addFindingAction.bind(null, job.id, self)} close={self} first={first} tiles={tiles} drafts={drafts} about={sp(q.about) ?? ""} />}
       {readying && open.length > 0 && <ReadyPanel jobId={job.id} self={self} open={open} first={first} canTell={job.kind !== "floor" && !!job.customer} />}
@@ -270,7 +271,7 @@ function Steps({ job, step, track, tz, checks }: { job: WorkshopJob; step: JobSt
     return track.stepAt.pickup ? `ready ${formatTime(track.stepAt.pickup, tz)}` : "";
   };
   return (
-    <nav aria-label="Steps" className="flex flex-col gap-1 rounded-xl border border-border bg-card p-2">
+    <nav aria-label="Steps" className="flex flex-col gap-1 rounded-xl border border-border bg-card p-2 lg:min-h-0 lg:overflow-y-auto">
       <ol className="flex flex-col gap-1">
         {STEP_ORDER.map((s, i) => {
           const state = i < idx ? "done" : i === idx ? "now" : "next";

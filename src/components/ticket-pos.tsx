@@ -288,14 +288,14 @@ export function TicketPos(props: {
         {/* Phones: the total, Ready by and the button stay at the bottom of the screen. */}
         <div className="sticky bottom-0 z-30 rounded-b-xl border-t border-border bg-card p-4 max-lg:px-3 max-lg:py-2.5 max-lg:shadow-[0_-4px_12px_rgba(0,0,0,0.06)] lg:static">
           <div className="mb-3 flex items-end justify-between gap-3 max-lg:mb-2 max-lg:items-baseline lg:hidden">
-            <p className="text-sm text-muted">{work ? `${mins(work)} of work` : "No work yet"}{partsTotal ? ` · ${money(partsTotal)}` : ""}</p>
+            <p className="text-sm text-muted">{work ? `${mins(work)} of work` : ""}{partsTotal ? `${work ? " · " : ""}${money(partsTotal)}` : ""}</p>
             <p className="text-sm font-bold">{lines.length > 0 && ready ? `Ready ${readyLabel(ready)}` : ""}</p>
           </div>
           {/* Laptops: a POS total, the work on the left and the price on the right. */}
           <div className="mb-3 hidden items-end justify-between gap-3 lg:flex">
             <div>
               <p className={label}>Total</p>
-              <p className="mt-1 text-base font-semibold">{work ? `${mins(work)} of work` : "No work yet"}</p>
+              {work > 0 && <p className="mt-1 text-base font-semibold">{mins(work)} of work</p>}
             </div>
             <p className="text-right">
               <span className="text-[28px] leading-none font-extrabold tabular-nums">{partsTotal ? money(partsTotal) : "—"}</span>
@@ -341,11 +341,10 @@ export function TicketPos(props: {
             <p className={`${label} mt-1`}>Parts in Lightspeed</p>
             {parts.length > 0 && partsState !== "loading" && <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 xl:grid-cols-4">{parts.map(partTile)}</div>}
             <p className="text-sm text-muted">
-              {partsState === "loading" ? "Looking in Lightspeed…" : partsState === "error" ? `Lightspeed didn't send parts (${partsError}).` : parts.length === 0 ? `No parts match “${search.trim()}”.` : "Tap to add; parts go on the work order as lines."}
+              {partsState === "loading" ? "Looking in Lightspeed…" : partsState === "error" ? `Lightspeed didn't send parts (${partsError}).` : parts.length === 0 ? `No parts match “${search.trim()}”.` : ""}
             </p>
           </>
         )}
-        {tab === "all" && !query && <p className="text-sm text-muted">Type to search parts too.</p>}
         {(tab === "services" || tab === "labour") && !shown.length && !labourShown.length && !presetsShown.length && query && <p className="text-sm text-muted">Nothing matches “{search.trim()}”.</p>}
         {tab === "parts" && (
           <p className="text-sm text-muted">
@@ -357,14 +356,10 @@ export function TicketPos(props: {
                   ? "Pick the customer's bike, or search, to see parts."
                   : parts.length === 0
                     ? `No parts in Lightspeed match “${search.trim() || model}”. Try another word.`
-                    : `Lightspeed items matching “${search.trim() || model}”. Tap to add; they go on the work order as lines.`}
+                    : ""}
           </p>
         )}
-        {tab !== "parts" && !partsInAll && (
-          <p className="text-sm text-muted">
-            {props.tilesNote || "Your Lightspeed service and labour items. Tap to add (again for more); each goes on the work order as a line at its Lightspeed price."}
-          </p>
-        )}
+        {tab !== "parts" && !partsInAll && props.tilesNote && <p className="text-sm text-muted">{props.tilesNote}</p>}
         <button type="button" onClick={() => setAddOpen(false)} className="sticky bottom-0 mt-auto min-h-12 w-full rounded-xl bg-[#17181a] text-base font-bold text-white lg:hidden">
           Done{lines.length ? ` · ${lines.reduce((n, l) => n + l.qty, 0)} item${lines.reduce((n, l) => n + l.qty, 0) === 1 ? "" : "s"}${work ? ` · ${mins(work)}` : ""}` : ""}
         </button>
