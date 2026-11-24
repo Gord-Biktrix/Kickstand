@@ -287,19 +287,25 @@ export function TicketPos(props: {
 
         {/* Phones: the total, Ready by and the button stay at the bottom of the screen. */}
         <div className="sticky bottom-0 z-30 rounded-b-xl border-t border-border bg-card p-4 max-lg:px-3 max-lg:py-2.5 max-lg:shadow-[0_-4px_12px_rgba(0,0,0,0.06)] lg:static">
-          <div className="mb-3 flex items-end justify-between gap-3 max-lg:mb-2 max-lg:items-baseline">
-            <p className="text-sm text-muted lg:hidden">{work ? `${mins(work)} of work` : "No work yet"}{partsTotal ? ` · ${money(partsTotal)}` : ""}</p>
-            <p className="text-sm font-bold lg:hidden">{lines.length > 0 && ready ? `Ready ${readyLabel(ready)}` : ""}</p>
-            <div className="hidden text-right lg:ml-auto lg:block">
-              <p className="text-sm text-muted">Work{partsTotal ? " · before tax" : ""}</p>
-              <p className="text-xl font-extrabold">{work ? mins(work) : "—"}{partsTotal ? ` · ${money(partsTotal)}` : ""}</p>
+          <div className="mb-3 flex items-end justify-between gap-3 max-lg:mb-2 max-lg:items-baseline lg:hidden">
+            <p className="text-sm text-muted">{work ? `${mins(work)} of work` : "No work yet"}{partsTotal ? ` · ${money(partsTotal)}` : ""}</p>
+            <p className="text-sm font-bold">{lines.length > 0 && ready ? `Ready ${readyLabel(ready)}` : ""}</p>
+          </div>
+          {/* Laptops: a POS total, the work on the left and the price on the right. */}
+          <div className="mb-3 hidden items-end justify-between gap-3 lg:flex">
+            <div>
+              <p className={label}>Total</p>
+              <p className="mt-1 text-base font-semibold">{work ? `${mins(work)} of work` : "No work yet"}</p>
             </div>
+            <p className="text-right">
+              <span className="text-[28px] leading-none font-extrabold tabular-nums">{partsTotal ? money(partsTotal) : "—"}</span>
+              {partsTotal ? <span className="block text-xs text-muted">+ tax</span> : null}
+            </p>
           </div>
           <label className="mb-2 flex min-h-11 items-center gap-2 text-sm"><input type="checkbox" name="sms_consent" defaultChecked className="h-5 w-5" /> {dropoff === "now" ? "Text them a link to follow the repair" : "Customer agrees to texts about this booking"}</label>
           <button type="submit" disabled={!props.enabled} className="flex min-h-14 w-full items-center justify-center rounded-xl lg:min-h-16 bg-[#ff6b1a] px-4 text-center text-lg font-extrabold text-[#17181a] disabled:opacity-50">
             {dropoff === "now" ? "Check in · create ticket" : `Book service · ${dropLabel}`}
           </button>
-          <p className="mt-2 hidden text-xs text-muted lg:block">{dropoff === "now" ? "Creates the Lightspeed work order now (Open, with the lines) and puts it in To do." : "Books the service appointment (the customer gets a confirmation) and puts the lines on its Lightspeed work order."}</p>
         </div>
       </section>
 
