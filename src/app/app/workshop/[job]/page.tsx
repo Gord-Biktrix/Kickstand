@@ -12,7 +12,7 @@ import { sp, type SearchParams } from "@/lib/flash";
 import { formatTime } from "@/lib/time";
 import { jobIdFromPath, jobPath, workshopJobs, type WorkshopJob } from "@/lib/workshop";
 import { fetchWorkorderLines, forgetWorkorder, linesSubtotal, type WorkorderLine } from "@/lib/workorder-lines";
-import { lightspeedWorkorderUrl } from "@/lib/workorders";
+import { lightspeedWorkorderUrl, syncWorkordersIfStale } from "@/lib/workorders";
 import { listTicketPhotos } from "@/lib/tickets";
 import { loadJobLog, recordTaskTotal } from "@/lib/job-log";
 import { CHECK_RESULTS, checkResult, currentStep, deriveTrack, fmtMinutes, jobChecklist, jobTasks, openTasks, repairDone, STEP_LABEL, STEP_ORDER, type JobStep, type Task, type Track } from "@/lib/job-track";
@@ -50,7 +50,9 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   const jobId = jobIdFromPath(ref);
   if (!jobId) notFound();
   const now = new Date();
-  const job = (await workshopJobs(db, showroom, now, 60)).find((j) => j.id === jobId);
+  let job = (await workshopJobs(db, showroom, now, 60)).find((j) => j.id === jobId);
+  // Not in Kickstand's copy of Lightspeed yet (made there in the last few minutes): read Lightspeed once, then look again.
+  if (!job && (await syncWorkordersIfStale(db, showroom, { now, maxAgeMs: 60_000 }))) job = (await workshopJobs(db, showroom, now, 60)).find((j) => j.id === jobId);
   if (!job) notFound();
   if (job.unitId) {
     // Bikes for pickup have their own page with the build checklist.

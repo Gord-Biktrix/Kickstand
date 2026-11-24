@@ -12,6 +12,7 @@ import { currentShowroom } from "@/lib/current-showroom";
 import { sp, type SearchParams } from "@/lib/flash";
 import { addLocalDays, formatTime, localToUtc, toLocalDate } from "@/lib/time";
 import { jobPath, workshopJobs, type JobColumn, type WorkshopJob } from "@/lib/workshop";
+import { syncWorkordersIfStale } from "@/lib/workorders";
 import { loadJobLogs } from "@/lib/job-log";
 import { currentStep, deriveTrack, fmtMinutes, repairDone, STEP_LABEL, type Track } from "@/lib/job-track";
 import { markReadyAction, moveJobAction, readyJobAction, setBookingStatusAction, startBuildAction } from "../actions";
@@ -69,6 +70,7 @@ export default async function WorkshopPage({ searchParams }: { searchParams: Pro
   const tz = showroom.timezone;
   const now = new Date();
   const today = toLocalDate(now, tz);
+  await syncWorkordersIfStale(db, showroom, { now });
   const all = await workshopJobs(db, showroom, now);
   // Mechanic filter: everyone, one person (by Lightspeed employee id), or jobs nobody has yet.
   const mechanics = [...new Map(all.filter((j) => j.mechanicId).map((j) => [j.mechanicId!, j.mechanic ?? `Employee ${j.mechanicId}`])).entries()].sort((a, b) => a[1].localeCompare(b[1]));

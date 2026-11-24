@@ -57,6 +57,20 @@ describe("work-order mirror and views", () => {
     expect((await listWorkorders(db, showroom)).map((w) => `${w.id}:${w.statusId}`)).toEqual(["9106:8"]);
   });
 
+  it("the board reads Lightspeed itself when its copy is over 10 minutes old, not before", async () => {
+    const { syncWorkordersIfStale } = await import("@/lib/workorders");
+    const on = { ...showroom, settings: { ...showroom.settings, lightspeed: { ...showroom.settings.lightspeed, enabled: true } } };
+    const src = new Fake([wo({ id: "10122" })]);
+    const t0 = new Date(); // the sync is logged at the real time
+    expect(await syncWorkordersIfStale(db, on, { now: t0, source: src })).toBe(true);
+    src.open = [wo({ id: "10122" }), wo({ id: "10123" })];
+    expect(await syncWorkordersIfStale(db, on, { now: new Date(t0.getTime() + 5 * 60_000), source: src })).toBe(false);
+    expect((await listWorkorders(db, on)).map((w) => w.id)).toEqual(["10122"]);
+    expect(await syncWorkordersIfStale(db, on, { now: new Date(t0.getTime() + 11 * 60_000), source: src })).toBe(true);
+    expect((await listWorkorders(db, on)).map((w) => w.id).sort()).toEqual(["10122", "10123"]);
+    expect(await syncWorkordersIfStale(db, showroom, { now: t0, source: src })).toBe(false); // Lightspeed off for the store
+  });
+
   it("puts mapped work orders on the Workshop board with the mechanic's name, once each", async () => {
     const order = await makeOrder(db, showroom);
     const unit = await makeUnit(db, showroom, order.id);

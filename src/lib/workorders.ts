@@ -4,9 +4,9 @@
  * and cut it into views they define themselves: a view is a name and a set of Lightspeed statuses.
  * Nothing here writes to Lightspeed.
  */
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import type { Db } from "@/db/client";
-import { lsEmployees, lsWorkorders, lsWorkorderStatuses, units, workorderViews, type LsWorkorder, type LsWorkorderStatus, type WorkorderView } from "@/db/schema";
+import { events, lsEmployees, lsWorkorders, lsWorkorderStatuses, units, workorderViews, type LsWorkorder, type LsWorkorderStatus, type WorkorderView } from "@/db/schema";
 import { logEvent } from "./events";
 import { asList, getConnection, LightspeedClient } from "./lightspeed";
 import { logger } from "./logger";
@@ -137,6 +137,30 @@ export async function syncWorkorders(dbx: Db, args: { showroom: ShowroomCtx; act
   }
   await logEvent(dbx, { showroomId: showroom.id, type: "workorders_synced", actor: args.actor, payload: summary });
   return summary;
+}
+
+/**
+ * The Workshop board's own refresh: if this store's work orders haven't been read from Lightspeed in the last
+ * 10 minutes, read them now. The hourly job runs late (GitHub delays scheduled runs by hours), and a board that
+ * hasn't seen a work order made in Lightspeed can't show it. Never throws; the board shows what it has.
+ */
+export async function syncWorkordersIfStale(dbx: Db, showroom: ShowroomCtx, opts: { now?: Date; maxAgeMs?: number; source?: WorkorderSource } = {}): Promise<boolean> {
+  const now = opts.now ?? new Date();
+  const maxAgeMs = opts.maxAgeMs ?? 10 * 60_000;
+  if (!showroom.settings.lightspeed.enabled || !showroom.settings.lightspeed.shop_id) return false;
+  const [last] = await dbx
+    .select({ at: sql<Date | null>`max(${events.createdAt})` })
+    .from(events)
+    .where(and(eq(events.showroomId, showroom.id), eq(events.type, "workorders_synced")));
+  const at = last?.at ? new Date(last.at) : null;
+  if (at && now.getTime() - at.getTime() < maxAgeMs) return false;
+  try {
+    await syncWorkorders(dbx, { showroom, actor: "board", now, source: opts.source });
+    return true;
+  } catch (err) {
+    logger.warn({ err: err instanceof Error ? err.message : String(err), showroom: showroom.slug }, "board: work-order sync skipped");
+    return false;
+  }
 }
 
 export async function listWorkorderStatuses(dbx: Db): Promise<LsWorkorderStatus[]> {
