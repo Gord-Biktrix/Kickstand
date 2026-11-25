@@ -1,7 +1,7 @@
 import { and, asc, eq } from "drizzle-orm";
 import type { DbOrTx } from "@/db/client";
 import { bookingTypes, showrooms, type BookingType } from "@/db/schema";
-import { effectiveHours, type WeeklyHours } from "./booking-types";
+import { effectiveHours, typeNotEnded, type WeeklyHours } from "./booking-types";
 import { addLocalDays, formatInZone, timeToMinutes, toLocalDate, weekdayOf } from "./time";
 
 /**
@@ -30,10 +30,12 @@ export async function loadDirectory(dbx: DbOrTx, typeSlug: string): Promise<Dire
     .innerJoin(showrooms, eq(showrooms.id, bookingTypes.showroomId))
     .where(and(eq(bookingTypes.slug, typeSlug), eq(bookingTypes.inDirectory, true), eq(bookingTypes.active, true), eq(bookingTypes.access, "public"), eq(bookingTypes.kind, "standard")))
     .orderBy(asc(showrooms.name));
-  if (!rows.length) return null;
+  // An event type whose last date has passed leaves the directory (each store's own date).
+  const live = rows.filter(({ type, store }) => typeNotEnded(type, toLocalDate(new Date(), store.timezone)));
+  if (!live.length) return null;
   return {
-    type: rows[0].type,
-    stores: rows.map(({ type, store }) => ({
+    type: live[0].type,
+    stores: live.map(({ type, store }) => ({
       slug: store.slug,
       name: store.name,
       city: cityOf(store.name),

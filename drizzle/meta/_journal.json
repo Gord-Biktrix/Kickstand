@@ -218,6 +218,13 @@
       "when": 1795545274682,
       "tag": "0030_smart_grey_gargoyle",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1795648869245,
+      "tag": "0031_handy_reavers",
+      "breakpoints": true
     }
   ]
 }

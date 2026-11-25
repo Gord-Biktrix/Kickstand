@@ -6,7 +6,7 @@ import { bookingTypes } from "@/db/schema";
 import { BookingCalendar, BookingInfo } from "@/components/booking-calendar";
 import { hostsFor } from "@/lib/staff-photos";
 import { Alert, Field } from "@/components/ui";
-import { colorOf, LOCATION_LABEL, type BookingLocation } from "@/lib/booking-types";
+import { colorOf, datesLabel, LOCATION_LABEL, type BookingLocation } from "@/lib/booking-types";
 import { sp, type SearchParams } from "@/lib/flash";
 import { getShowroom } from "@/lib/showroom";
 import { formatLongDateFromLocal, formatTime } from "@/lib/time";
@@ -65,6 +65,7 @@ export default async function BookTypePage({ params, searchParams }: { params: P
       brand={showroom.name}
       title={type.name}
       durationMin={type.durationMin}
+      dates={datesLabel(type)}
       location={where}
       description={type.description}
       extra={slot ? <p className="text-sm font-medium" style={{ color: accent }}>{formatTime(slot.startsAt, tz)} – {formatTime(slot.endsAt, tz)}, {formatLongDateFromLocal(date!)}</p> : undefined}

@@ -12,7 +12,8 @@ import { canSwitchShowroom, currentShowroom, readOnlyReason } from "@/lib/curren
 import { listShowrooms } from "@/lib/showroom";
 import { hasRole, PASSWORD_NUDGE_COOKIE, requireUser, roleLabel } from "@/lib/auth";
 import { HeaderMenu } from "@/components/header-menu";
-import { colorOf, ensureDefaultBookingTypes, isTicketType, listBookingTypes, LOCATION_LABEL, type BookingLocation } from "@/lib/booking-types";
+import { colorOf, ensureDefaultBookingTypes, isTicketType, listBookingTypes, typeNotEnded, LOCATION_LABEL, type BookingLocation } from "@/lib/booking-types";
+import { toLocalDate } from "@/lib/time";
 import { signOutAction } from "./actions";
 
 // Three places, one question each (redesign 2026-11): who's coming in (Schedule), what's on the bench (Workshop),
@@ -37,7 +38,7 @@ export default async function StaffLayout({ children }: { children: React.ReactN
   // First-run nudge: people land here via Google/link and don't know a password is optional and where it lives.
   // "+ New" lists what can be booked here, like Calendly's Create menu, so staff pick the type in one click.
   await ensureDefaultBookingTypes(db, showroom);
-  const active = (await listBookingTypes(db, showroom.id)).filter((t) => t.kind === "standard" && t.active);
+  const active = (await listBookingTypes(db, showroom.id)).filter((t) => t.kind === "standard" && t.active && typeNotEnded(t, toLocalDate(new Date(), showroom.timezone)));
   // Types that create a work order open New ticket (so the work order gets its lines); the rest use the booking form.
   const ticketTypes = showroom.kind === "online" ? [] : active.filter(isTicketType);
   const visitTypes = active.filter((t) => !ticketTypes.includes(t));

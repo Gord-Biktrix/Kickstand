@@ -190,6 +190,9 @@ export type BookingTypeInput = {
   inDirectory?: boolean;
   /** Follow the profile's availability instead of `hours`. */
   useStoreHours?: boolean;
+  /** Only bookable on these dates (both inclusive, store-local); both null = any date. */
+  dateFrom?: string | null;
+  dateTo?: string | null;
   color?: string;
   /** Booking form questions (src/lib/booking-questions.ts); left as is when omitted. */
   questions?: BookingQuestion[];
@@ -234,6 +237,15 @@ export function validateBookingType(raw: BookingTypeInput, profileKind: string):
     color: raw.color && isBookingColor(raw.color) ? raw.color : "orange",
     ...(raw.hostIds ? { hostIds: [...new Set(raw.hostIds.filter((id) => /^[0-9a-f-]{36}$/i.test(id)))].slice(0, 6) } : {}),
   };
+  if ((raw.dateFrom ?? null) !== null || (raw.dateTo ?? null) !== null) {
+    const ok = (d: string | null | undefined) => !!d && /^\d{4}-\d{2}-\d{2}$/.test(d) && !Number.isNaN(Date.parse(`${d}T00:00:00Z`));
+    if (!ok(raw.dateFrom) || !ok(raw.dateTo)) throw new Error("Pick the first and last date it can be booked.");
+    if (raw.dateTo! < raw.dateFrom!) throw new Error("The last date is before the first.");
+    if (Date.parse(`${raw.dateTo}T00:00:00Z`) - Date.parse(`${raw.dateFrom}T00:00:00Z`) > 366 * 86_400_000) throw new Error("Keep the dates within a year.");
+  } else {
+    out.dateFrom = null;
+    out.dateTo = null;
+  }
   if (!out.useStoreHours && !Object.keys(out.hours).length) throw new Error("Set the hours it can be booked on at least one day, or use the store's availability.");
   return out;
 }
@@ -394,6 +406,8 @@ export async function syncDirectoryCopies(dbx: DbOrTx, sourceId: string, previou
     slotStepMin: src.slotStepMin,
     noticeMin: src.noticeMin,
     horizonDays: src.horizonDays,
+    dateFrom: src.dateFrom,
+    dateTo: src.dateTo,
     questions: src.questions,
     color: src.color,
     inDirectory: on,
@@ -443,4 +457,20 @@ export function isTicketType(t: Pick<BookingType, "kind" | "active" | "createsWo
 /** Where staff book a type: New ticket set to that type, or the booking form. Online stores have no workshop. */
 export function staffBookHref(t: Pick<BookingType, "id" | "kind" | "active" | "createsWorkOrder" | "location">, storeKind: string): string {
   return storeKind !== "online" && isTicketType(t) ? `/app/workshop/new?type=${t.id}` : `/app/bookings/new?type=${t.id}`;
+}
+
+/** Still bookable on or after `today`: no dates set, or the last date hasn't passed. Ended types leave booking pages. */
+export function typeNotEnded(t: Pick<BookingType, "dateTo">, today: string): boolean {
+  return !t.dateTo || t.dateTo >= today;
+}
+
+/** "Dec 1–7", "Nov 28 – Dec 4", "Dec 30, 2026 – Jan 3, 2027" for a type's dates; null when it has none. */
+export function datesLabel(t: Pick<BookingType, "dateFrom" | "dateTo">): string | null {
+  if (!t.dateFrom || !t.dateTo) return null;
+  const M = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const [y1, m1, d1] = t.dateFrom.split("-").map(Number);
+  const [y2, m2, d2] = t.dateTo.split("-").map(Number);
+  if (y1 !== y2) return `${M[m1 - 1]} ${d1}, ${y1} – ${M[m2 - 1]} ${d2}, ${y2}`;
+  if (m1 !== m2) return `${M[m1 - 1]} ${d1} – ${M[m2 - 1]} ${d2}`;
+  return d1 === d2 ? `${M[m1 - 1]} ${d1}` : `${M[m1 - 1]} ${d1}–${d2}`;
 }

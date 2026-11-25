@@ -16,7 +16,12 @@ export type TypeSlot = { time: string; startsAt: Date; endsAt: Date; remaining: 
 export type TypeDay = { date: LocalDate; slots: TypeSlot[] };
 export type Busy = { startsAt: Date; endsAt: Date };
 
-export type SlotType = Pick<BookingType, "durationMin" | "bufferMin" | "slotStepMin" | "noticeMin" | "horizonDays"> & { hours: WeeklyHours };
+export type SlotType = Pick<BookingType, "durationMin" | "bufferMin" | "slotStepMin" | "noticeMin" | "horizonDays"> & { hours: WeeklyHours; dateFrom?: string | null; dateTo?: string | null };
+
+/** The last date a type can be booked: its last date when it has dates (however far ahead), else `horizonDays` out. */
+export function lastBookableDate(type: Pick<SlotType, "horizonDays" | "dateTo">, today: LocalDate): LocalDate {
+  return type.dateTo ? (type.dateTo as LocalDate) : addLocalDays(today, type.horizonDays);
+}
 
 export function typeSlots(args: {
   type: SlotType;
@@ -31,8 +36,9 @@ export function typeSlots(args: {
 }): TypeDay[] {
   const { type, tz, now, capacity } = args;
   const today = toLocalDate(now, tz);
-  const from = args.from && args.from > today ? args.from : today;
-  const last = addLocalDays(today, type.horizonDays);
+  let from = args.from && args.from > today ? args.from : today;
+  if (type.dateFrom && type.dateFrom > from) from = type.dateFrom as LocalDate;
+  const last = lastBookableDate(type, today);
   const to = args.to && args.to < last ? args.to : last;
   if (to < from) return [];
   const earliest = now.getTime() + type.noticeMin * 60_000;
@@ -102,12 +108,13 @@ export async function getTypeAvailability(
 ): Promise<TypeDay[]> {
   const now = args.now ?? new Date();
   const tz = args.showroom.timezone;
-  const horizonEnd = localToUtc(addLocalDays(toLocalDate(now, tz), args.type.horizonDays + 1), "00:00", tz);
   const today = toLocalDate(now, tz);
+  const lastDay = lastBookableDate(args.type, today);
+  const horizonEnd = localToUtc(addLocalDays(lastDay, 1), "00:00", tz);
   const [capacity, busy, closed] = await Promise.all([
     typeCapacity(dbx, args.showroom, args.type),
     busyFor(dbx, args.type.id, now, horizonEnd, args.exceptBookingId),
-    closedDates(dbx, args.showroom.id, today, addLocalDays(today, args.type.horizonDays + 1)),
+    closedDates(dbx, args.showroom.id, today, addLocalDays(lastDay, 1)),
   ]);
   const hours = effectiveHours(args.type, args.showroom.bookingHours as WeeklyHours);
   return typeSlots({ type: { ...args.type, hours }, tz, now, capacity, busy, from: args.from, to: args.to, closed });

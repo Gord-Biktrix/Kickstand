@@ -13,6 +13,7 @@ import {
   CAPACITY_LABEL,
   directoryStoreIds,
   colorOf,
+  datesLabel,
   DURATION_CHOICES,
   effectiveHours,
   ensureDefaultBookingTypes,
@@ -121,7 +122,7 @@ function TypeRow({ t, profileSlug, root, storeHours, selected }: { t: BookingTyp
   const linkable = !pickup && t.access === "public";
   const meta = pickup
     ? "Invite only · times from Settings › Capacity"
-    : `${t.durationMin} min · ${LOCATION_LABEL[t.location as BookingLocation]} · ${t.access === "invite" ? "Invite only" : "Public"} · ${t.useStoreHours ? "Store hours" : hoursSummary(effectiveHours(t, storeHours))}`;
+    : `${t.durationMin} min · ${LOCATION_LABEL[t.location as BookingLocation]} · ${t.access === "invite" ? "Invite only" : "Public"} · ${t.useStoreHours ? "Store hours" : hoursSummary(effectiveHours(t, storeHours))}${datesLabel(t) ? ` · ${datesLabel(t)}` : ""}`;
   return (
     <li className={`flex flex-wrap items-center gap-3 border-b border-border px-4 py-3 last:border-b-0 ${t.active ? "" : "bg-background opacity-70"} ${selected ? "ring-2 ring-inset ring-accent" : ""}`}>
       <span aria-hidden="true" className="h-10 w-1.5 shrink-0 rounded-full" style={{ background: colorOf(t.color).hex }} />
@@ -242,6 +243,16 @@ function EditorPanel({ t, online, storeHours, profileSlug, close, people, dirSto
                   <summary className="cursor-pointer text-xs text-muted">Set custom hours</summary>
                   <div className="mt-2"><HoursEditor hours={t && !t.useStoreHours ? (t.hours as WeeklyHours) : Object.keys(storeHours).length ? storeHours : WEEKDAY_8_TO_4} /></div>
                 </details>
+                <fieldset disabled={locked} className="group mt-4 border-t border-border pt-3">
+                  <label className="flex items-start gap-2 text-sm">
+                    <input type="checkbox" id="eddates" name="dates_on" defaultChecked={!!t?.dateFrom} className="mt-1 h-4 w-4" />
+                    <span>Only these dates <span className="block text-xs text-muted">Leaves the booking page after the last day</span></span>
+                  </label>
+                  <div className="mt-2 hidden grid-cols-2 gap-3 pl-6 group-has-[#eddates:checked]:grid">
+                    <Field label="From" htmlFor="ed_df"><input id="ed_df" name="date_from" type="date" defaultValue={t?.dateFrom ?? ""} className="input" /></Field>
+                    <Field label="To" htmlFor="ed_dt"><input id="ed_dt" name="date_to" type="date" defaultValue={t?.dateTo ?? ""} className="input" /></Field>
+                  </div>
+                </fieldset>
               </fieldset>
 
               <fieldset disabled={locked}>

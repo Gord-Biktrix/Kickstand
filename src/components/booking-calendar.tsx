@@ -18,13 +18,14 @@ export function BookingCalendar({ days, tz, ...rest }: Omit<React.ComponentProps
 }
 
 /** The left panel: brand, who, what, how long, where. */
-export function BookingInfo({ brand, title, durationMin, location, description, extra, hosts }: { brand: string; title: string; durationMin: number; location: string; description?: string; extra?: ReactNode; hosts?: Host[] }) {
+export function BookingInfo({ brand, title, durationMin, location, description, extra, hosts, dates }: { brand: string; title: string; durationMin: number; location: string; description?: string; extra?: ReactNode; hosts?: Host[]; dates?: string | null }) {
   return (
     <div className="space-y-3">
       <p className="text-sm font-semibold uppercase tracking-widest text-accent">Biktrix</p>
       <p className="text-sm text-muted">{brand}</p>
       {hosts && hosts.length > 0 && <HostFaces hosts={hosts} size={52} />}
       <h1 className="text-2xl font-bold leading-tight">{title}</h1>
+      {dates && <p className="flex items-center gap-2 text-sm font-semibold"><CalendarIcon /> {dates}</p>}
       <p className="flex items-center gap-2 text-sm text-muted"><ClockIcon /> {durationMin} min</p>
       <p className="flex items-center gap-2 text-sm text-muted"><PlaceIcon /> {location}</p>
       {extra}
@@ -40,6 +41,10 @@ export function HostFaces({ hosts, size = 52 }: { hosts: Host[]; size?: number }
       {hosts.map((h) => <span key={h.id} title={h.name}><Avatar name={h.name} photo={h.photo} size={size} className="ring-2 ring-card" /></span>)}
     </div>
   );
+}
+
+function CalendarIcon() {
+  return <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3.5" y="5" width="17" height="15" rx="2" /><path d="M3.5 10h17M8 3v4M16 3v4" /></svg>;
 }
 
 function ClockIcon() {

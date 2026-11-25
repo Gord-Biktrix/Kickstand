@@ -2,7 +2,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { db } from "@/db/client";
 import { Card } from "@/components/ui";
-import { colorOf, ensureDefaultBookingTypes, listBookingTypes, LOCATION_LABEL, type BookingLocation } from "@/lib/booking-types";
+import { colorOf, datesLabel, ensureDefaultBookingTypes, listBookingTypes, LOCATION_LABEL, typeNotEnded, type BookingLocation } from "@/lib/booking-types";
+import { toLocalDate } from "@/lib/time";
 import { getShowroom } from "@/lib/showroom";
 import { hostsFor } from "@/lib/staff-photos";
 import { HostFaces } from "@/components/booking-calendar";
@@ -21,7 +22,7 @@ export default async function ProfileBookingPage({ params, searchParams }: { par
   const showroom = await getShowroom(db, profile).catch(() => null);
   if (!showroom) notFound();
   await ensureDefaultBookingTypes(db, showroom);
-  const types = (await listBookingTypes(db, showroom.id)).filter((t) => t.kind === "standard" && t.access === "public" && t.active);
+  const types = (await listBookingTypes(db, showroom.id)).filter((t) => t.kind === "standard" && t.access === "public" && t.active && typeNotEnded(t, toLocalDate(new Date(), showroom.timezone)));
   const hostsByType = new Map(await Promise.all(types.map(async (t) => [t.id, await hostsFor(db, t.hostIds)] as const)));
   return (
     <div className="mx-auto max-w-3xl space-y-6">
@@ -40,7 +41,7 @@ export default async function ProfileBookingPage({ params, searchParams }: { par
               <Link href={`/book/${showroom.slug}/${t.slug}${keep ? `?${keep}` : ""}`} className="block h-full rounded-xl border border-border bg-card p-5 shadow-sm hover:shadow-md focus-visible:outline-2 focus-visible:outline-accent" style={{ borderTop: `6px solid ${colorOf(t.color).hex}` }}>
                 {(hostsByType.get(t.id)?.length ?? 0) > 0 && <div className="mb-3"><HostFaces hosts={hostsByType.get(t.id)!} size={40} /></div>}
                 <div className="text-lg font-semibold">{t.name}</div>
-                <div className="mt-1 text-sm text-muted">{t.durationMin} min · {LOCATION_LABEL[t.location as BookingLocation]}</div>
+                <div className="mt-1 text-sm text-muted">{datesLabel(t) ? `${datesLabel(t)} · ` : ""}{t.durationMin} min · {LOCATION_LABEL[t.location as BookingLocation]}</div>
                 {t.description && <p className="mt-2 text-sm">{t.description}</p>}
               </Link>
             </li>

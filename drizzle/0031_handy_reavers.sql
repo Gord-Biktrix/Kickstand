@@ -1,0 +1,3 @@
+ALTER TABLE "booking_types" ADD COLUMN "date_from" date;--> statement-breakpoint
+ALTER TABLE "booking_types" ADD COLUMN "date_to" date;--> statement-breakpoint
+ALTER TABLE "booking_types" ADD CONSTRAINT "booking_types_dates_check" CHECK (("booking_types"."date_from" is null) = ("booking_types"."date_to" is null) and ("booking_types"."date_to" is null or "booking_types"."date_to" >= "booking_types"."date_from"));

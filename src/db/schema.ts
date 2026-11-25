@@ -414,6 +414,9 @@ export const bookingTypes = pgTable(
     hours: jsonb("hours").$type<Record<string, [string, string][]>>().notNull().default({}),
     /** true = follow the profile's availability (showrooms.booking_hours); false = this type's own `hours`. */
     useStoreHours: boolean("use_store_hours").notNull().default(false),
+    /** Only bookable from date_from to date_to (store-local dates, both inclusive), e.g. an event week; null = any date. */
+    dateFrom: date("date_from"),
+    dateTo: date("date_to"),
     /** Colour key (see BOOKING_COLORS) for the type's row, the booking page and calendar blocks. */
     color: text("color").notNull().default("orange"),
     createsWorkOrder: boolean("creates_work_order").notNull().default(false),
@@ -432,6 +435,7 @@ export const bookingTypes = pgTable(
     check("booking_types_kind_check", sql`${t.kind} in ('standard','pickup')`),
     check("booking_types_access_check", sql`${t.access} in ('public','invite')`),
     check("booking_types_location_check", sql`${t.location} in ('in_person','video','phone')`),
+    check("booking_types_dates_check", sql`(${t.dateFrom} is null) = (${t.dateTo} is null) and (${t.dateTo} is null or ${t.dateTo} >= ${t.dateFrom})`),
     check("booking_types_capacity_mode_check", sql`${t.capacityMode} in ('bench','staff')`),
     check("booking_types_numbers_check", sql`${t.durationMin} between 5 and 480 and ${t.bufferMin} between 0 and 240 and ${t.slotStepMin} between 5 and 240 and ${t.noticeMin} >= 0 and ${t.horizonDays} between 1 and 365 and ${t.benchCapacity} between 1 and 50`),
   ],

@@ -1426,6 +1426,8 @@ function bookingTypeFromForm(formData: FormData, profileKind: string, current?: 
     benchCapacity: num(formData, "bench_capacity", 1),
     hours,
     useStoreHours,
+    dateFrom: bool(formData, "dates_on") ? str(formData, "date_from") || "" : null,
+    dateTo: bool(formData, "dates_on") ? str(formData, "date_to") || "" : null,
     color: str(formData, "color") || "orange",
     createsWorkOrder: bool(formData, "creates_work_order"),
     inDirectory: bool(formData, "in_directory"),
@@ -1458,6 +1460,11 @@ function keepShared(formData: FormData, t: BookingType): FormData {
     questions: JSON.stringify(t.questions ?? []),
   };
   for (const [k, v] of Object.entries(set)) f.set(k, v);
+  if (t.dateFrom && t.dateTo) {
+    f.set("dates_on", "on");
+    f.set("date_from", t.dateFrom);
+    f.set("date_to", t.dateTo);
+  } else f.delete("dates_on");
   return f;
 }
 

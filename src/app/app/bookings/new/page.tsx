@@ -5,10 +5,10 @@ import { BookingCalendar, BookingInfo } from "@/components/booking-calendar";
 import { Card, Field, Flash, PageHeader } from "@/components/ui";
 import { requireUser } from "@/lib/auth";
 import { colorOf, ensureDefaultBookingTypes,
-  listBookingTypes, LOCATION_LABEL, staffBookHref, type BookingLocation } from "@/lib/booking-types";
+  listBookingTypes, LOCATION_LABEL, staffBookHref, typeNotEnded, type BookingLocation } from "@/lib/booking-types";
 import { currentShowroom } from "@/lib/current-showroom";
 import { sp, type SearchParams } from "@/lib/flash";
-import { formatLongDateFromLocal, formatTime } from "@/lib/time";
+import { formatLongDateFromLocal, formatTime, toLocalDate } from "@/lib/time";
 import { getTypeAvailability } from "@/lib/type-slots";
 import { staffCreateTypeBookingAction } from "../../actions";
 import { QuestionFields } from "@/components/question-fields";
@@ -25,7 +25,7 @@ export default async function NewBookingPage({ searchParams }: { searchParams: P
   const user = await requireUser("staff");
   const showroom = await currentShowroom(user);
   await ensureDefaultBookingTypes(db, showroom);
-  const types = (await listBookingTypes(db, showroom.id)).filter((t) => t.kind === "standard" && t.active);
+  const types = (await listBookingTypes(db, showroom.id)).filter((t) => t.kind === "standard" && t.active && typeNotEnded(t, toLocalDate(new Date(), showroom.timezone)));
   const type = types.find((t) => t.id === sp(q.type));
   const tz = showroom.timezone;
   const days = type ? await getTypeAvailability(db, { showroom, type }) : [];
