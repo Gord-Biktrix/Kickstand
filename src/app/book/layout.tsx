@@ -7,7 +7,8 @@ export const metadata = { title: { default: "Book an appointment · Biktrix", te
  * Inside the website embed (an iframe from /embed.js): hide our header and tell the parent page how tall the
  * content is, so the frame grows and is shown (only once there is something in <main>, so the frame never appears
  * blank), and tell it when the customer moves to a new step (form, confirmation, error) so it can scroll the
- * frame back into view. Plain inline script, not a React component, so it runs as the HTML
+ * frame back into view. When a booking is made (the confirmation page, ?ok=booked) it also sends
+ * "biktrix-booking:booked", so the host page can fire its own ad conversion (e.g. Meta Schedule). Plain inline script, not a React component, so it runs as the HTML
  * arrives instead of after the page's JavaScript has downloaded and started (saves a few hundred ms on a first
  * visit). Does nothing on the full page.
  */
@@ -16,7 +17,9 @@ function send(m){window.parent.postMessage(m,"*");}
 var last=0;function post(){var m=document.querySelector("main");if(!m||!m.firstElementChild)return;var h=Math.ceil(document.body.getBoundingClientRect().height);if(h!==last){last=h;send({type:"biktrix-booking:height",height:h});}}
 post();if(window.ResizeObserver)new ResizeObserver(post).observe(document.body);document.addEventListener("DOMContentLoaded",post);window.addEventListener("load",post);
 var at=location.pathname+location.search;function step(u){var x=new URL(u,location.href),q=x.searchParams,was=new URL(at,location.href);if(x.pathname+x.search===at)return;at=x.pathname+x.search;
-if(x.pathname!==was.pathname||q.get("confirm")||q.get("error")||q.get("ok"))send({type:"biktrix-booking:step"});}
+if(x.pathname!==was.pathname||q.get("confirm")||q.get("error")||q.get("ok"))send({type:"biktrix-booking:step"});booked(x);}
+function booked(x){if(x.pathname.indexOf("/book/m/")===0&&new URLSearchParams(x.search).get("ok")==="booked")send({type:"biktrix-booking:booked"});}
+booked(location);
 ["pushState","replaceState"].forEach(function(k){var o=history[k];history[k]=function(s,t,u){var r=o.apply(this,arguments);if(u!=null)try{step(String(u));}catch(_){}return r;};});
 window.addEventListener("popstate",function(){step(location.href);});})();`;
 
