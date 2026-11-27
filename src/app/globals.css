@@ -150,6 +150,8 @@ button[aria-busy="true"]::after {
 /* An embed of one appointment type (not the list) has nowhere to go back to. */
 .embed-one-type .all-types-link { display: none; }
 .in-embed body { background: transparent; }
+/* The host page sets the width and its own heading: run edge to edge so the card lines up with that heading. */
+.in-embed main { max-width: none; padding-left: 0; padding-right: 0; }
 /* In the embed the frame is sized to the page, so the page must not stretch to the frame (or it could never shrink). */
 .in-embed, .in-embed body { height: auto; min-height: 0; }
 
