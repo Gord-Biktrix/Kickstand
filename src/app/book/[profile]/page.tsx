@@ -15,9 +15,9 @@ export async function generateMetadata({ params }: { params: Promise<{ profile: 
 
 /** A profile's public booking page, Calendly-style: one card per public, switched-on type. Bike pickup is invite-only, so never listed. */
 export default async function ProfileBookingPage({ params, searchParams }: { params: Promise<{ profile: string }>; searchParams: Promise<Record<string, string | string[] | undefined>> }) {
-  // Keep a share link's / embed's prefilled details (name, email, phone) when the customer picks a type.
+  // Keep a share link's / embed's prefilled details (name, email, phone, country) when the customer picks a type.
   const sq = await searchParams;
-  const keep = new URLSearchParams(["name", "email", "phone"].flatMap((k) => (typeof sq[k] === "string" && sq[k] ? [[k, (sq[k] as string).slice(0, 200)]] : []))).toString();
+  const keep = new URLSearchParams(["name", "email", "phone", "country"].flatMap((k) => (typeof sq[k] === "string" && sq[k] ? [[k, (sq[k] as string).slice(0, 200)]] : []))).toString();
   const { profile } = await params;
   const showroom = await getShowroom(db, profile).catch(() => null);
   if (!showroom) notFound();

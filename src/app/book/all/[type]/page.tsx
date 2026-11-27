@@ -22,9 +22,9 @@ export default async function DirectoryPage({ params, searchParams }: { params: 
   const dir = await loadDirectory(db, typeSlug);
   if (!dir) notFound();
 
-  // Name, email and phone passed in by the website embed go on to the store's form.
+  // Name, email, phone and country passed in by the website embed go on to the store's form.
   const carry = new URLSearchParams();
-  for (const k of ["name", "email", "phone"] as const) {
+  for (const k of ["name", "email", "phone", "country"] as const) {
     const v = sp(q[k])?.slice(0, k === "phone" ? 40 : 200);
     if (v) carry.set(k, v);
   }

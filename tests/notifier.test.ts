@@ -34,6 +34,16 @@ describe("KlaviyoNotifier", () => {
     expect(calls.filter((c) => c.url.includes("subscription"))).toHaveLength(1);
   });
 
+  it("puts a known country on the profile's location, beside the pinned time zone", async () => {
+    const calls: { url: string; body: Record<string, unknown> }[] = [];
+    const n = new KlaviyoNotifier("key", "2025-07-15", fakeFetch(calls));
+    await n.send("Booking: Confirmed", { email: "us@x.com", phone: null, smsConsent: false, country: "United States" }, {}, "b1");
+    await n.send("Booking: Confirmed", { email: "ca@x.ca", phone: null, smsConsent: false }, {}, "b2");
+    const loc = (i: number) => (calls[i].body as { data: { attributes: { profile: { data: { attributes: { location: Record<string, unknown> } } } } } }).data.attributes.profile.data.attributes.location;
+    expect(loc(0)).toEqual({ timezone: "America/Vancouver", country: "United States" });
+    expect(loc(1)).toEqual({ timezone: "America/Vancouver" });
+  });
+
   it("does not register consent without a phone or without the tick, and still sends the event", async () => {
     const calls: { url: string; body: Record<string, unknown> }[] = [];
     const n = new KlaviyoNotifier("key", "2025-07-15", fakeFetch(calls));

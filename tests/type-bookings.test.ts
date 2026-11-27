@@ -128,6 +128,16 @@ describe("booking a booking type", () => {
     }
   });
 
+  it("a booking from the US site's embed tells Klaviyo the customer is in the United States", async () => {
+    const { booking } = await createTypeBooking(db, { showroom: online, type, startsAt: slot("10:00"), details, createdBy: "customer", now: NOW, country: "us" });
+    expect(booking.country).toBe("US");
+    expect(notifier.sent.at(-1)!.profile.country).toBe("United States");
+    // Anything that isn't a known code is ignored, and no country is sent.
+    const other = await createTypeBooking(db, { showroom: online, type, startsAt: slot("11:00"), details, createdBy: "customer", now: NOW, country: "Narnia" });
+    expect(other.booking.country).toBeNull();
+    expect(notifier.sent.at(-1)!.profile.country).toBeNull();
+  });
+
   it("closed days close the type's calendar and list bookings already on them", async () => {
     const { booking } = await createTypeBooking(db, { showroom: online, type, startsAt: slot("10:00"), details, createdBy: "customer", now: NOW });
     await addClosedDays(db, online.id, [{ date: "2026-11-17", name: "Staff day" }, { date: "2026-11-18", name: "" }]);

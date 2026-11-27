@@ -466,6 +466,8 @@ export const bookings = pgTable(
     customerPhone: text("customer_phone"),
     smsConsent: boolean("sms_consent").notNull().default(false),
     customerNote: text("customer_note").notNull().default(""),
+    /** ISO code from the website embed (data-country), sent to Klaviyo as the profile country. */
+    country: text("country"),
     /** The booking form's questions as asked, with the customer's answers: [{ question, answer }]. */
     answers: jsonb("answers").notNull().default([]),
     /** The booking's message in the store's Slack channel (bot posting), so later changes reply in its thread. */

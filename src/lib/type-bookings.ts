@@ -4,6 +4,7 @@
  * (booking.ts). Each confirmed change fires one Klaviyo event ("Booking: Confirmed" / "Rescheduled" /
  * "Cancelled"); the flow in Klaviyo owns the wording and channel, as for pickups.
  */
+import { countryCode, countryName } from "./country";
 import { and, asc, between, desc, eq, isNotNull, ne, or, sql } from "drizzle-orm";
 import { bookingSlackMessage, bookingThreadReply, getSlackBot, postSlack, type BookingSlackPing } from "./slack";
 import { collectAnswers, readAnswers, readQuestions } from "./booking-questions";
@@ -89,6 +90,8 @@ export async function createTypeBooking(
     showroom: ShowroomCtx; type: BookingType; startsAt: Date; details: CustomerDetails; createdBy: string; now?: Date; answers?: (field: string) => string;
     /** Staff booking from New ticket: the Lightspeed customer already picked, and their registered bike. */
     lsCustomerId?: string | null; lsSerializedId?: string | null;
+    /** From the website embed (data-country): an ISO code, anything else is ignored. */
+    country?: string | null;
   },
 ): Promise<{ booking: Booking; token: string }> {
   const { showroom, type } = args;
@@ -117,6 +120,7 @@ export async function createTypeBooking(
         customerPhone: details.phone,
         smsConsent: details.smsConsent,
         customerNote: details.note,
+        country: countryCode(args.country),
         answers,
         tokenHash: hashToken(token),
         tokenEnc: encryptToken(token),
@@ -258,7 +262,7 @@ async function notifyBooking(
   const uniqueId = `${booking.id}:${metric}:${booking.rescheduleCount}${args.resend ? `:resend:${Date.now()}` : ""}`;
   let status: "sent" | "failed" = "sent";
   try {
-    await getNotifier().send(metric, { email: booking.customerEmail, phone: booking.customerPhone, name: booking.customerName, smsConsent: booking.smsConsent }, properties, uniqueId);
+    await getNotifier().send(metric, { email: booking.customerEmail, phone: booking.customerPhone, name: booking.customerName, smsConsent: booking.smsConsent, country: countryName(booking.country) }, properties, uniqueId);
   } catch (err) {
     status = "failed";
     logger.warn({ err: err instanceof Error ? err.message : String(err), metric, bookingId: booking.id }, "booking event not sent");

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { countryCode } from "@/lib/country";
 import { notFound } from "next/navigation";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db/client";
@@ -49,7 +50,7 @@ export default async function BookTypePage({ params, searchParams }: { params: P
   const month = sp(q.month);
   const slot = date && time ? days.find((d) => d.date === date)?.slots.find((s) => s.time === time) : undefined;
   // Details passed in by a share link or the website embed (data-name / data-email / data-phone) fill the form.
-  const prefill = { name: sp(q.name)?.slice(0, 200), email: sp(q.email)?.slice(0, 200), phone: sp(q.phone)?.slice(0, 40), tz: tz === storeTz ? undefined : tz };
+  const prefill = { name: sp(q.name)?.slice(0, 200), email: sp(q.email)?.slice(0, 200), phone: sp(q.phone)?.slice(0, 40), country: countryCode(sp(q.country)) ?? undefined, tz: tz === storeTz ? undefined : tz };
   // Came from the all-showrooms directory: keep "← All showrooms" on every step.
   const fromDirectory = sp(q.dir) === "1" && type.inDirectory;
   const prefillQuery = new URLSearchParams(Object.entries({ ...prefill, dir: fromDirectory ? "1" : undefined }).filter((e): e is [string, string] => !!e[1])).toString();
@@ -98,6 +99,7 @@ export default async function BookTypePage({ params, searchParams }: { params: P
               <input type="hidden" name="date" value={date} />
               <input type="hidden" name="time" value={time} />
               {tz !== storeTz && <input type="hidden" name="tz" value={tz} />}
+              {prefill.country && <input type="hidden" name="country" value={prefill.country} />}
               <Field label="Name" htmlFor="bk_name"><input id="bk_name" name="name" required autoComplete="name" defaultValue={prefill.name} className="input" /></Field>
               <Field label="Email" htmlFor="bk_email"><input id="bk_email" name="email" type="email" autoComplete="email" defaultValue={prefill.email} className="input" required={type.location === "video"} /></Field>
               <Field label="Phone" htmlFor="bk_phone" hint={type.location === "phone" ? "We'll call you on this number." : "Email, phone or both, so we can confirm."}>

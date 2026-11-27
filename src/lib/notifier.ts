@@ -5,6 +5,8 @@ export type Profile = {
   phone: string | null;
   name?: string | null;
   smsConsent: boolean;
+  /** Country name for the Klaviyo profile ("United States"), when known. */
+  country?: string | null;
 };
 
 export interface Notifier {
@@ -78,7 +80,7 @@ export class KlaviyoNotifier implements Notifier {
     // (US/Eastern) when it is unknown, which held evening Vancouver texts until the next morning. Pin it.
     const profileAttrs: Record<string, unknown> = {
       properties: { sms_consent: profile.smsConsent },
-      location: { timezone: "America/Vancouver" },
+      location: { timezone: "America/Vancouver", ...(profile.country ? { country: profile.country } : {}) },
     };
     if (profile.email) profileAttrs.email = profile.email;
     if (profile.phone) profileAttrs.phone_number = profile.phone;

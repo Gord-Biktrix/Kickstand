@@ -10,10 +10,10 @@ export function embedScript(origin: string): string {
   function url(store,type,pre){
     var u=ORIGIN+"/book/"+clean(store)+(clean(type)?"/"+clean(type):"");
     var q=[];
-    ["name","email","phone"].forEach(function(k){if(pre&&pre[k])q.push(k+"="+encodeURIComponent(pre[k]));});
+    ["name","email","phone","country"].forEach(function(k){if(pre&&pre[k])q.push(k+"="+encodeURIComponent(pre[k]));});
     return q.length?u+"?"+q.join("&"):u;
   }
-  function pre(el){return {name:el.getAttribute("data-name"),email:el.getAttribute("data-email"),phone:el.getAttribute("data-phone")};}
+  function pre(el){return {name:el.getAttribute("data-name"),email:el.getAttribute("data-email"),phone:el.getAttribute("data-phone"),country:el.getAttribute("data-country")};}
   function frame(src){
     var f=document.createElement("iframe");
     f.src=src;f.title="Book an appointment";

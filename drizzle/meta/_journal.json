@@ -225,6 +225,13 @@
       "when": 1795648869245,
       "tag": "0031_handy_reavers",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1795814834552,
+      "tag": "0032_giant_rogue",
+      "breakpoints": true
     }
   ]
 }

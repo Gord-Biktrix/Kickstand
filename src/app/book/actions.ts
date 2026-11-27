@@ -1,5 +1,6 @@
 "use server";
 
+import { countryCode } from "@/lib/country";
 import { validTimeZone } from "@/lib/view-tz";
 import { and, eq } from "drizzle-orm";
 import { redirect } from "next/navigation";
@@ -32,11 +33,12 @@ export async function bookTypeAction(profileSlug: string, typeSlug: string, form
       createdBy: "customer",
       details: { name: str(formData, "name"), email: str(formData, "email"), phone: str(formData, "phone"), smsConsent: bool(formData, "sms_consent"), note: str(formData, "note") },
       answers: (field) => str(formData, field),
+      country: str(formData, "country"),
     }));
   } catch (err) {
     const date = str(formData, "date");
     const time = str(formData, "time");
-    const tzq = validTimeZone(str(formData, "tz")) ? `tz=${encodeURIComponent(str(formData, "tz"))}` : "";
+    const tzq = [validTimeZone(str(formData, "tz")) ? `tz=${encodeURIComponent(str(formData, "tz"))}` : "", countryCode(str(formData, "country")) ? `country=${countryCode(str(formData, "country"))}` : ""].filter(Boolean).join("&");
     back(err instanceof TypeBookingError && err.code === "DETAILS" && date && time ? `${page}?date=${date}&time=${time}&confirm=1${tzq ? `&${tzq}` : ""}` : `${page}${tzq ? `?${tzq}` : ""}`, err);
   }
   const tz = validTimeZone(str(formData, "tz"));
